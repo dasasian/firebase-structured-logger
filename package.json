@@ -1,0 +1,62 @@
+{
+  "name": "firebase-structured-logger",
+  "version": "0.1.0",
+  "description": "Structured logging for Firebase apps — client, functions, and tools",
+  "exports": {
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "default": "./dist/client/index.js"
+    },
+    "./functions": {
+      "types": "./dist/functions/index.d.ts",
+      "default": "./dist/functions/index.js"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "default": "./dist/tools/index.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "client": ["dist/client/index.d.ts"],
+      "functions": ["dist/functions/index.d.ts"],
+      "tools": ["dist/tools/index.d.ts"]
+    }
+  },
+  "bin": {
+    "fsl": "./dist/tools/index.js"
+  },
+  "files": [
+    "dist",
+    "skills"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@google-cloud/storage": "^7.0.0"
+  },
+  "peerDependencies": {
+    "firebase": ">=10.0.0",
+    "firebase-admin": ">=12.0.0",
+    "firebase-functions": ">=6.0.0"
+  },
+  "peerDependenciesMeta": {
+    "firebase": { "optional": true },
+    "firebase-admin": { "optional": true },
+    "firebase-functions": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "firebase": "^12.0.0",
+    "firebase-admin": "^13.0.0",
+    "firebase-functions": "^7.0.0",
+    "typescript": "~5.9.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
