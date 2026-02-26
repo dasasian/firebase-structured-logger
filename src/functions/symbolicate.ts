@@ -1,3 +1,5 @@
+import { TraceMap, originalPositionFor, type EncodedSourceMap } from '@jridgewell/trace-mapping'
+
 export interface StackFrame {
   raw: string
   fileName?: string
@@ -6,52 +8,10 @@ export interface StackFrame {
   columnNumber?: number
 }
 
-export interface SourceMapObject {
-  version: number
-  sources: string[]
-  sourcesContent?: string[]
-  names: string[]
-  mappings: string
-}
-
-const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-
-/**
- * Decode VLQ-encoded source map mappings string.
- * Returns flat array of delta values per line (groups of 1-5 concatenated).
- */
-function decodeVLQ(mappings: string): number[][] {
-  return mappings.split(';').map((line) => {
-    if (!line) return []
-
-    const values: number[] = []
-    for (const segment of line.split(',')) {
-      if (!segment) continue
-      let value = 0
-      let shift = 0
-      for (const char of segment) {
-        const digit = BASE64.indexOf(char)
-        if (digit === -1) break
-        const hasContinuation = !!(digit & 32)
-        value += (digit & 31) << shift
-        if (hasContinuation) {
-          shift += 5
-        } else {
-          const shouldNegate = value & 1
-          value >>>= 1
-          values.push(shouldNegate ? -value : value)
-          value = 0
-          shift = 0
-        }
-      }
-    }
-    return values
-  })
-}
 
 /**
  * Parse browser stack trace into structured frames.
- * Handles Chrome, Firefox, and Safari formats.
+ * Handles Chrome, Firefox, and Safari formats (including anonymous frames).
  */
 export function parseStackTrace(stack: string): StackFrame[] {
   const frames: StackFrame[] = []
@@ -86,8 +46,8 @@ export function parseStackTrace(stack: string): StackFrame[] {
       continue
     }
 
-    // Firefox: "functionName@file:line:col"
-    const firefoxMatch = trimmed.match(/^(.+?)@(.+?):(\d+):(\d+)$/)
+    // Firefox/Safari: "functionName@file:line:col" or "@file:line:col" (anonymous)
+    const firefoxMatch = trimmed.match(/^(.*?)@(.+?):(\d+):(\d+)$/)
     if (firefoxMatch) {
       frames.push({
         raw: trimmed,
@@ -109,42 +69,20 @@ export function parseStackTrace(stack: string): StackFrame[] {
  * Look up original source location for a generated line/column.
  */
 export function symbolicate(
-  sourceMap: SourceMapObject,
+  sourceMap: EncodedSourceMap,
   generatedLine: number,
   generatedColumn: number,
 ): { source: string; line: number; column: number; name?: string } | null {
   try {
-    const mappings = decodeVLQ(sourceMap.mappings)
-    const targetLine = generatedLine - 1
-    const lineData = mappings[targetLine]
-    if (!lineData || lineData.length === 0) return null
-
-    let generatedCol = 0
-    let sourceFile = 0
-    let sourceLine = 0
-    let sourceCol = 0
-    let nameIndex = 0
-
-    // Each group is 1-5 values. Advance i by the number of values in each group.
-    // Groups are implicitly 4 or 5 values; we advance conservatively by checking length.
-    let i = 0
-    while (i < lineData.length) {
-      generatedCol += lineData[i]
-
-      if (generatedCol > generatedColumn) break
-
-      if (i + 1 < lineData.length) sourceFile += lineData[i + 1]
-      if (i + 2 < lineData.length) sourceLine += lineData[i + 2]
-      if (i + 3 < lineData.length) sourceCol += lineData[i + 3]
-      if (i + 4 < lineData.length) nameIndex += lineData[i + 4]
-
-      i += 5
+    const tracer = new TraceMap(sourceMap)
+    const result = originalPositionFor(tracer, { line: generatedLine, column: generatedColumn })
+    if (!result.source) return null
+    return {
+      source: result.source,
+      line: result.line ?? generatedLine,
+      column: result.column ?? generatedColumn,
+      name: result.name ?? undefined,
     }
-
-    const source = sourceMap.sources[sourceFile] ?? 'unknown'
-    const name = sourceMap.names[nameIndex]
-
-    return { source, line: sourceLine + 1, column: sourceCol, name }
   } catch {
     return null
   }
@@ -155,7 +93,7 @@ export function symbolicate(
  */
 export function symbolicateStackTrace(
   frames: StackFrame[],
-  sourceMap: SourceMapObject,
+  sourceMap: EncodedSourceMap,
 ): StackFrame[] {
   return frames.map((frame) => {
     if (!frame.lineNumber || !frame.columnNumber || !frame.fileName) return frame

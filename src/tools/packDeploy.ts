@@ -1,3 +1,4 @@
+import { createHash } from 'crypto'
 import { execSync } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -52,15 +53,10 @@ export async function pack(options: PackOptions): Promise<void> {
   const [{ filename: baseTgzFileName }] = JSON.parse(packOutput) as [{ filename: string }]
   const tgzSource = path.join(packageRoot, baseTgzFileName)
 
-  // Use a unique filename per pack to prevent Cloud Build from caching stale tarballs.
-  // Derive a short ID from the app's git HEAD (falls back to timestamp).
-  let uniqueId: string
-  try {
-    uniqueId = execSync('git rev-parse --short HEAD', { cwd: functionsDir, encoding: 'utf-8' }).trim()
-  } catch {
-    uniqueId = Date.now().toString(36)
-  }
-  const tgzFileName = baseTgzFileName.replace(/\.tgz$/, `-${uniqueId}.tgz`)
+  // Use a content hash so the filename is stable for identical builds and
+  // changes only when FSL itself changes — no calling-project release ID needed.
+  const contentHash = createHash('sha256').update(fs.readFileSync(tgzSource)).digest('hex').slice(0, 8)
+  const tgzFileName = baseTgzFileName.replace(/\.tgz$/, `-${contentHash}.tgz`)
 
   // 3. Copy to functions/vendor/ (remove any previous fsl tarballs first)
   fs.mkdirSync(vendorDir, { recursive: true })
@@ -114,20 +110,29 @@ export async function packRestore(options: PackOptions): Promise<void> {
     fs.readFileSync(manifestPath, 'utf-8'),
   )
 
-  // 1. Restore package.json
+  // 1. Restore package.json — skip if originalRef is a file: path that no longer exists
+  // (e.g. a previous vendor tarball that was cleaned up during pack).
   const pkg = readPackageJson(functionsDir)
   const existing = findFslDep(pkg)
+  const refMatch = originalRef.match(/^file:(.+)$/)
+  const refFilePath = refMatch ? path.resolve(functionsDir, refMatch[1]) : null
+  const refFileExists = refFilePath ? fs.existsSync(refFilePath) : true
+
   if (existing) {
-    ;(pkg[existing.field] as Record<string, string>)['firebase-structured-logger'] = originalRef
-    writePackageJson(functionsDir, pkg)
+    if (refFileExists) {
+      ;(pkg[existing.field] as Record<string, string>)['firebase-structured-logger'] = originalRef
+      writePackageJson(functionsDir, pkg)
+    } else {
+      console.log(`[fsl] Original ref (${originalRef}) no longer exists — keeping vendor tgz reference.`)
+    }
   }
 
-  // 2. Remove tgz + manifest
+  // 2. Remove tgz + manifest — only remove tgz if we restored to a different ref
   const tgzPath = path.join(vendorDir, tgzFileName)
-  if (fs.existsSync(tgzPath)) fs.unlinkSync(tgzPath)
+  if (refFileExists && fs.existsSync(tgzPath)) fs.unlinkSync(tgzPath)
   fs.unlinkSync(manifestPath)
 
-  // 3. npm install to restore symlink
+  // 3. npm install to restore
   console.log('[fsl] Restoring...')
   execSync('npm install', { cwd: functionsDir, stdio: 'inherit' })
 

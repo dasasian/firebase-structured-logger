@@ -147,7 +147,7 @@ export class Logger<
         message: error.message,
         stack: error.stack,
         name: error.name,
-        cause: error.cause !== undefined ? String(error.cause) : undefined,
+        cause: error.cause != null ? String(error.cause) : undefined,
       },
     }, attachments)
   }

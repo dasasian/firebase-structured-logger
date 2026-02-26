@@ -18,9 +18,15 @@
   },
   "typesVersions": {
     "*": {
-      "client": ["dist/client/index.d.ts"],
-      "functions": ["dist/functions/index.d.ts"],
-      "tools": ["dist/tools/index.d.ts"]
+      "client": [
+        "dist/client/index.d.ts"
+      ],
+      "functions": [
+        "dist/functions/index.d.ts"
+      ],
+      "tools": [
+        "dist/tools/index.d.ts"
+      ]
     }
   },
   "bin": {
@@ -38,6 +44,7 @@
   },
   "dependencies": {
     "@google-cloud/storage": "^7.0.0",
+    "@jridgewell/trace-mapping": "^0.3.31",
     "ulid": "^2.3.0"
   },
   "peerDependencies": {
@@ -46,9 +53,15 @@
     "firebase-functions": ">=6.0.0"
   },
   "peerDependenciesMeta": {
-    "firebase": { "optional": true },
-    "firebase-admin": { "optional": true },
-    "firebase-functions": { "optional": true }
+    "firebase": {
+      "optional": true
+    },
+    "firebase-admin": {
+      "optional": true
+    },
+    "firebase-functions": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

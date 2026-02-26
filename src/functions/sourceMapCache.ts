@@ -1,10 +1,10 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { getStorage } from 'firebase-admin/storage'
-import type { SourceMapObject } from './symbolicate'
+import type { EncodedSourceMap } from '@jridgewell/trace-mapping'
 
-// In-memory cache: cacheKey → SourceMapObject | null (null = confirmed not found)
-const cache = new Map<string, SourceMapObject | null>()
+// In-memory cache: cacheKey → EncodedSourceMap | null (null = confirmed not found)
+const cache = new Map<string, EncodedSourceMap | null>()
 
 let configuredBucket: string | undefined
 
@@ -19,12 +19,12 @@ export function getConfiguredBucket(): string | undefined {
 /**
  * Load source map from embedded current release directory (instant for current release).
  */
-function loadEmbeddedSourceMap(fileName: string): SourceMapObject | null {
+function loadEmbeddedSourceMap(fileName: string): EncodedSourceMap | null {
   try {
     // Looks for sourcemaps/current/{fileName}.map relative to the Cloud Function working directory
     const mapPath = path.join(process.cwd(), 'sourcemaps', 'current', `${fileName}.map`)
     if (!fs.existsSync(mapPath)) return null
-    return JSON.parse(fs.readFileSync(mapPath, 'utf-8')) as SourceMapObject
+    return JSON.parse(fs.readFileSync(mapPath, 'utf-8')) as EncodedSourceMap
   } catch {
     return null
   }
@@ -36,7 +36,7 @@ function loadEmbeddedSourceMap(fileName: string): SourceMapObject | null {
 async function loadStorageSourceMap(
   releaseId: string,
   fileName: string,
-): Promise<SourceMapObject | null> {
+): Promise<EncodedSourceMap | null> {
   const cacheKey = `${releaseId}/${fileName}`
   if (cache.has(cacheKey)) return cache.get(cacheKey) ?? null
 
@@ -53,7 +53,7 @@ async function loadStorageSourceMap(
     }
 
     const [content] = await file.download()
-    const sourceMap = JSON.parse(content.toString()) as SourceMapObject
+    const sourceMap = JSON.parse(content.toString()) as EncodedSourceMap
     cache.set(cacheKey, sourceMap)
     return sourceMap
   } catch (err) {
@@ -69,7 +69,7 @@ async function loadStorageSourceMap(
 export async function getSourceMap(
   releaseId: string,
   fileName: string,
-): Promise<SourceMapObject | null> {
+): Promise<EncodedSourceMap | null> {
   const embedded = loadEmbeddedSourceMap(fileName)
   if (embedded) return embedded
   return loadStorageSourceMap(releaseId, fileName)
