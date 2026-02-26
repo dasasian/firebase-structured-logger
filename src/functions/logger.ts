@@ -130,7 +130,9 @@ export function writeLog(
   }
 
   // Production: write to Cloud Logging via firebase-functions logger
-  const structuredData = { labels: entry.labels, jsonPayload: entry.jsonPayload }
+  // Use the namespaced key so Cloud Run's log agent promotes these to root LogEntry.labels,
+  // making them filterable via labels.* in Cloud Logging queries.
+  const structuredData = { 'logging.googleapis.com/labels': entry.labels, jsonPayload: entry.jsonPayload }
 
   switch (payload.severity) {
     case 'ERROR':
