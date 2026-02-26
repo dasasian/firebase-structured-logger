@@ -141,15 +141,12 @@ export class Logger<
       ...(labels as Record<string, string | undefined>),
     }
 
-    await this.send(error.message, 'ERROR', errorLabels, {
-      ...context,
-      error: {
-        message: error.message,
-        stack: error.stack,
-        name: error.name,
-        cause: error.cause != null ? String(error.cause) : undefined,
-      },
-    }, attachments)
+    await this.send(error.message, 'ERROR', errorLabels, context, attachments, {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+      cause: error.cause != null ? String(error.cause) : undefined,
+    })
   }
 
   async info(
@@ -185,6 +182,7 @@ export class Logger<
     labels?: Record<string, string | undefined>,
     context?: Record<string, unknown>,
     attachments?: Record<string, Blob | File | string>,
+    error?: NonNullable<LogPayload['jsonPayload']>['error'],
   ): Promise<void> {
     if (SEVERITY_ORDER[severity] > this.minLevel) return
 
@@ -219,7 +217,7 @@ export class Logger<
       jsonPayload: {
         breadcrumbs: getLastBreadcrumbs(20),
         context,
-        error: context?.error as { message: string; stack?: string; name?: string } | undefined,
+        error,
       },
       ...(base64Attachments ? { attachments: base64Attachments } : {}),
     }
