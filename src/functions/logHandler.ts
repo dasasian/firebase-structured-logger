@@ -4,7 +4,7 @@ import { writeLog } from './logger'
 import { configureSourceMapBucket, getSourceMap } from './sourceMapCache'
 import {
   parseStackTrace,
-  symbolicateStackTrace,
+  symbolicate,
   formatStackTrace,
 } from './symbolicate'
 
@@ -24,7 +24,16 @@ interface ErrorPayload {
 }
 
 /**
+ * Extract the bundle filename (e.g. "index-DnZ05f3M.js") from a frame URL.
+ */
+function bundleFileFromUrl(url: string): string | null {
+  const match = url.match(/\/([^/]+\.js)(?:[?#].*)?$/)
+  return match ? match[1] : null
+}
+
+/**
  * Attempt to symbolicate a minified error stack trace using source maps.
+ * Loads source maps per-bundle so multiple chunks are handled correctly.
  */
 async function symbolicateError(
   releaseId: string,
@@ -34,15 +43,48 @@ async function symbolicateError(
 
   try {
     const frames = parseStackTrace(error.stack)
-    const bundleNames = ['main', 'index', 'app']
 
-    for (const name of bundleNames) {
-      const sourceMap = await getSourceMap(releaseId, name)
-      if (sourceMap) {
-        const symbolicated = symbolicateStackTrace(frames, sourceMap)
-        return { ...error, stack: formatStackTrace(symbolicated) }
+    // Collect unique bundle filenames referenced across all frames
+    const bundleFiles = new Set<string>()
+    for (const frame of frames) {
+      if (frame.fileName) {
+        const bundle = bundleFileFromUrl(frame.fileName)
+        if (bundle) bundleFiles.add(bundle)
       }
     }
+
+    if (bundleFiles.size === 0) return error
+
+    // Load source map for each unique bundle (getSourceMap handles caching)
+    const sourceMaps = new Map<string, Awaited<ReturnType<typeof getSourceMap>>>()
+    await Promise.all(
+      Array.from(bundleFiles).map(async (bundle) => {
+        const map = await getSourceMap(releaseId, bundle)
+        if (map) sourceMaps.set(bundle, map)
+      }),
+    )
+
+    if (sourceMaps.size === 0) return error
+
+    // Symbolicate each frame with its bundle's source map
+    const symbolicated = frames.map((frame) => {
+      if (!frame.fileName || !frame.lineNumber || !frame.columnNumber) return frame
+      const bundle = bundleFileFromUrl(frame.fileName)
+      if (!bundle) return frame
+      const sourceMap = sourceMaps.get(bundle)
+      if (!sourceMap) return frame
+      const result = symbolicate(sourceMap, frame.lineNumber, frame.columnNumber)
+      if (!result) return frame
+      return {
+        ...frame,
+        fileName: result.source,
+        lineNumber: result.line,
+        columnNumber: result.column,
+        functionName: result.name ?? frame.functionName,
+      }
+    })
+
+    return { ...error, stack: formatStackTrace(symbolicated) }
   } catch (err) {
     console.warn('[fsl] Symbolication failed:', err)
   }

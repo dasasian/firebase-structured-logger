@@ -49,11 +49,26 @@ export async function pack(options: PackOptions): Promise<void> {
   // 2. Pack — use --json for reliable filename parsing
   console.log('[fsl] Packing...')
   const packOutput = execSync('npm pack --json', { cwd: packageRoot, encoding: 'utf-8' })
-  const [{ filename: tgzFileName }] = JSON.parse(packOutput) as [{ filename: string }]
-  const tgzSource = path.join(packageRoot, tgzFileName)
+  const [{ filename: baseTgzFileName }] = JSON.parse(packOutput) as [{ filename: string }]
+  const tgzSource = path.join(packageRoot, baseTgzFileName)
 
-  // 3. Copy to functions/vendor/
+  // Use a unique filename per pack to prevent Cloud Build from caching stale tarballs.
+  // Derive a short ID from the app's git HEAD (falls back to timestamp).
+  let uniqueId: string
+  try {
+    uniqueId = execSync('git rev-parse --short HEAD', { cwd: functionsDir, encoding: 'utf-8' }).trim()
+  } catch {
+    uniqueId = Date.now().toString(36)
+  }
+  const tgzFileName = baseTgzFileName.replace(/\.tgz$/, `-${uniqueId}.tgz`)
+
+  // 3. Copy to functions/vendor/ (remove any previous fsl tarballs first)
   fs.mkdirSync(vendorDir, { recursive: true })
+  for (const f of fs.readdirSync(vendorDir)) {
+    if (f.startsWith('firebase-structured-logger-') && f.endsWith('.tgz')) {
+      fs.unlinkSync(path.join(vendorDir, f))
+    }
+  }
   const tgzDest = path.join(vendorDir, tgzFileName)
   fs.copyFileSync(tgzSource, tgzDest)
   fs.unlinkSync(tgzSource)
