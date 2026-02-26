@@ -151,10 +151,10 @@ When asked to fix violations found in Phase 2, use the FSL API Reference below. 
 ### Frontend
 Import from project logger utility (e.g. `src/utils/logger.ts`):
 ```ts
-logError(raw: unknown, labels?: Partial<AppLabels>, context?: Record<string, unknown>): Promise<void>
-logWarn(message: string, labels?: Partial<AppLabels>, context?: Record<string, unknown>): Promise<void>
-logInfo(message: string, labels?: Partial<AppLabels>, context?: Record<string, unknown>): Promise<void>
-logDebug(message: string, labels?: Partial<AppLabels>, context?: Record<string, unknown>): Promise<void>
+logError(raw: unknown, labels?: Partial<AppLabels>, context?: Record<string, unknown>, attachments?: Record<string, Blob | File | string>): Promise<void>
+logWarn(message: string, labels?: Partial<AppLabels>, context?: Record<string, unknown>, attachments?: Record<string, Blob | File | string>): Promise<void>
+logInfo(message: string, labels?: Partial<AppLabels>, context?: Record<string, unknown>, attachments?: Record<string, Blob | File | string>): Promise<void>
+logDebug(message: string, labels?: Partial<AppLabels>, context?: Record<string, unknown>, attachments?: Record<string, Blob | File | string>): Promise<void>
 ```
 
 Import `bc` from `firebase-structured-logger/client`:
@@ -171,13 +171,15 @@ Import from `firebase-structured-logger/functions`:
 // Call first in every onCall handler — auto-seeds userId and functionName
 initRequestLogger<AppLabels>(request, { functionName: 'myFunc', labels: { organizationId: request.data.organizationId } })
 
-logError(raw: unknown, labels?: Record<string, string | undefined>, context?: Record<string, unknown>): void
-logWarn(message: string, labels?: Record<string, string | undefined>, context?: Record<string, unknown>): void
-logInfo(message: string, labels?: Record<string, string | undefined>, context?: Record<string, unknown>): void
-logDebug(message: string, labels?: Record<string, string | undefined>, context?: Record<string, unknown>): void
+logError(raw: unknown, labels?: Record<string, string | undefined>, context?: Record<string, unknown>, attachments?: Record<string, string | Buffer>): void
+logWarn(message: string, labels?: Record<string, string | undefined>, context?: Record<string, unknown>, attachments?: Record<string, string | Buffer>): void
+logInfo(message: string, labels?: Record<string, string | undefined>, context?: Record<string, unknown>, attachments?: Record<string, string | Buffer>): void
+logDebug(message: string, labels?: Record<string, string | undefined>, context?: Record<string, unknown>, attachments?: Record<string, string | Buffer>): void
 ```
 
 ### Key behaviours
 - `logError` auto-derives `errorType` from `error.name` — only pass explicitly to override (e.g. `{ errorType: 'DatabaseError' }`)
 - `logError` accepts `unknown` — never cast with `as Error`
 - `initRequestLogger` auto-seeds `userId` (from `request.auth.uid`) and `functionName` — do not pass these in labels
+- Every log entry includes `labels.logId` (ULID) — if `attachments` are passed, they are uploaded to GCS at `logAttachments/{logId}/{name}` fire-and-forget; upload failure never blocks the log entry
+- When catching an error, check if there are attachments in scope (images, file snapshots, captured data) that would help reproduce or diagnose it — if so, pass them via `attachments`

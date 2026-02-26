@@ -63,6 +63,23 @@ function getBrowser(): string {
   return 'unknown'
 }
 
+async function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      resolve(result.split(',')[1] ?? result)
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(blob)
+  })
+}
+
+async function assetToBase64(asset: Blob | File | string): Promise<string> {
+  if (typeof asset === 'string') return asset
+  return blobToBase64(asset)
+}
+
 export class Logger<
   AppLabels extends Record<string, string | undefined> = Record<string, string | undefined>,
 > {
@@ -106,6 +123,7 @@ export class Logger<
     raw: unknown,
     labels?: Partial<AppLabels>,
     context?: Record<string, unknown>,
+    attachments?: Record<string, Blob | File | string>,
   ): Promise<void> {
     const error = raw instanceof Error ? raw : new Error(String(raw))
     const screen = getCurrentScreen()
@@ -131,31 +149,34 @@ export class Logger<
         name: error.name,
         cause: error.cause !== undefined ? String(error.cause) : undefined,
       },
-    })
+    }, attachments)
   }
 
   async info(
     message: string,
     labels?: Partial<AppLabels>,
     context?: Record<string, unknown>,
+    attachments?: Record<string, Blob | File | string>,
   ): Promise<void> {
-    await this.send(message, 'INFO', labels as Record<string, string | undefined>, context)
+    await this.send(message, 'INFO', labels as Record<string, string | undefined>, context, attachments)
   }
 
   async warning(
     message: string,
     labels?: Partial<AppLabels>,
     context?: Record<string, unknown>,
+    attachments?: Record<string, Blob | File | string>,
   ): Promise<void> {
-    await this.send(message, 'WARNING', labels as Record<string, string | undefined>, context)
+    await this.send(message, 'WARNING', labels as Record<string, string | undefined>, context, attachments)
   }
 
   async debug(
     message: string,
     labels?: Partial<AppLabels>,
     context?: Record<string, unknown>,
+    attachments?: Record<string, Blob | File | string>,
   ): Promise<void> {
-    await this.send(message, 'DEBUG', labels as Record<string, string | undefined>, context)
+    await this.send(message, 'DEBUG', labels as Record<string, string | undefined>, context, attachments)
   }
 
   private async send(
@@ -163,6 +184,7 @@ export class Logger<
     severity: LogSeverity,
     labels?: Record<string, string | undefined>,
     context?: Record<string, unknown>,
+    attachments?: Record<string, Blob | File | string>,
   ): Promise<void> {
     if (SEVERITY_ORDER[severity] > this.minLevel) return
 
@@ -182,6 +204,14 @@ export class Logger<
       ...labels,
     }
 
+    let base64Attachments: Record<string, string> | undefined
+    if (attachments && Object.keys(attachments).length > 0) {
+      base64Attachments = {}
+      for (const [name, attachment] of Object.entries(attachments)) {
+        base64Attachments[name] = await assetToBase64(attachment)
+      }
+    }
+
     const payload: LogPayload = {
       message,
       severity,
@@ -191,6 +221,7 @@ export class Logger<
         context,
         error: context?.error as { message: string; stack?: string; name?: string } | undefined,
       },
+      ...(base64Attachments ? { attachments: base64Attachments } : {}),
     }
 
     recordLog()

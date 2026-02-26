@@ -26,6 +26,8 @@ export interface LogPayload {
       cause?: string
     }
   }
+  /** Base64-encoded attachments keyed by name. Uploaded to GCS, stripped before writing to Cloud Logging. */
+  attachments?: Record<string, string>
 }
 
 export interface BreadcrumbEntry {

@@ -164,10 +164,10 @@ export const logFrontendEvent = createClientLogFunction({
 ## Client API
 
 ```ts
-logger.error(error: unknown, labels?, context?)
-logger.info(message: string, labels?, context?)
-logger.warning(message: string, labels?, context?)
-logger.debug(message: string, labels?, context?)
+logger.error(error: unknown, labels?, context?, attachments?: Record<string, Blob | File | string>)
+logger.info(message: string, labels?, context?, attachments?: Record<string, Blob | File | string>)
+logger.warning(message: string, labels?, context?, attachments?: Record<string, Blob | File | string>)
+logger.debug(message: string, labels?, context?, attachments?: Record<string, Blob | File | string>)
 
 logger.setUser(uid, extraLabels?)
 logger.clearUser()
@@ -176,6 +176,20 @@ logger.addBreadcrumb(type, name, data?)
 ```
 
 Debug logs are suppressed in production automatically.
+
+### Asset uploads
+
+Pass attachments (images, file snapshots, captured data) to any log method to persist them alongside the log entry:
+
+```ts
+// Capture a photo blob, then if an error occurs:
+logger.error(err, { screen: 'camera' }, context, { photo: blob })
+```
+
+Attachments are uploaded to GCS at `logAttachments/{logId}/{name}` — the same `logId` appears in `labels.logId` on the log entry. Every log entry gets a `logId` regardless of whether attachments are present.
+
+**GCS lifecycle:** Add a lifecycle rule to your bucket to auto-delete attachments after 30 days:
+GCS Console → your bucket → Lifecycle → Add rule → Delete objects with prefix `logAttachments/` older than 30 days.
 
 ---
 
@@ -192,6 +206,12 @@ export const myFunction = onCall(async (request) => {
   initRequestLogger(request, { functionName: 'myFunction' })
   logInfo('started')
 })
+```
+
+Backend log methods also accept an optional `attachments` parameter (`Record<string, string | Buffer>`):
+
+```ts
+logError(err, labels, context, { snapshot: buffer })
 ```
 
 ---

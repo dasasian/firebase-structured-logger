@@ -12,6 +12,10 @@ export function configureSourceMapBucket(bucketName: string): void {
   configuredBucket = bucketName
 }
 
+export function getConfiguredBucket(): string | undefined {
+  return configuredBucket
+}
+
 /**
  * Load source map from embedded current release directory (instant for current release).
  */

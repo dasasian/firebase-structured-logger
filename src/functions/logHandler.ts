@@ -101,6 +101,7 @@ export function createClientLogHandler(config: ClientLogHandlerConfig) {
         severity,
         labels: cleanLabels(labels) as LogPayload['labels'],
         jsonPayload: { ...jsonPayload, error: processedError },
+        attachments: request.data.attachments,
       })
     } catch (err) {
       console.error('[fsl] Error processing client log:', err)
