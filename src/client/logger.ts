@@ -38,7 +38,7 @@ const SEVERITY_ORDER: Record<LogSeverity, number> = {
 }
 
 function defaultMinLevel(): LogSeverity {
-  if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production') return 'INFO'
+  if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production') return 'WARNING'
   return 'DEBUG'
 }
 

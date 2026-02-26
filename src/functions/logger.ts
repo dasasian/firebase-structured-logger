@@ -14,6 +14,14 @@ interface FunctionsLoggerConfig {
   logLocalDir?: string
   logMaxRecordsPerFile?: number  // default 2000
   logMaxRotatedFiles?: number    // default 5
+  minSeverity?: LogSeverity      // default 'WARNING' in production, 'DEBUG' in emulator
+}
+
+const SEVERITY_ORDER: Record<LogSeverity, number> = {
+  ERROR: 0,
+  WARNING: 1,
+  INFO: 2,
+  DEBUG: 3,
 }
 
 let globalConfig: FunctionsLoggerConfig | null = null
@@ -75,6 +83,9 @@ async function uploadLogAttachments(logId: string, logAttachments: Record<string
 export function writeLog(
   payload: LogPayload & { functionName?: string; requestId?: string },
 ): void {
+  const minSeverity = globalConfig?.minSeverity ?? (IS_EMULATOR ? 'DEBUG' : 'WARNING')
+  if (SEVERITY_ORDER[payload.severity] > SEVERITY_ORDER[minSeverity]) return
+
   const logId = ulid()
   const hasAttachments = payload.attachments && Object.keys(payload.attachments).length > 0
   const labels = {
@@ -135,9 +146,19 @@ export function writeLog(
   const structuredData = { 'logging.googleapis.com/labels': entry.labels, jsonPayload: entry.jsonPayload }
 
   switch (payload.severity) {
-    case 'ERROR':
-      ffLogger.error(payload.message, structuredData)
+    case 'ERROR': {
+      // Reconstruct an Error with the original (symbolicated) stack so entryFromArgs
+      // sees an Error instance, skipping its `new Error(message).stack` fallback that
+      // would otherwise replace the message with a server-side call stack.
+      const err = new Error(payload.message)
+      err.name = payload.jsonPayload?.error?.name ?? err.name
+      err.stack = payload.jsonPayload?.error?.stack ?? err.stack
+      if (payload.jsonPayload?.error?.cause !== undefined) {
+        (err as any).cause = payload.jsonPayload.error.cause
+      }
+      ffLogger.error(err, structuredData)
       break
+    }
     case 'WARNING':
       ffLogger.warn(payload.message, structuredData)
       break
