@@ -161,6 +161,31 @@ export const logFrontendEvent = createClientLogFunction({
 
 ---
 
+### 8. Add the emulator script
+
+Add a `serve` script to `functions/package.json` so you can run the functions emulator locally:
+
+```json
+"scripts": {
+  "build": "tsc",
+  "build:watch": "tsc --watch",
+  "serve": "npm run build && firebase emulators:start --only functions"
+}
+```
+
+Run it from the `functions/` directory:
+```bash
+npm run serve
+```
+
+This is required for two things:
+- **Local log capture** — the emulator writes log entries to `DEV_LOG_DIR` (e.g. `functions/logs/dev.jsonl`) so you can inspect them without deploying
+- **firebase-mcp-server** — the MCP server reads from that same local JSONL file, letting Claude query your dev logs directly
+
+Without this, log events from your frontend won't be captured locally and the MCP server will have nothing to query.
+
+---
+
 ## Client API
 
 ```ts
