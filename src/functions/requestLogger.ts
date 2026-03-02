@@ -44,12 +44,10 @@ export function initRequestLogger<
 }
 
 /**
- * Retrieve the request-scoped logger. Throws if called outside a request context.
+ * Retrieve the request-scoped logger.
+ * Falls back to an anonymous logger (no request labels) when called outside a request context.
+ * Logs written outside a request will be missing userId, functionName, etc. — visible in Cloud Logging.
  */
 export function getLogger(): LogWriter {
-  const writer = storage.getStore()
-  if (!writer) {
-    throw new Error('[fsl] getLogger() called outside of a request — call initRequestLogger() first')
-  }
-  return writer
+  return storage.getStore() ?? createLogWriter({})
 }
