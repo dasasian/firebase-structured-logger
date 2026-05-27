@@ -2,27 +2,21 @@ import { getClientLogger } from './logger'
 
 export function setupGlobalErrorHandler(): void {
   window.addEventListener('error', (event) => {
-    getClientLogger()
-      .error(event.error, { errorCategory: 'crash', errorType: 'UncaughtError' } as never)
-      .catch(() => {
-        console.error('[fsl] Uncaught error:', event.error)
-      })
+    console.error('[fsl] Uncaught error:', event.error)
+    getClientLogger().error(event.error, { errorCategory: 'crash', errorType: 'UncaughtError' } as never)
   })
 
   window.addEventListener('unhandledrejection', (event) => {
-    getClientLogger()
-      .error(event.reason, { errorCategory: 'crash', errorType: 'UnhandledRejection' } as never)
-      .catch(() => {
-        console.error('[fsl] Unhandled rejection:', event.reason)
-      })
+    console.error('[fsl] Unhandled rejection:', event.reason)
+    getClientLogger().error(event.reason, { errorCategory: 'crash', errorType: 'UnhandledRejection' } as never)
   })
 }
 
-export async function handleReactError(
+export function handleReactError(
   error: Error,
   errorInfo: { componentStack: string },
-): Promise<void> {
-  await getClientLogger().error(
+): void {
+  getClientLogger().error(
     error,
     { errorCategory: 'crash', errorType: 'ReactError' } as never,
     { componentStack: errorInfo.componentStack },

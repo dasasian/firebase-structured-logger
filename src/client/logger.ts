@@ -119,12 +119,12 @@ export class Logger<
     addBreadcrumb(type, name, data)
   }
 
-  async error(
+  error(
     raw: unknown,
     labels?: Partial<AppLabels>,
     context?: Record<string, unknown>,
     attachments?: Record<string, Blob | File | string>,
-  ): Promise<void> {
+  ): void {
     const error = raw instanceof Error ? raw : new Error(String(raw))
     const screen = getCurrentScreen()
     const activity = getActiveActivity()
@@ -141,7 +141,7 @@ export class Logger<
       ...(labels as Record<string, string | undefined>),
     }
 
-    await this.send(error.message, 'ERROR', errorLabels, context, attachments, {
+    void this.send(error.message, 'ERROR', errorLabels, context, attachments, {
       message: error.message,
       stack: error.stack,
       name: error.name,
@@ -149,31 +149,31 @@ export class Logger<
     })
   }
 
-  async info(
+  info(
     message: string,
     labels?: Partial<AppLabels>,
     context?: Record<string, unknown>,
     attachments?: Record<string, Blob | File | string>,
-  ): Promise<void> {
-    await this.send(message, 'INFO', labels as Record<string, string | undefined>, context, attachments)
+  ): void {
+    void this.send(message, 'INFO', labels as Record<string, string | undefined>, context, attachments)
   }
 
-  async warning(
+  warning(
     message: string,
     labels?: Partial<AppLabels>,
     context?: Record<string, unknown>,
     attachments?: Record<string, Blob | File | string>,
-  ): Promise<void> {
-    await this.send(message, 'WARNING', labels as Record<string, string | undefined>, context, attachments)
+  ): void {
+    void this.send(message, 'WARNING', labels as Record<string, string | undefined>, context, attachments)
   }
 
-  async debug(
+  debug(
     message: string,
     labels?: Partial<AppLabels>,
     context?: Record<string, unknown>,
     attachments?: Record<string, Blob | File | string>,
-  ): Promise<void> {
-    await this.send(message, 'DEBUG', labels as Record<string, string | undefined>, context, attachments)
+  ): void {
+    void this.send(message, 'DEBUG', labels as Record<string, string | undefined>, context, attachments)
   }
 
   private async send(
@@ -191,40 +191,40 @@ export class Logger<
       return
     }
 
-    const allLabels: LogPayload['labels'] = {
-      appId: this.config.appId,
-      releaseId: this.config.releaseId,
-      screen: getCurrentScreen(),
-      userId: this.userId,
-      platform: getPlatform(),
-      browser: getBrowser(),
-      ...this.userLabels,
-      ...labels,
-    }
-
-    let base64Attachments: Record<string, string> | undefined
-    if (attachments && Object.keys(attachments).length > 0) {
-      base64Attachments = {}
-      for (const [name, attachment] of Object.entries(attachments)) {
-        base64Attachments[name] = await assetToBase64(attachment)
-      }
-    }
-
-    const payload: LogPayload = {
-      message,
-      severity,
-      labels: allLabels,
-      jsonPayload: {
-        breadcrumbs: getLastBreadcrumbs(20),
-        context,
-        error,
-      },
-      ...(base64Attachments ? { attachments: base64Attachments } : {}),
-    }
-
-    recordLog()
-
     try {
+      const allLabels: LogPayload['labels'] = {
+        appId: this.config.appId,
+        releaseId: this.config.releaseId,
+        screen: getCurrentScreen(),
+        userId: this.userId,
+        platform: getPlatform(),
+        browser: getBrowser(),
+        ...this.userLabels,
+        ...labels,
+      }
+
+      let base64Attachments: Record<string, string> | undefined
+      if (attachments && Object.keys(attachments).length > 0) {
+        base64Attachments = {}
+        for (const [name, attachment] of Object.entries(attachments)) {
+          base64Attachments[name] = await assetToBase64(attachment)
+        }
+      }
+
+      const payload: LogPayload = {
+        message,
+        severity,
+        labels: allLabels,
+        jsonPayload: {
+          breadcrumbs: getLastBreadcrumbs(20),
+          context,
+          error,
+        },
+        ...(base64Attachments ? { attachments: base64Attachments } : {}),
+      }
+
+      recordLog()
+
       await this.config.logFunction(payload)
     } catch (err) {
       console.error('[fsl] Failed to send log:', err instanceof Error ? err.message : err)
@@ -241,17 +241,17 @@ export class Logger<
  * 2. Stack trace is symbolicated (points to source file, not minified bundle)
  * 3. MCP query: source: local, where: [{ field: "labels.errorType", operator: "==", value: "fsl-verify" }]
  */
-export async function triggerTestLog(): Promise<void> {
+export function triggerTestLog(): void {
   console.info('[fsl] triggerTestLog called')
   const logger = getClientLogger()
   const testError = new Error('[fsl-verify] Test error — logging pipeline check')
   console.info('[fsl] sending error log...')
-  await logger.error(testError, { errorType: 'fsl-verify' }, { test: true })
+  logger.error(testError, { errorType: 'fsl-verify' }, { test: true })
   console.info('[fsl] sending warning log...')
-  await logger.warning('[fsl-verify] Test warning', { errorType: 'fsl-verify' })
+  logger.warning('[fsl-verify] Test warning', { errorType: 'fsl-verify' })
   console.info('[fsl] sending info log...')
-  await logger.info('[fsl-verify] Test info', { errorType: 'fsl-verify' })
-  console.info('[fsl] triggerTestLog complete — check dev.jsonl for fsl-verify entries')
+  logger.info('[fsl-verify] Test info', { errorType: 'fsl-verify' })
+  console.info('[fsl] triggerTestLog scheduled — sends are fire-and-forget; check dev.jsonl in ~1-2s')
 }
 
 // Module-level singleton

@@ -47,9 +47,16 @@ export function initLogger(config: FunctionsLoggerConfig): void {
 function rotateLogFile(logDir: string, maxRotatedFiles: number): void {
   const current = path.join(logDir, LOG_FILENAME);
   try {
-    if (fs.existsSync(current)) {
-      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    // The functions emulator spawns multiple worker processes that each call
+    // initLogger() on startup. existsSync + renameSync is a TOCTOU race:
+    // a parallel worker can rename the file between our check and our rename.
+    // Attempt the rename and swallow ENOENT — it means another worker already rotated.
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    try {
       fs.renameSync(current, path.join(logDir, `dev-${timestamp}.jsonl`));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      // Another worker rotated first (or no previous log file to rotate) — fine
     }
 
     // Delete oldest rotated files beyond limit
@@ -63,7 +70,12 @@ function rotateLogFile(logDir: string, maxRotatedFiles: number): void {
       Math.max(0, rotated.length - maxRotatedFiles),
     );
     for (const f of toDelete) {
-      fs.unlinkSync(path.join(logDir, f));
+      try {
+        fs.unlinkSync(path.join(logDir, f));
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+        // Another worker already deleted it — fine
+      }
     }
   } catch (err) {
     console.warn("[fsl] Failed to rotate log file:", err);
