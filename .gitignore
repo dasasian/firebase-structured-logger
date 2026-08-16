@@ -18,6 +18,7 @@ dist/
 # Firebase credentials
 *.json
 !package.json
+!package-lock.json
 !tsconfig.json
 
 # IDE

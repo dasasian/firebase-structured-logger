@@ -2,7 +2,7 @@
 
 Structured logging for Firebase apps — client, functions, and tools.
 
-Sends frontend logs to a Cloud Function, symbolicates stack traces, and writes structured entries to Google Cloud Logging — queryable via [firebase-mcp-server](https://github.com/your-org/firebase-mcp-server).
+Sends frontend logs to a Cloud Function, symbolicates stack traces, and writes structured entries to Google Cloud Logging — queryable with standard Cloud Logging tools.
 
 ---
 
