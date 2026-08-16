@@ -11,18 +11,32 @@ no MCP registry step.
 
 `npm run build` (tsc) · `npm run typecheck` (tsc --noEmit) · `npm test`.
 
-`npm test` runs the `tests/*.ts` tsx suites. The `handler` and `symbolication` suites run
+`npm test` runs the `tests/*.ts` tsx suites. Keep them green.
+
+The functions-side suites — `errorPayload`, `requestLogger`, `handler`, `symbolication` — run
 under `FUNCTIONS_EMULATOR=true` (already set in the `test` script) so they exercise emulator
-mode without live credentials. Keep them green.
+mode without live credentials, writing to a throwaway `dev.jsonl` instead of Cloud Logging.
+
+Two support modules, not suites themselves:
+
+- `tests/testHelpers.ts` — `assert`, `reportResults`, `readLastEntry(dir)`, `clearLog(dir)`,
+  `makeRequest(payload)`. Every suite uses these; don't re-roll them per file.
+- `tests/browserStubs.ts` — in-memory `sessionStorage`, a fake `window` with
+  `dispatchWindowEvent`/`listenerCount`, a stub `navigator`, and `withFrozenTime`.
+  **Import it before the module under test** — `rateLimiter` reads `window` and
+  `client/logger` reads `navigator` at module load, so a later stub is too late.
+
+`errorPayload` is the parity suite: the client and functions loggers must build an identical
+`ErrorPayload`. They share `src/shared/error.ts` now, but they drifted once before.
 
 ## Releasing
 
 A library → **npm only** (no registry, no `server.json`, no tag-triggered publish workflow).
 Full process + gotchas: `../PUBLISHING.md`. The short version:
 
-1. Update `CHANGELOG.md` (`[Unreleased]` → `[X.Y.Z] — <date>`). **No `CHANGELOG.md` yet?**
-   Create one ([Keep a Changelog](https://keepachangelog.com) format) and backfill the
-   already-published versions from `git log` + the GitHub releases.
+1. Update `CHANGELOG.md` ([Keep a Changelog](https://keepachangelog.com) format): rename
+   `[Unreleased]` to `[X.Y.Z] — <date>`, open a fresh empty `[Unreleased]`, and update the
+   two link refs at the bottom of the file.
 2. Bump `version` in `package.json`.
 3. Commit `chore: release X.Y.Z` and push.
 4. `npm publish` — needs your OTP. Traps: a `404 on PUT` = lapsed token (`npm login`);

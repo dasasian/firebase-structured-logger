@@ -5,21 +5,7 @@
 
 import { Logger } from '../src/client/logger.js'
 import type { LogPayload } from '../src/shared/types.js'
-
-// --- Assertion helpers ---
-
-let passed = 0
-let failed = 0
-
-function assert(name: string, condition: boolean, detail?: string) {
-  if (condition) {
-    console.log(`  ✓ ${name}`)
-    passed++
-  } else {
-    console.error(`  ✗ ${name}${detail ? `: ${detail}` : ''}`)
-    failed++
-  }
-}
+import { assert, reportResults } from './testHelpers.js'
 
 function makeLogger(): { logger: Logger; lastPayload: () => LogPayload | undefined } {
   let captured: LogPayload | undefined
@@ -122,9 +108,7 @@ async function run() {
   await testNonErrorInput()
   await testInfoHasNoError()
 
-  console.log(`\n${'─'.repeat(40)}`)
-  console.log(`Results: ${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  reportResults()
 }
 
 run().catch(err => {

@@ -2,12 +2,13 @@ import * as fs from "fs";
 import * as path from "path";
 import { write as ffWrite } from "firebase-functions/logger";
 import { ulid } from "ulid";
-import { getStorage } from "firebase-admin/storage";
 import type { LogSeverity, LogPayload } from "../shared/types";
-import { getConfiguredBucket } from "./sourceMapCache";
+import { SEVERITY_ORDER } from "../shared/severity";
+import { toError, toErrorPayload } from "../shared/error";
+import { getBucket } from "./sourceMapCache";
 
 const IS_EMULATOR = process.env.FUNCTIONS_EMULATOR === "true";
-const LOG_FILENAME = "dev.jsonl";
+export const LOG_FILENAME = "dev.jsonl";
 
 interface FunctionsLoggerConfig {
   appId: string;
@@ -16,13 +17,6 @@ interface FunctionsLoggerConfig {
   logMaxRotatedFiles?: number; // default 5
   minSeverity?: LogSeverity; // default 'WARNING' in production, 'DEBUG' in emulator
 }
-
-const SEVERITY_ORDER: Record<LogSeverity, number> = {
-  ERROR: 0,
-  WARNING: 1,
-  INFO: 2,
-  DEBUG: 3,
-};
 
 let globalConfig: FunctionsLoggerConfig | null = null;
 let currentRecordCount = 0;
@@ -86,16 +80,39 @@ async function uploadLogAttachments(
   logId: string,
   logAttachments: Record<string, string>,
 ): Promise<void> {
-  const bucketName = getConfiguredBucket();
-  const bucket = bucketName
-    ? getStorage().bucket(bucketName)
-    : getStorage().bucket();
+  const bucket = getBucket();
   await Promise.all(
     Object.entries(logAttachments).map(async ([name, data]) => {
       const file = bucket.file(`logAttachments/${logId}/${name}`);
       await file.save(Buffer.from(data, "base64"));
     }),
   );
+}
+
+const CONSOLE_FN: Record<
+  LogSeverity,
+  (message: string, ...args: unknown[]) => void
+> = {
+  ERROR: console.error,
+  WARNING: console.warn,
+  DEBUG: console.debug,
+  INFO: console.log,
+};
+
+/**
+ * Strip null/undefined labels and convert all values to strings for Cloud Logging.
+ */
+export function cleanLabels(
+  labels: Record<string, unknown> | undefined,
+): Record<string, string> {
+  if (!labels) return {};
+  const cleaned: Record<string, string> = {};
+  for (const [key, value] of Object.entries(labels)) {
+    if (value !== null && value !== undefined) {
+      cleaned[key] = String(value);
+    }
+  }
+  return cleaned;
 }
 
 /**
@@ -152,16 +169,10 @@ export function writeLog(
     }
 
     // Also write to console for immediate visibility
-    const consoleFn =
-      payload.severity === "ERROR"
-        ? console.error
-        : payload.severity === "WARNING"
-          ? console.warn
-          : payload.severity === "DEBUG"
-            ? console.debug
-            : console.log;
-
-    consoleFn(`[${payload.severity}] ${payload.message}`, labels);
+    CONSOLE_FN[payload.severity](
+      `[${payload.severity}] ${payload.message}`,
+      labels,
+    );
     return;
   }
 
@@ -193,10 +204,24 @@ function logAttachmentsToBase64(
 export function createLogWriter(
   baseLabels: Record<string, string | undefined>,
 ) {
-  const merge = (extra?: Record<string, string | undefined>) => ({
-    ...baseLabels,
-    ...extra,
-  });
+  const merge = (extra?: Record<string, string | undefined>) =>
+    ({ ...baseLabels, ...extra }) as LogPayload["labels"];
+
+  const write = (
+    severity: LogSeverity,
+    message: string,
+    labels?: Record<string, string | undefined>,
+    context?: Record<string, unknown>,
+    attachments?: Record<string, string | Buffer>,
+  ): void => {
+    writeLog({
+      message,
+      severity,
+      labels: merge(labels),
+      jsonPayload: { context },
+      attachments: logAttachmentsToBase64(attachments),
+    });
+  };
 
   return {
     error(
@@ -205,68 +230,33 @@ export function createLogWriter(
       context?: Record<string, unknown>,
       attachments?: Record<string, string | Buffer>,
     ): void {
-      const error = raw instanceof Error ? raw : new Error(String(raw));
+      const error = toError(raw);
       writeLog({
         message: error.message,
         severity: "ERROR",
-        labels: merge({
-          errorType: error.name,
-          ...labels,
-        }) as LogPayload["labels"],
-        jsonPayload: {
-          context,
-          error: {
-            message: error.message,
-            stack: error.stack,
-            name: error.name,
-            cause: error.cause !== undefined ? String(error.cause) : undefined,
-          },
-        },
+        labels: merge({ errorType: error.name, ...labels }),
+        jsonPayload: { context, error: toErrorPayload(error) },
         attachments: logAttachmentsToBase64(attachments),
       });
     },
-    info(
+    info: (
       message: string,
       labels?: Record<string, string | undefined>,
       context?: Record<string, unknown>,
       attachments?: Record<string, string | Buffer>,
-    ): void {
-      writeLog({
-        message,
-        severity: "INFO",
-        labels: merge(labels) as LogPayload["labels"],
-        jsonPayload: { context },
-        attachments: logAttachmentsToBase64(attachments),
-      });
-    },
-    warning(
+    ): void => write("INFO", message, labels, context, attachments),
+    warning: (
       message: string,
       labels?: Record<string, string | undefined>,
       context?: Record<string, unknown>,
       attachments?: Record<string, string | Buffer>,
-    ): void {
-      writeLog({
-        message,
-        severity: "WARNING",
-        labels: merge(labels) as LogPayload["labels"],
-        jsonPayload: { context },
-        attachments: logAttachmentsToBase64(attachments),
-      });
-    },
-    debug(
+    ): void => write("WARNING", message, labels, context, attachments),
+    debug: (
       message: string,
       labels?: Record<string, string | undefined>,
       context?: Record<string, unknown>,
       attachments?: Record<string, string | Buffer>,
-    ): void {
-      writeLog({
-        message,
-        severity: "DEBUG",
-        labels: merge(labels) as LogPayload["labels"],
-        jsonPayload: { context },
-        attachments: logAttachmentsToBase64(attachments),
-      });
-    },
+    ): void => write("DEBUG", message, labels, context, attachments),
   };
 }
 

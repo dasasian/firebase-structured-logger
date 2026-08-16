@@ -65,6 +65,19 @@ export function parseStackTrace(stack: string): StackFrame[] {
   return frames
 }
 
+// Building a TraceMap decodes the whole mappings string, so keep one per source
+// map instead of rebuilding it for every frame of every stack.
+const tracers = new WeakMap<EncodedSourceMap, TraceMap>()
+
+function tracerFor(sourceMap: EncodedSourceMap): TraceMap {
+  let tracer = tracers.get(sourceMap)
+  if (!tracer) {
+    tracer = new TraceMap(sourceMap)
+    tracers.set(sourceMap, tracer)
+  }
+  return tracer
+}
+
 /**
  * Look up original source location for a generated line/column.
  */
@@ -74,8 +87,10 @@ export function symbolicate(
   generatedColumn: number,
 ): { source: string; line: number; column: number; name?: string } | null {
   try {
-    const tracer = new TraceMap(sourceMap)
-    const result = originalPositionFor(tracer, { line: generatedLine, column: generatedColumn })
+    const result = originalPositionFor(tracerFor(sourceMap), {
+      line: generatedLine,
+      column: generatedColumn,
+    })
     if (!result.source) return null
     return {
       source: result.source,
@@ -89,15 +104,21 @@ export function symbolicate(
 }
 
 /**
- * Apply source map to all frames in a stack trace.
+ * Apply source maps to all frames in a stack trace.
+ *
+ * `resolve` picks the source map for a given frame, so a stack spanning several
+ * bundles is handled by the same code path as a single-bundle one. Pass
+ * `() => map` when one map covers the whole stack.
  */
 export function symbolicateStackTrace(
   frames: StackFrame[],
-  sourceMap: EncodedSourceMap,
+  resolve: (frame: StackFrame) => EncodedSourceMap | null | undefined,
 ): StackFrame[] {
   return frames.map((frame) => {
     if (!frame.lineNumber || !frame.columnNumber || !frame.fileName) return frame
-    if (!frame.fileName.includes('.js')) return frame
+
+    const sourceMap = resolve(frame)
+    if (!sourceMap) return frame
 
     const result = symbolicate(sourceMap, frame.lineNumber, frame.columnNumber)
     if (!result) return frame

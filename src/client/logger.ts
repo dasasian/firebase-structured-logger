@@ -1,4 +1,6 @@
-import type { LogSeverity, LogPayload } from '../shared/types'
+import type { LogSeverity, LogPayload, ErrorPayload } from '../shared/types'
+import { SEVERITY_ORDER } from '../shared/severity'
+import { toError, toErrorPayload } from '../shared/error'
 import {
   addBreadcrumb,
   getLastBreadcrumbs,
@@ -30,38 +32,37 @@ export interface InitLoggerConfig<
   rateLimitOptions?: RateLimitConfig
 }
 
-const SEVERITY_ORDER: Record<LogSeverity, number> = {
-  ERROR: 0,
-  WARNING: 1,
-  INFO: 2,
-  DEBUG: 3,
-}
-
 function defaultMinLevel(): LogSeverity {
   if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production') return 'WARNING'
   return 'DEBUG'
 }
 
-function getPlatform(): string {
+// Order matters — first match wins.
+const PLATFORMS: [RegExp, string][] = [
+  [/iPhone|iPad|iPod/, 'ios'],
+  [/Android/, 'android'],
+  [/Mac/, 'macos'],
+  [/Win/, 'windows'],
+  [/Linux/, 'linux'],
+]
+
+const BROWSERS: [RegExp, string][] = [
+  [/Firefox/, 'firefox'],
+  [/Edg/, 'edge'],
+  [/Chrome/, 'chrome'],
+  [/Safari/, 'safari'],
+]
+
+function matchUserAgent(table: [RegExp, string][], fallback: string): string {
   if (typeof navigator === 'undefined') return 'unknown'
   const ua = navigator.userAgent
-  if (/iPhone|iPad|iPod/.test(ua)) return 'ios'
-  if (/Android/.test(ua)) return 'android'
-  if (/Mac/.test(ua)) return 'macos'
-  if (/Win/.test(ua)) return 'windows'
-  if (/Linux/.test(ua)) return 'linux'
-  return 'web'
+  return table.find(([pattern]) => pattern.test(ua))?.[1] ?? fallback
 }
 
-function getBrowser(): string {
-  if (typeof navigator === 'undefined') return 'unknown'
-  const ua = navigator.userAgent
-  if (/Firefox/.test(ua)) return 'firefox'
-  if (/Edg/.test(ua)) return 'edge'
-  if (/Chrome/.test(ua)) return 'chrome'
-  if (/Safari/.test(ua)) return 'safari'
-  return 'unknown'
-}
+// The user agent never changes for the lifetime of the page, so resolve both
+// once at module load rather than re-running the regexes on every log call.
+const PLATFORM = matchUserAgent(PLATFORMS, 'web')
+const BROWSER = matchUserAgent(BROWSERS, 'unknown')
 
 async function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -125,7 +126,7 @@ export class Logger<
     context?: Record<string, unknown>,
     attachments?: Record<string, Blob | File | string>,
   ): void {
-    const error = raw instanceof Error ? raw : new Error(String(raw))
+    const error = toError(raw)
     const screen = getCurrentScreen()
     const activity = getActiveActivity()
 
@@ -141,12 +142,14 @@ export class Logger<
       ...(labels as Record<string, string | undefined>),
     }
 
-    void this.send(error.message, 'ERROR', errorLabels, context, attachments, {
-      message: error.message,
-      stack: error.stack,
-      name: error.name,
-      cause: error.cause != null ? String(error.cause) : undefined,
-    })
+    void this.send(
+      error.message,
+      'ERROR',
+      errorLabels,
+      context,
+      attachments,
+      toErrorPayload(error),
+    )
   }
 
   info(
@@ -182,7 +185,7 @@ export class Logger<
     labels?: Record<string, string | undefined>,
     context?: Record<string, unknown>,
     attachments?: Record<string, Blob | File | string>,
-    error?: NonNullable<LogPayload['jsonPayload']>['error'],
+    error?: ErrorPayload,
   ): Promise<void> {
     if (SEVERITY_ORDER[severity] > this.minLevel) return
 
@@ -197,8 +200,8 @@ export class Logger<
         releaseId: this.config.releaseId,
         screen: getCurrentScreen(),
         userId: this.userId,
-        platform: getPlatform(),
-        browser: getBrowser(),
+        platform: PLATFORM,
+        browser: BROWSER,
         ...this.userLabels,
         ...labels,
       }

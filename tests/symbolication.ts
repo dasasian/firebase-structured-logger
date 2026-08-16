@@ -20,13 +20,18 @@ if (process.env.FUNCTIONS_EMULATOR !== 'true') {
 process.env.GOOGLE_APPLICATION_CREDENTIALS = './service-account.json'
 
 import { initializeApp } from 'firebase-admin/app'
-import { parseStackTrace, symbolicate, formatStackTrace } from '../src/functions/symbolicate.js'
+import {
+  parseStackTrace,
+  symbolicate,
+  symbolicateStackTrace,
+  formatStackTrace,
+} from '../src/functions/symbolicate.js'
 import { getSourceMap, clearSourceMapCache } from '../src/functions/sourceMapCache.js'
 import { createClientLogHandler } from '../src/functions/logHandler.js'
 import { initLogger } from '../src/functions/logger.js'
 import type { LogPayload } from '../src/shared/types.js'
 import type { EncodedSourceMap } from '@jridgewell/trace-mapping'
-import type { CallableRequest } from 'firebase-functions/v2/https'
+import { assert, reportResults, readLastEntry, clearLog, makeRequest } from './testHelpers.js'
 
 initializeApp({ projectId: 'acme-app-12345' })
 
@@ -61,37 +66,6 @@ function cleanup() {
   if (fs.existsSync(mapFile)) fs.unlinkSync(mapFile)
   fs.rmSync(LOG_DIR, { recursive: true, force: true })
   clearSourceMapCache()
-}
-
-function readLastEntry(): Record<string, unknown> | undefined {
-  const logFile = path.join(LOG_DIR, 'dev.jsonl')
-  if (!fs.existsSync(logFile)) return undefined
-  const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n').filter(Boolean)
-  return lines.length ? JSON.parse(lines[lines.length - 1]) : undefined
-}
-
-function clearLog() {
-  const f = path.join(LOG_DIR, 'dev.jsonl')
-  if (fs.existsSync(f)) fs.writeFileSync(f, '')
-}
-
-function makeRequest(data: LogPayload): CallableRequest<LogPayload> {
-  return { data, auth: undefined, rawRequest: {} } as any
-}
-
-// --- Assertion helpers ---
-
-let passed = 0
-let failed = 0
-
-function assert(name: string, condition: boolean, detail?: string) {
-  if (condition) {
-    console.log(`  ✓ ${name}`)
-    passed++
-  } else {
-    console.error(`  ✗ ${name}${detail ? ': ' + detail : ''}`)
-    failed++
-  }
 }
 
 // --- Tests ---
@@ -168,12 +142,8 @@ async function testSymbolicationPipelineWithEmbeddedSourceMap() {
   const sourceMap = await getSourceMap('test-release', BUNDLE_NAME)
   assert('embedded source map loaded', !!sourceMap)
 
-  const symbolicated = frames.map(frame => {
-    if (!frame.lineNumber || !frame.columnNumber || !sourceMap) return frame
-    const result = symbolicate(sourceMap, frame.lineNumber, frame.columnNumber)
-    if (!result) return frame
-    return { ...frame, fileName: result.source, lineNumber: result.line, columnNumber: result.column, functionName: result.name ?? frame.functionName }
-  })
+  // One map covers this whole stack, so the resolver ignores the frame.
+  const symbolicated = symbolicateStackTrace(frames, () => sourceMap)
 
   const formatted = formatStackTrace(symbolicated)
   assert('stack no longer contains bundle URL', !formatted.includes(BUNDLE_NAME), `got: ${formatted}`)
@@ -184,10 +154,67 @@ async function testSymbolicationPipelineWithEmbeddedSourceMap() {
   console.log('\n  Symbolicated stack:\n' + formatted.split('\n').map(l => '    ' + l).join('\n'))
 }
 
+function testMultiBundleSymbolication() {
+  console.log('\nTest: symbolicateStackTrace — one stack spanning two bundles')
+
+  // Same mappings, different source file, so each frame proves which map was used.
+  const VENDOR_BUNDLE = 'vendor-TEST5678.js'
+  const VENDOR_SOURCE_MAP: EncodedSourceMap = {
+    ...TEST_SOURCE_MAP,
+    sources: ['../../src/vendor/thirdParty.ts'],
+  }
+
+  const maps = new Map<string, EncodedSourceMap>([
+    [BUNDLE_NAME, TEST_SOURCE_MAP],
+    [VENDOR_BUNDLE, VENDOR_SOURCE_MAP],
+  ])
+
+  const stack = [
+    `duplicate@https://acme.example.com/assets/${BUNDLE_NAME}:1:4`,
+    `handleCreate@https://acme.example.com/assets/${VENDOR_BUNDLE}:1:20`,
+    // A frame from a bundle we have no map for must survive untouched.
+    `mystery@https://acme.example.com/assets/unknown-TEST0000.js:1:4`,
+  ].join('\n')
+
+  const frames = parseStackTrace(stack)
+  assert('parsed 3 frames', frames.length === 3)
+
+  const symbolicated = symbolicateStackTrace(frames, (frame) => {
+    const bundle = frame.fileName?.match(/\/([^/]+\.js)(?:[?#].*)?$/)?.[1]
+    return bundle ? maps.get(bundle) : null
+  })
+
+  const formatted = formatStackTrace(symbolicated)
+
+  assert(
+    'frame 1 resolved through the app bundle map',
+    symbolicated[0].fileName === '../../src/services/catalogProducts.ts',
+    `got: ${symbolicated[0].fileName}`,
+  )
+  assert(
+    'frame 2 resolved through the vendor bundle map',
+    symbolicated[1].fileName === '../../src/vendor/thirdParty.ts',
+    `got: ${symbolicated[1].fileName}`,
+  )
+  assert(
+    'frame 2 kept its own line number',
+    symbolicated[1].lineNumber === 25,
+    `got: ${symbolicated[1].lineNumber}`,
+  )
+  assert(
+    'frame 3 left untouched (no source map for that bundle)',
+    symbolicated[2].fileName === 'https://acme.example.com/assets/unknown-TEST0000.js',
+    `got: ${symbolicated[2].fileName}`,
+  )
+  assert('both mapped bundle URLs are gone', !formatted.includes(BUNDLE_NAME) && !formatted.includes(VENDOR_BUNDLE), `got: ${formatted}`)
+
+  console.log('\n  Multi-bundle stack:\n' + formatted.split('\n').map(l => '    ' + l).join('\n'))
+}
+
 async function testHandlerEmulatorSkipsSymbolication() {
   console.log('\nTest: handler in emulator mode skips symbolication (by design)')
   writeTestSourceMap()
-  clearLog()
+  clearLog(LOG_DIR)
   clearSourceMapCache()
 
   const handler = createClientLogHandler({})
@@ -200,7 +227,7 @@ async function testHandlerEmulatorSkipsSymbolication() {
     jsonPayload: { error: { message: 'Test', name: 'Error', stack: minifiedStack } },
   }))
 
-  const stack = (readLastEntry()?.jsonPayload as any)?.error?.stack
+  const stack = (readLastEntry(LOG_DIR)?.jsonPayload as any)?.error?.stack
   assert('stack preserved as-is (symbolication skipped in emulator)', stack === minifiedStack, `got: ${stack}`)
 }
 
@@ -213,13 +240,11 @@ async function run() {
   testSymbolicateNoMatch()
   testFormatStackTrace()
   await testSymbolicationPipelineWithEmbeddedSourceMap()
+  testMultiBundleSymbolication()
   await testHandlerEmulatorSkipsSymbolication()
 
-  console.log(`\n${'─'.repeat(40)}`)
-  console.log(`Results: ${passed} passed, ${failed} failed`)
-
   cleanup()
-  if (failed > 0) process.exit(1)
+  reportResults()
 }
 
 run().catch(err => {

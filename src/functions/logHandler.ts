@@ -1,10 +1,11 @@
 import { onCall, HttpsError, type CallableRequest } from 'firebase-functions/v2/https'
-import type { LogPayload } from '../shared/types'
-import { writeLog } from './logger'
+import type { LogPayload, ErrorPayload } from '../shared/types'
+import { SEVERITIES } from '../shared/severity'
+import { writeLog, cleanLabels } from './logger'
 import { configureSourceMapBucket, getSourceMap } from './sourceMapCache'
 import {
   parseStackTrace,
-  symbolicate,
+  symbolicateStackTrace,
   formatStackTrace,
 } from './symbolicate'
 
@@ -14,14 +15,7 @@ export interface ClientLogHandlerConfig {
   maxInstances?: number
 }
 
-const VALID_SEVERITIES = new Set(['ERROR', 'WARNING', 'INFO', 'DEBUG'])
-
-interface ErrorPayload {
-  message: string
-  stack?: string
-  name?: string
-  cause?: string
-}
+const VALID_SEVERITIES = new Set<string>(SEVERITIES)
 
 /**
  * Extract the bundle filename (e.g. "index-DnZ05f3M.js") from a frame URL.
@@ -67,21 +61,9 @@ async function symbolicateError(
     if (sourceMaps.size === 0) return error
 
     // Symbolicate each frame with its bundle's source map
-    const symbolicated = frames.map((frame) => {
-      if (!frame.fileName || !frame.lineNumber || !frame.columnNumber) return frame
-      const bundle = bundleFileFromUrl(frame.fileName)
-      if (!bundle) return frame
-      const sourceMap = sourceMaps.get(bundle)
-      if (!sourceMap) return frame
-      const result = symbolicate(sourceMap, frame.lineNumber, frame.columnNumber)
-      if (!result) return frame
-      return {
-        ...frame,
-        fileName: result.source,
-        lineNumber: result.line,
-        columnNumber: result.column,
-        functionName: result.name ?? frame.functionName,
-      }
+    const symbolicated = symbolicateStackTrace(frames, (frame) => {
+      const bundle = frame.fileName && bundleFileFromUrl(frame.fileName)
+      return bundle ? sourceMaps.get(bundle) : null
     })
 
     return { ...error, stack: formatStackTrace(symbolicated) }
@@ -90,22 +72,6 @@ async function symbolicateError(
   }
 
   return error
-}
-
-/**
- * Strip null/undefined labels and convert all values to strings for Cloud Logging.
- */
-function cleanLabels(
-  labels: LogPayload['labels'] | undefined,
-): Record<string, string> {
-  if (!labels) return {}
-  const cleaned: Record<string, string> = {}
-  for (const [key, value] of Object.entries(labels)) {
-    if (value !== null && value !== undefined) {
-      cleaned[key] = String(value)
-    }
-  }
-  return cleaned
 }
 
 /**

@@ -10,7 +10,6 @@
  */
 
 import fs from 'fs'
-import path from 'path'
 
 if (process.env.FUNCTIONS_EMULATOR !== 'true') {
   console.error('Run with: FUNCTIONS_EMULATOR=true npx tsx test-handler.ts')
@@ -25,7 +24,7 @@ import { initializeApp } from 'firebase-admin/app'
 import { createClientLogHandler } from '../src/functions/logHandler.js'
 import { initLogger } from '../src/functions/logger.js'
 import type { LogPayload } from '../src/shared/types.js'
-import type { CallableRequest } from 'firebase-functions/v2/https'
+import { assert, reportResults, readLastEntry, clearLog, makeRequest } from './testHelpers.js'
 
 // Init Firebase Admin (needed by writeLog for storage attachments etc.)
 initializeApp({ projectId: 'acme-app-12345' })
@@ -34,45 +33,13 @@ initializeApp({ projectId: 'acme-app-12345' })
 fs.mkdirSync(LOG_DIR, { recursive: true })
 initLogger({ appId: 'acme', logLocalDir: LOG_DIR })
 
-// --- Assertion helpers ---
-
-let passed = 0
-let failed = 0
-
-function assert(name: string, condition: boolean, detail?: string) {
-  if (condition) {
-    console.log(`  ✓ ${name}`)
-    passed++
-  } else {
-    console.error(`  ✗ ${name}${detail ? ': ' + detail : ''}`)
-    failed++
-  }
-}
-
-function readLastEntry(): Record<string, unknown> | undefined {
-  const logFile = path.join(LOG_DIR, 'dev.jsonl')
-  if (!fs.existsSync(logFile)) return undefined
-  const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n').filter(Boolean)
-  if (lines.length === 0) return undefined
-  return JSON.parse(lines[lines.length - 1])
-}
-
-function clearLog() {
-  const logFile = path.join(LOG_DIR, 'dev.jsonl')
-  if (fs.existsSync(logFile)) fs.writeFileSync(logFile, '')
-}
-
-function makeRequest(data: LogPayload): CallableRequest<LogPayload> {
-  return { data, auth: undefined, rawRequest: {} } as any
-}
-
 const handler = createClientLogHandler({})
 
 // --- Tests ---
 
 async function testErrorPayloadStructure() {
   console.log('\nTest: error payload — error separate from context, no duplicate')
-  clearLog()
+  clearLog(LOG_DIR)
 
   await handler(makeRequest({
     message: 'DUPLICATE_PRODUCT:test123',
@@ -101,7 +68,7 @@ async function testErrorPayloadStructure() {
     },
   }))
 
-  const entry = readLastEntry()
+  const entry = readLastEntry(LOG_DIR)
   assert('entry was written', !!entry)
 
   const jp = entry?.jsonPayload as any
@@ -120,43 +87,9 @@ async function testErrorPayloadStructure() {
   console.log(JSON.stringify(entry, null, 2))
 }
 
-async function testSymbolicatedStack() {
-  console.log('\nTest: minified stack gets symbolicated (if source map available)')
-  clearLog()
-
-  await handler(makeRequest({
-    message: 'Test error with minified stack',
-    severity: 'ERROR',
-    labels: {
-      appId: 'acme',
-      releaseId: 'faeb9a9',  // real release ID with source maps in GCS
-      errorType: 'Error',
-    },
-    jsonPayload: {
-      error: {
-        message: 'Test error with minified stack',
-        name: 'Error',
-        stack: 'ir@https://acme.example.com/assets/index-DmZHAO2r.js:19:21992',
-      },
-    },
-  }))
-
-  const entry = readLastEntry()
-  const jp = entry?.jsonPayload as any
-  const stack = jp?.error?.stack as string | undefined
-
-  assert('error.stack is set', !!stack)
-  if (stack?.includes('acme.example.com/assets')) {
-    console.log('  ~ stack not symbolicated (source map unavailable — expected in local env)')
-  } else {
-    assert('stack is symbolicated (no bundle URL)', !stack?.includes('acme.example.com/assets'))
-    console.log('  ~ symbolicated stack:', stack)
-  }
-}
-
 async function testInvalidPayloadRejected() {
   console.log('\nTest: invalid payload throws HttpsError')
-  clearLog()
+  clearLog(LOG_DIR)
 
   let threw = false
   try {
@@ -172,16 +105,12 @@ async function testInvalidPayloadRejected() {
 
 async function run() {
   await testErrorPayloadStructure()
-  await testSymbolicatedStack()
   await testInvalidPayloadRejected()
-
-  console.log(`\n${'─'.repeat(40)}`)
-  console.log(`Results: ${passed} passed, ${failed} failed`)
 
   // Cleanup
   fs.rmSync(LOG_DIR, { recursive: true, force: true })
 
-  if (failed > 0) process.exit(1)
+  reportResults()
 }
 
 run().catch(err => {

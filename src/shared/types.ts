@@ -12,6 +12,13 @@ export interface BaseLabels {
   activity?: string
 }
 
+export interface ErrorPayload {
+  message: string
+  stack?: string
+  name?: string
+  cause?: string
+}
+
 export interface LogPayload {
   message: string
   severity: LogSeverity
@@ -19,12 +26,7 @@ export interface LogPayload {
   jsonPayload?: {
     breadcrumbs?: BreadcrumbEntry[]
     context?: Record<string, unknown>
-    error?: {
-      message: string
-      stack?: string
-      name?: string
-      cause?: string
-    }
+    error?: ErrorPayload
   }
   /** Base64-encoded attachments keyed by name. Uploaded to GCS, stripped before writing to Cloud Logging. */
   attachments?: Record<string, string>

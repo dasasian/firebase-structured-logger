@@ -1,0 +1,26 @@
+version: 2
+
+# Grouped and monthly on purpose: a weekly stream of single-package PRs is the
+# version people train themselves to ignore. Security advisories are raised
+# immediately regardless of this schedule.
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      npm:
+        patterns:
+          - "*"
+
+  # These workflows publish to npm, so a stale action here is a supply-chain
+  # concern rather than a convenience one.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    groups:
+      github-actions:
+        patterns:
+          - "*"

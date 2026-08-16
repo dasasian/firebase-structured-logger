@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'async_hooks'
 import type { CallableRequest } from 'firebase-functions/v2/https'
-import { createLogWriter, type LogWriter } from './logger'
+import { createLogWriter, cleanLabels, type LogWriter } from './logger'
 
 const storage = new AsyncLocalStorage<LogWriter>()
 
@@ -26,19 +26,14 @@ export function initRequestLogger<
   request: CallableRequest,
   extra?: { functionName?: string; appId?: string; labels?: Partial<AppLabels> },
 ): LogWriter {
-  const labels: Record<string, string | undefined> = {
-    functionName: extra?.functionName,
-    userId: request.auth?.uid,
-    appId: extra?.appId,
-    ...extra?.labels,
-  }
-
-  // Remove undefined values
-  const cleanLabels = Object.fromEntries(
-    Object.entries(labels).filter(([, v]) => v !== undefined),
-  ) as Record<string, string>
-
-  const writer = createLogWriter(cleanLabels)
+  const writer = createLogWriter(
+    cleanLabels({
+      functionName: extra?.functionName,
+      userId: request.auth?.uid,
+      appId: extra?.appId,
+      ...extra?.labels,
+    }),
+  )
   storage.enterWith(writer)
   return writer
 }

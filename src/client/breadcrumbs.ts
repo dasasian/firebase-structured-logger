@@ -29,11 +29,16 @@ export function addBreadcrumb(
   name: string,
   data?: Record<string, unknown>,
 ): void {
-  const entry: BreadcrumbEntry = { timestamp: Date.now(), type, name, data }
+  const now = Date.now()
+  const entry: BreadcrumbEntry = { timestamp: now, type, name, data }
   breadcrumbs.push(entry)
 
-  const cutoff = Date.now() - MAX_AGE_MS
-  breadcrumbs = breadcrumbs.filter((bc) => bc.timestamp > cutoff)
+  // Entries are appended in timestamp order, so only rebuild the array when the
+  // oldest one has actually aged out — otherwise there is nothing to drop.
+  const cutoff = now - MAX_AGE_MS
+  if (breadcrumbs[0].timestamp <= cutoff) {
+    breadcrumbs = breadcrumbs.filter((bc) => bc.timestamp > cutoff)
+  }
 
   if (breadcrumbs.length > MAX_BREADCRUMBS) {
     breadcrumbs = breadcrumbs.slice(breadcrumbs.length - MAX_BREADCRUMBS)

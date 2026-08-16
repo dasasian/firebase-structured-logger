@@ -40,6 +40,13 @@ function saveState(state: RateLimitState): void {
   }
 }
 
+/** Read-modify-write the persisted state in one round-trip. */
+function mutateState(mutate: (state: RateLimitState) => void): void {
+  const state = getState()
+  mutate(state)
+  saveState(state)
+}
+
 function getErrorSignature(
   error: Error | string,
   screen: string | undefined,
@@ -72,9 +79,9 @@ export function canLogError(
 }
 
 export function recordLog(): void {
-  const state = getState()
-  state.logCount++
-  saveState(state)
+  mutateState((state) => {
+    state.logCount++
+  })
 }
 
 export function recordError(
@@ -82,11 +89,11 @@ export function recordError(
   screen?: string,
   activity?: string,
 ): void {
-  const state = getState()
   const sig = getErrorSignature(error, screen, activity)
-  state.errorSignatures[sig] = (state.errorSignatures[sig] ?? 0) + 1
-  state.logCount++
-  saveState(state)
+  mutateState((state) => {
+    state.errorSignatures[sig] = (state.errorSignatures[sig] ?? 0) + 1
+    state.logCount++
+  })
 }
 
 export function resetRateLimiter(): void {

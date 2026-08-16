@@ -1,6 +1,6 @@
 {
   "name": "@dasasian/firebase-structured-logger",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Structured logging for Firebase apps — client, functions, and tools",
   "license": "MIT",
   "author": "Dasasian",
@@ -65,7 +65,7 @@
     "build:watch": "tsc --watch",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
-    "test": "tsx tests/logger.ts && FUNCTIONS_EMULATOR=true tsx tests/handler.ts && FUNCTIONS_EMULATOR=true tsx tests/symbolication.ts",
+    "test": "tsx tests/logger.ts && tsx tests/breadcrumbs.ts && tsx tests/rateLimiter.ts && tsx tests/errorHandler.ts && FUNCTIONS_EMULATOR=true tsx tests/errorPayload.ts && FUNCTIONS_EMULATOR=true tsx tests/requestLogger.ts && FUNCTIONS_EMULATOR=true tsx tests/handler.ts && FUNCTIONS_EMULATOR=true tsx tests/symbolication.ts",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

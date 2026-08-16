@@ -39,3 +39,6 @@ npm-debug.log*
 # Testing
 coverage/
 .nyc_output/
+# Throwaway log dirs the emulator-mode suites write to (removed on a clean run,
+# left behind when a suite fails part-way)
+test-*-output/

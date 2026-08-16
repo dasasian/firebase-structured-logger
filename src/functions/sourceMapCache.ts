@@ -6,20 +6,35 @@ import type { EncodedSourceMap } from '@jridgewell/trace-mapping'
 // In-memory cache: cacheKey → EncodedSourceMap | null (null = confirmed not found)
 const cache = new Map<string, EncodedSourceMap | null>()
 
+// Separate cache for the embedded (current release) maps, keyed by bundle filename.
+const embeddedCache = new Map<string, EncodedSourceMap | null>()
+
 let configuredBucket: string | undefined
 
 export function configureSourceMapBucket(bucketName: string): void {
   configuredBucket = bucketName
 }
 
-export function getConfiguredBucket(): string | undefined {
-  return configuredBucket
+/** Resolve the configured Storage bucket, falling back to the project default. */
+export function getBucket(bucketName = configuredBucket) {
+  return bucketName ? getStorage().bucket(bucketName) : getStorage().bucket()
 }
 
 /**
  * Load source map from embedded current release directory (instant for current release).
+ * Result is memoised — this sits on the per-error hot path and the embedded maps
+ * cannot change while the instance is alive.
  */
 function loadEmbeddedSourceMap(fileName: string): EncodedSourceMap | null {
+  const cached = embeddedCache.get(fileName)
+  if (cached !== undefined) return cached
+
+  const sourceMap = readEmbeddedSourceMap(fileName)
+  embeddedCache.set(fileName, sourceMap)
+  return sourceMap
+}
+
+function readEmbeddedSourceMap(fileName: string): EncodedSourceMap | null {
   try {
     // Looks for sourcemaps/current/{fileName}.map relative to the Cloud Function working directory
     const mapPath = path.join(process.cwd(), 'sourcemaps', 'current', `${fileName}.map`)
@@ -41,10 +56,7 @@ async function loadStorageSourceMap(
   if (cache.has(cacheKey)) return cache.get(cacheKey) ?? null
 
   try {
-    const bucket = configuredBucket
-      ? getStorage().bucket(configuredBucket)
-      : getStorage().bucket()
-    const file = bucket.file(`sourcemaps/${releaseId}/${fileName}.map`)
+    const file = getBucket().file(`sourcemaps/${releaseId}/${fileName}.map`)
     const [exists] = await file.exists()
 
     if (!exists) {
@@ -77,4 +89,5 @@ export async function getSourceMap(
 
 export function clearSourceMapCache(): void {
   cache.clear()
+  embeddedCache.clear()
 }
