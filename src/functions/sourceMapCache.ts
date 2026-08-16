@@ -1,6 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { getStorage } from 'firebase-admin/storage'
+import type { Bucket } from '@google-cloud/storage'
 import type { EncodedSourceMap } from '@jridgewell/trace-mapping'
 
 // In-memory cache: cacheKey → EncodedSourceMap | null (null = confirmed not found)
@@ -15,8 +16,14 @@ export function configureSourceMapBucket(bucketName: string): void {
   configuredBucket = bucketName
 }
 
-/** Resolve the configured Storage bucket, falling back to the project default. */
-export function getBucket(bucketName = configuredBucket) {
+/**
+ * Resolve the configured Storage bucket, falling back to the project default.
+ *
+ * The return type is spelled out rather than inferred: without it the emitted
+ * `.d.ts` would need to name `Bucket` from a path inside `node_modules`, which
+ * TypeScript 7 rejects as non-portable (TS2883).
+ */
+export function getBucket(bucketName = configuredBucket): Bucket {
   return bucketName ? getStorage().bucket(bucketName) : getStorage().bucket()
 }
 

@@ -13,6 +13,13 @@ updates:
       npm:
         patterns:
           - "*"
+    ignore:
+      # TypeScript 7 is the native compiler rewrite, not a routine bump: it drops
+      # moduleResolution=node10 and tightens declaration emit. Grouped updates are
+      # all-or-nothing, so leaving it in here blocks every other package behind a
+      # migration. Tracked in #6 — remove this rule when that lands.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
 
   # These workflows publish to npm, so a stale action here is a supply-chain
   # concern rather than a convenience one.
