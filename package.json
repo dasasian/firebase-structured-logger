@@ -15,7 +15,7 @@
     "observability",
     "typescript"
   ],
-  "homepage": "https://github.com/dasasian/firebase-structured-logger#readme",
+  "homepage": "https://dasasian.com/firebase-structured-logger",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/dasasian/firebase-structured-logger.git"
