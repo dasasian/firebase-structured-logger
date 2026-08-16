@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 430" role="img" aria-label="firebase-structured-logger — structured logging for Firebase apps">
+  <style>
+    .bg { fill: #f5f7fa; }
+    .brand { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 23px; font-weight: 600; fill: #15181e; }
+    .brand-accent { fill: #235a9b; }
+    .kind { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; letter-spacing: 3px; fill: #79828f; }
+    .rule { stroke: #dbe1ea; }
+    .margin { stroke: #235a9b; }
+    .h { font-family: Georgia, "Times New Roman", serif; font-weight: 700; font-size: 74px; fill: #15181e; letter-spacing: -1px; }
+    .h-accent { fill: #235a9b; }
+    .sub { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 21px; fill: #4b5462; }
+    .cap { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 15px; fill: #79828f; font-style: italic; }
+    .lbl { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; letter-spacing: 2px; fill: #79828f; }
+    .pill-min-bg { fill: #eef1f6; stroke: #cfd6e0; }
+    .pill-src-bg { fill: #e4f2ea; stroke: #1b7a46; }
+    .pill-min { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 16px; fill: #79828f; }
+    .pill-src { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 16px; font-weight: 600; fill: #1b7a46; }
+    .arrow { fill: #79828f; font-size: 20px; font-family: system-ui, sans-serif; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #101318; }
+      .brand { fill: #e8ecf2; } .brand-accent { fill: #74a6e2; }
+      .kind, .cap, .lbl { fill: #6b7480; }
+      .rule { stroke: #2a313b; } .margin { stroke: #74a6e2; }
+      .h { fill: #e8ecf2; } .h-accent { fill: #74a6e2; }
+      .sub { fill: #9aa4b2; }
+      .pill-min-bg { fill: #1e232b; stroke: #333c48; }
+      .pill-src-bg { fill: #16261e; stroke: #55b585; }
+      .pill-min { fill: #9aa4b2; }
+      .pill-src { fill: #55b585; }
+      .arrow { fill: #6b7480; }
+    }
+  </style>
+
+  <rect class="bg" x="0" y="0" width="1280" height="430"/>
+  <line class="margin" x1="72" y1="50" x2="72" y2="380" stroke-width="2" opacity="0.5"/>
+
+  <!-- masthead -->
+  <text class="brand" x="104" y="72">@dasasian/<tspan class="brand-accent">firebase-structured-logger</tspan></text>
+  <text class="kind" x="1208" y="70" text-anchor="end">TYPESCRIPT&#160;LIBRARY</text>
+  <line class="rule" x1="104" y1="94" x2="1208" y2="94" stroke-width="1"/>
+
+  <!-- headline -->
+  <text class="h" x="102" y="204">Structured logging</text>
+  <text class="h" x="102" y="288">for <tspan class="h-accent">Firebase apps</tspan>.</text>
+
+  <!-- subtitle -->
+  <text class="sub" x="104" y="338">Client → Cloud Function → Cloud Logging, with stack traces resolved back to your source.</text>
+
+  <!-- symbolication motif: the signature capability -->
+  <text class="lbl" x="104" y="384">STACK TRACE</text>
+  <g transform="translate(230, 366)">
+    <rect class="pill-min-bg" x="0" y="0" width="196" height="30" rx="7" stroke-width="1.5"/>
+    <text class="pill-min" x="13" y="20">app-4f2a.js:1:98432</text>
+    <text class="arrow" x="210" y="21">→</text>
+    <rect class="pill-src-bg" x="240" y="0" width="168" height="30" rx="7" stroke-width="1.5"/>
+    <text class="pill-src" x="253" y="20">Camera.tsx:42:11</text>
+  </g>
+  <text class="cap" x="104" y="416">Minified frontend errors resolved to source, and stored as queryable structured entries.</text>
+</svg>

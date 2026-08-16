@@ -1,95 +1,43 @@
-# firebase-structured-logger
+<p align="center">
+  <img src="https://raw.githubusercontent.com/dasasian/firebase-structured-logger/main/assets/hero.svg" alt="firebase-structured-logger — structured logging for Firebase apps" width="900">
+</p>
 
-Structured logging for Firebase apps — client, functions, and tools.
+<p align="center">
+  <a href="https://www.npmjs.com/package/@dasasian/firebase-structured-logger"><img alt="npm" src="https://img.shields.io/npm/v/@dasasian/firebase-structured-logger?style=flat-square&color=235a9b"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-235a9b?style=flat-square"></a>
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square">
+  <img alt="Node 18+" src="https://img.shields.io/badge/node-18%2B-5fa04e?style=flat-square">
+</p>
 
-Sends frontend logs to a Cloud Function, symbolicates stack traces, and writes structured entries to Google Cloud Logging — queryable with standard Cloud Logging tools.
+# @dasasian/firebase-structured-logger
 
----
+One logging pipeline for a Firebase app, from the browser to Google Cloud Logging: frontend events go to a Cloud Function, production stack traces are **symbolicated** against your source maps, and everything is written as **structured, queryable entries**. Ships a client logger, a Cloud Functions logger, and an `fsl` CLI.
 
-## Add to your project
+## Why
 
-Copy this prompt into Claude Code:
+- **Symbolicated frontend errors** — minified production traces resolve back to `File.tsx:line:col` using source maps you upload at deploy time. No more chasing `app-4f2a.js:1:98432`.
+- **Structured entries** — severity, labels, user / session / screen context, breadcrumbs, and file attachments, all queryable in Cloud Logging.
+- **One API across surfaces** — the same `logger.info/warning/error/debug` shape on the client and in Cloud Functions.
+- **Local dev loop** — the Functions emulator writes JSONL you can `tail` or query without deploying — and query from Claude with the companion [**firebase-mcp-server**](https://github.com/dasasian/firebase-mcp-server).
 
-```
-Set up firebase-structured-logger in this project.
-Ask me for the path to the firebase-structured-logger directory before proceeding.
-```
+## Install
 
----
-
-## Manual setup
-
-### Prerequisites
-
-Before starting, confirm:
-
-- [ ] A `functions/` directory exists with `package.json`, `tsconfig.json`, and `src/index.ts`
-- [ ] `firebase.json` has a `"functions"` entry pointing to that directory
-- [ ] Your frontend build tool is Vite (the deploy script and source map tooling assume Vite)
-- [ ] Firebase Storage is enabled in your project (required for source map uploads) — enable it in the Firebase console under **Storage → Get started**
-
-**If you don't have Cloud Functions yet**, initialise them first:
 ```bash
-firebase init functions
-```
-Then choose TypeScript and accept the defaults. This creates `functions/`, `firebase.json` entries, and `functions/tsconfig.json`.
+# frontend (project root)
+npm install @dasasian/firebase-structured-logger
 
----
-
-### 1. Add dependencies
-
-**Root `package.json`** (frontend):
-```json
-"firebase-structured-logger": "file:../firebase-structured-logger"
+# Cloud Functions
+cd functions && npm install @dasasian/firebase-structured-logger
 ```
 
-**`functions/package.json`** (Cloud Functions):
-```json
-"firebase-structured-logger": "file:../../firebase-structured-logger"
-```
+Ships ESM with three entry points — `/client`, `/functions`, `/tools` — plus the `fsl` CLI. `firebase`, `firebase-admin`, and `firebase-functions` are optional peer dependencies (bring your own versions).
 
-Run `npm install` in both.
+## Quick start
 
----
-
-### 2. Add to `.gitignore`
-
-```
-functions/vendor/
-functions/logs/*.jsonl
-```
-
-The `vendor/` directory holds the deploy-time tgz — it should not be committed. The `logs/` directory holds local JSONL log files from the emulator — the directory should be tracked but not the log files.
-
-Create the log directory so git tracks it:
-```bash
-mkdir -p functions/logs && touch functions/logs/.gitkeep
-```
-
----
-
-### 3. Wire deploy scripts
-
-Merge the following into your existing deploy scripts in the root `package.json` — don't replace them wholesale, keep any existing flags like `--project`:
-
-```json
-"deploy": "export VITE_RELEASE_ID=$(git rev-parse --short HEAD) && npm run build && npx fsl upload-sourcemaps --functions=./functions --embed-sourcemaps && npx fsl pack --functions=./functions && firebase deploy",
-"postdeploy": "npx fsl pack-restore --functions=./functions"
-```
-
-`fsl upload-sourcemaps` reads the bucket name from `VITE_FIREBASE_STORAGE_BUCKET` (or `FIREBASE_STORAGE_BUCKET`) after loading `.env.local`. It uploads source maps to Cloud Storage, embeds a copy in `functions/sourcemaps/current/` for fast lookup, and deletes them from `dist/` so they are not deployed to hosting.
-
-`fsl pack` builds and packs the package into `functions/vendor/`, patches `functions/package.json`
-to reference it, and runs `npm install`. `fsl pack-restore` undoes this after deploy.
-
----
-
-### 4. Initialise the client logger
-
-The best place for this is your app's entry point — typically `src/main.tsx`, `src/main.ts`, or wherever you initialise Firebase. It must run before any logging calls.
+**1. Initialize the client** — at your app entry (e.g. `src/main.tsx`), before any logging:
 
 ```ts
-import { initLogger, setupGlobalErrorHandler } from 'firebase-structured-logger/client'
+import { initLogger, setupGlobalErrorHandler } from '@dasasian/firebase-structured-logger/client'
 import { httpsCallable } from 'firebase/functions'
 import { functions } from './config/firebase'
 
@@ -99,100 +47,108 @@ export const logger = initLogger({
   logFunction: httpsCallable(functions, 'logFrontendEvent'),
 })
 
-setupGlobalErrorHandler()
+setupGlobalErrorHandler() // capture uncaught errors + unhandled rejections
 ```
 
-**`VITE_RELEASE_ID`** — required for symbolicated stack traces in production. Used by both the client (to tag log entries) and `fsl upload-sourcemaps` (to store maps under the matching path). Must be the same value in both places.
+**2. Add the Cloud Function** — in `functions/src/index.ts`:
 
-The simplest approach — set it once in your deploy script and let both tools read it automatically:
-```json
-"deploy": "VITE_RELEASE_ID=$(git rev-parse --short HEAD) npm run build && npx fsl upload-sourcemaps ..."
+```ts
+import { initLogger, createClientLogFunction } from '@dasasian/firebase-structured-logger/functions'
+
+initLogger({ appId: 'my-app' })
+
+export const logFrontendEvent = createClientLogFunction({
+  bucketName: 'my-app.firebasestorage.app', // Storage bucket holding source maps
+})
 ```
-`fsl upload-sourcemaps` reads `VITE_RELEASE_ID` from the environment automatically (no `--release` flag needed).
 
-Locally, the client defaults to `'dev'` which is fine — source maps aren't uploaded during development so symbolication isn't needed.
+**3. Log** — anywhere in the frontend:
+
+```ts
+logger.info('checkout started', { orderId })
+logger.error(err, { screen: 'camera' }, context, { photo: blob }) // attachments optional
+```
+
+Debug logs are suppressed in production automatically. That's the happy path — the rest of this doc covers source-map symbolication, user context, the CLI, and the local emulator loop.
 
 ---
 
-### 5. Define app-specific labels
+## How it works
+
+```
+Browser  ──logFrontendEvent()──▶  Cloud Function  ──symbolicate──▶  Cloud Logging
+ (client)      httpsCallable          (functions)     (source maps)   (structured)
+```
+
+- The **client** batches structured events and calls your `logFrontendEvent` Cloud Function.
+- The **function** symbolicates any stack trace against source maps in Cloud Storage, then writes a structured entry (in production) or a local JSONL file (in the emulator).
+- You query the result in **Cloud Logging**, or locally from Claude via **[firebase-mcp-server](https://github.com/dasasian/firebase-mcp-server)** (`@dasasian/firebase-mcp-server`).
+
+## Full setup
+
+### Prerequisites
+
+- A `functions/` directory (`firebase init functions`, TypeScript) referenced by `firebase.json`.
+- **Firebase Storage enabled** (source maps are uploaded there): Firebase console → **Storage → Get started**.
+- A frontend build that emits source maps. The `fsl` source-map tooling assumes **Vite**.
+
+### 1. `.gitignore`
+
+```
+functions/logs/*.jsonl
+```
+
+The `logs/` directory holds local JSONL from the emulator — track the directory, not the files:
+
+```bash
+mkdir -p functions/logs && touch functions/logs/.gitkeep
+```
+
+### 2. Wire the deploy script
+
+Upload source maps (and strip them from the hosting bundle) as part of deploy. Merge into your root `package.json` scripts — keep any existing flags like `--project`:
+
+```json
+"deploy": "export VITE_RELEASE_ID=$(git rev-parse --short HEAD) && npm run build && npx fsl upload-sourcemaps --functions=./functions --embed-sourcemaps && firebase deploy"
+```
+
+`fsl upload-sourcemaps` reads the bucket from `VITE_FIREBASE_STORAGE_BUCKET` (or `FIREBASE_STORAGE_BUCKET`) after loading `.env.local`. It uploads source maps to Cloud Storage, embeds a copy in `functions/sourcemaps/current/` for fast lookup, and deletes them from `dist/` so they are **not** served to browsers.
+
+> **`VITE_RELEASE_ID`** ties a build to its source maps — the client tags every entry with it, and `upload-sourcemaps` stores maps under the matching path. Use the same value in both places (the deploy script above sets it once from the git SHA). Locally it defaults to `'dev'`, and no maps are uploaded — symbolication isn't needed in development.
+
+### 3. Typed labels + user context
 
 ```ts
 interface MyAppLabels {
   organizationId?: string
   itemId?: string
-  // add whatever domain entities are relevant
+  // whatever domain entities are relevant
 }
 
-export const logger = initLogger<MyAppLabels>({ ... })
+export const logger = initLogger<MyAppLabels>({ /* … */ })
+
+logger.setUser(uid, { /* app labels */ }) // on sign in
+logger.clearUser()                        // on sign out
+logger.setScreen('checkout')              // on navigation
 ```
 
----
+### 4. Run the emulator (local capture)
 
-### 6. Wire user context
-
-```ts
-// On sign in:
-logger.setUser(uid, { /* app-specific labels */ })
-
-// On sign out:
-logger.clearUser()
-
-// On navigation:
-logger.setScreen('screenName')
-```
-
----
-
-### 7. Add the Cloud Function
-
-In `functions/src/index.ts`:
-```ts
-import { initLogger, createClientLogFunction } from 'firebase-structured-logger/functions'
-
-initLogger({
-  appId: 'my-app',
-  logLocalDir: process.env.DEV_LOG_DIR ?? './logs',  // emulator only
-})
-
-export const logFrontendEvent = createClientLogFunction({
-  bucketName: 'my-firebase-app.firebasestorage.app',
-})
-```
-
----
-
-### 8. Add the emulator script
-
-Add a `serve` script to `functions/package.json` so you can run the functions emulator locally:
+Add a `serve` script to `functions/package.json`:
 
 ```json
-"scripts": {
-  "build": "tsc",
-  "build:watch": "tsc --watch",
-  "serve": "npm run build && firebase emulators:start --only functions"
-}
+"serve": "npm run build && firebase emulators:start --only functions"
 ```
 
-Run it from the `functions/` directory:
-```bash
-npm run serve
-```
-
-This is required for two things:
-- **Local log capture** — the emulator writes log entries to `DEV_LOG_DIR` (e.g. `functions/logs/dev.jsonl`) so you can inspect them without deploying
-- **firebase-mcp-server** — the MCP server reads from that same local JSONL file, letting Claude query your dev logs directly
-
-Without this, log events from your frontend won't be captured locally and the MCP server will have nothing to query.
-
----
+The emulator writes entries to `DEV_LOG_DIR` (e.g. `functions/logs/dev.jsonl`), so you can inspect logs without deploying — and point **[firebase-mcp-server](https://github.com/dasasian/firebase-mcp-server)** at that same file to query your dev logs from Claude.
 
 ## Client API
 
 ```ts
-logger.error(error: unknown, labels?, context?, attachments?: Record<string, Blob | File | string>)
-logger.info(message: string, labels?, context?, attachments?: Record<string, Blob | File | string>)
-logger.warning(message: string, labels?, context?, attachments?: Record<string, Blob | File | string>)
-logger.debug(message: string, labels?, context?, attachments?: Record<string, Blob | File | string>)
+logger.error(error, labels?, context?, attachments?)   // attachments: Record<string, Blob | File | string>
+logger.info(message, labels?, context?, attachments?)
+logger.warning(message, labels?, context?, attachments?)
+logger.debug(message, labels?, context?, attachments?) // suppressed in production
 
 logger.setUser(uid, extraLabels?)
 logger.clearUser()
@@ -200,77 +156,36 @@ logger.setScreen(screen)
 logger.addBreadcrumb(type, name, data?)
 ```
 
-Debug logs are suppressed in production automatically.
-
-### Asset uploads
-
-Pass attachments (images, file snapshots, captured data) to any log method to persist them alongside the log entry:
-
-```ts
-// Capture a photo blob, then if an error occurs:
-logger.error(err, { screen: 'camera' }, context, { photo: blob })
-```
-
-Attachments are uploaded to GCS at `logAttachments/{logId}/{name}` — the same `logId` appears in `labels.logId` on the log entry. Every log entry gets a `logId` regardless of whether attachments are present.
-
-**GCS lifecycle:** Add a lifecycle rule to your bucket to auto-delete attachments after 30 days:
-GCS Console → your bucket → Lifecycle → Add rule → Delete objects with prefix `logAttachments/` older than 30 days.
-
----
+**Attachments** (images, snapshots, captured data) upload to GCS at `logAttachments/{logId}/{name}`; the same `logId` is on the entry's `labels.logId`. Add a lifecycle rule to auto-delete `logAttachments/` after N days.
 
 ## Functions API
 
 ```ts
-import { initLogger, initRequestLogger, logError, logInfo } from 'firebase-structured-logger/functions'
+import { initLogger, initRequestLogger, logError, logInfo } from '@dasasian/firebase-structured-logger/functions'
 
-// At module load:
-initLogger({ appId: 'my-app' })
+initLogger({ appId: 'my-app' }) // at module load
 
-// At function entry — auto-seeds userId and functionName:
 export const myFunction = onCall(async (request) => {
-  initRequestLogger(request, { functionName: 'myFunction' })
+  initRequestLogger(request, { functionName: 'myFunction' }) // seeds userId + functionName
   logInfo('started')
 })
 ```
 
-Backend log methods also accept an optional `attachments` parameter (`Record<string, string | Buffer>`):
+Backend log methods also accept an optional `attachments` (`Record<string, string | Buffer>`).
 
-```ts
-logError(err, labels, context, { snapshot: buffer })
-```
-
----
-
-## CLI reference
+## CLI (`fsl`)
 
 ```bash
-# Build + pack for deployment (run before firebase deploy)
-npx fsl pack --functions=./functions
-
-# Restore package.json after deploy
-npx fsl pack-restore --functions=./functions
-
-# Upload source maps to Cloud Storage and delete local .map files
-# Reads bucket from VITE_FIREBASE_STORAGE_BUCKET env var (.env.local loaded automatically)
-# Release ID: --release > RELEASE_ID > VITE_RELEASE_ID (from .env.local) — required, no fallback
-# Authenticates via FIREBASE_SERVICE_ACCOUNT_PATH if set, otherwise uses ADC
+# Upload source maps to Cloud Storage and strip local .map files (run in deploy)
 npx fsl upload-sourcemaps [--bucket=<name>] [--functions=<path>] [--embed-sourcemaps] [--release=<id>]
 
-# Install skills into current project
+# Install the Claude Code skills into the current project (or --global, --force)
 npx fsl install-skills
-
-# Install skills globally
-npx fsl install-skills --global
-
-# Overwrite existing skills without prompting
-npx fsl install-skills --force
 ```
 
----
+> The `fsl pack` / `pack-restore` commands exist only for consuming this package via a local `file:` dependency (they vendor a tgz so `firebase deploy` can bundle it). When you install from npm — as above — you don't need them.
 
 ## Skills
-
-Install skills to enable Claude Code log validation and querying:
 
 ```bash
 npx fsl install-skills
@@ -278,114 +193,36 @@ npx fsl install-skills
 
 | Skill | Description |
 |-------|-------------|
-| `/logs` | Validate logging in a file — checks error paths, labels, PII, missing `initRequestLogger`, breadcrumbs |
-| `/query-logs` | Query Cloud Logging or local JSONL via firebase-mcp-server |
-
-**Example — `/logs src/services/inventoryService.ts`:**
-```
-VIOLATIONS FOUND: 2
-
-1. Line 42 - Missing logError in catch block
-2. Line 67 - console.error used directly instead of logError
-
-MISSING LOGGING: 1
-
-1. Line 89 - Error path returns null with no log
-
-LABEL COMPLETENESS:
-✗ placeId missing — placeId is in scope at line 42
-✓ organizationId included
-```
-
----
-
-## Verifying the pipeline
-
-### 1. Set up the log directory
-
-Set `DEV_LOG_DIR` in your environment (e.g. `.env.local`):
-```
-DEV_LOG_DIR=./functions/logs
-```
-
-Set the same value in your firebase-mcp-server config so Claude can query local logs.
-
-### 2. Start the emulator
-
-```bash
-firebase emulators:start --only functions
-```
-
-### 3. Add a test button (dev only)
-
-```tsx
-import { triggerTestLog } from 'firebase-structured-logger/client'
-
-// Render only in dev
-{import.meta.env.DEV && (
-  <button onClick={triggerTestLog}>Test Logging</button>
-)}
-```
-
-### 4. Clear Vite's dependency cache
-
-> **Important:** Do this after first installing FSL, and again any time you rebuild FSL locally.
-> Vite pre-bundles dependencies at startup and will serve stale code otherwise.
-
-```bash
-npm run dev -- --force
-```
-
-### 5. Click the button and verify
-
-**Check the log file:**
-```bash
-tail -f functions/logs/dev.jsonl
-```
-You should see three entries with `"errorType":"fsl-verify"` — one ERROR, one WARNING, one INFO.
-
-**Check symbolication:**
-The ERROR entry's `jsonPayload.error.stack` should resolve to a source file and line number, not a minified bundle.
-
-**Query via MCP:**
-```
-source: local
-where: [{ field: "labels.errorType", operator: "==", value: "fsl-verify" }]
-```
-
----
+| `/logs` | Validate logging in a file — error paths, labels, PII, missing `initRequestLogger`, breadcrumbs |
+| `/query-logs` | Query Cloud Logging or local JSONL via [firebase-mcp-server](https://github.com/dasasian/firebase-mcp-server) |
 
 ## Local log rotation
 
-Logs are written to `{logLocalDir}/dev.jsonl`. On each emulator start, the current file is rotated to `dev-{timestamp}.jsonl`. When the record limit is hit mid-session, rotation happens automatically.
+Logs write to `{logLocalDir}/dev.jsonl`; each emulator start rotates the current file to `dev-{timestamp}.jsonl`, and rotation also happens when the record limit is hit mid-session.
 
 | Config | Default | Description |
 |---|---|---|
 | `logLocalDir` | — | Directory for local log files |
 | `logMaxRecordsPerFile` | 2000 | Records per file before rotation |
-| `logMaxRotatedFiles` | 5 | Number of rotated files to keep |
-
----
+| `logMaxRotatedFiles` | 5 | Rotated files to keep |
 
 ## Source maps
 
-To get symbolicated stack traces in production:
+For symbolicated production traces, emit source maps in Vite and upload them at deploy:
 
-1. Add to your Vite build:
 ```ts
 // vite.config.ts
 build: {
   sourcemap: true,
   commonjsOptions: {
-    // Required: Rollup's commonjs plugin doesn't cover file: deps by default
+    // Rollup's commonjs plugin doesn't cover file: deps by default
     include: [/firebase-structured-logger/, /node_modules/],
   },
 }
 ```
 
-2. After building, upload and delete local maps:
-```bash
-npx fsl upload-sourcemaps --bucket=my-bucket
-```
+Maps are stored at `gs://<bucket>/sourcemaps/{releaseId}/{filename}.map` and loaded by the Cloud Function during symbolication.
 
-Source maps are stored at `gs://my-bucket/sourcemaps/{releaseId}/{filename}.map` and loaded by the Cloud Function during symbolication.
+## License
+
+MIT © Dasasian
