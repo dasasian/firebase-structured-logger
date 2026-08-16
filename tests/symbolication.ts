@@ -17,7 +17,7 @@ if (process.env.FUNCTIONS_EMULATOR !== 'true') {
   process.exit(1)
 }
 
-process.env.GOOGLE_APPLICATION_CREDENTIALS = '../../Service.Accounts/neatpour-3f7bd-firebase-adminsdk-fbsvc-d0843b1015.json'
+process.env.GOOGLE_APPLICATION_CREDENTIALS = './service-account.json'
 
 import { initializeApp } from 'firebase-admin/app'
 import { parseStackTrace, symbolicate, formatStackTrace } from '../src/functions/symbolicate.js'
@@ -28,7 +28,7 @@ import type { LogPayload } from '../src/shared/types.js'
 import type { EncodedSourceMap } from '@jridgewell/trace-mapping'
 import type { CallableRequest } from 'firebase-functions/v2/https'
 
-initializeApp({ projectId: 'neatpour-3f7bd' })
+initializeApp({ projectId: 'acme-app-12345' })
 
 const LOG_DIR = './test-symbolication-output'
 const SOURCE_MAP_DIR = path.join(process.cwd(), 'sourcemaps', 'current')
@@ -36,7 +36,7 @@ const BUNDLE_NAME = 'index-TEST1234.js'
 
 fs.mkdirSync(LOG_DIR, { recursive: true })
 fs.mkdirSync(SOURCE_MAP_DIR, { recursive: true })
-initLogger({ appId: 'neatpour', logLocalDir: LOG_DIR })
+initLogger({ appId: 'acme', logLocalDir: LOG_DIR })
 
 // --- Source map fixture ---
 // Maps:
@@ -114,11 +114,11 @@ function testParseStackTraceChrome() {
 function testParseStackTraceSafari() {
   console.log('\nTest: parseStackTrace — Safari/Firefox format')
   const frames = parseStackTrace(
-    `duplicate@https://neatpour.app/assets/${BUNDLE_NAME}:1:4\nhandleCreate@https://neatpour.app/assets/${BUNDLE_NAME}:1:20`
+    `duplicate@https://acme.example.com/assets/${BUNDLE_NAME}:1:4\nhandleCreate@https://acme.example.com/assets/${BUNDLE_NAME}:1:20`
   )
   assert('parses 2 frames', frames.length === 2, `got ${frames.length}`)
   assert('frame 0 functionName', frames[0].functionName === 'duplicate')
-  assert('frame 0 fileName', frames[0].fileName === `https://neatpour.app/assets/${BUNDLE_NAME}`)
+  assert('frame 0 fileName', frames[0].fileName === `https://acme.example.com/assets/${BUNDLE_NAME}`)
   assert('frame 0 lineNumber', frames[0].lineNumber === 1)
   assert('frame 0 columnNumber', frames[0].columnNumber === 4)
   assert('frame 1 functionName', frames[1].functionName === 'handleCreate')
@@ -160,7 +160,7 @@ async function testSymbolicationPipelineWithEmbeddedSourceMap() {
   writeTestSourceMap()
   clearSourceMapCache()
 
-  const minifiedStack = `duplicate@https://neatpour.app/assets/${BUNDLE_NAME}:1:4\nhandleCreate@https://neatpour.app/assets/${BUNDLE_NAME}:1:20`
+  const minifiedStack = `duplicate@https://acme.example.com/assets/${BUNDLE_NAME}:1:4\nhandleCreate@https://acme.example.com/assets/${BUNDLE_NAME}:1:20`
 
   const frames = parseStackTrace(minifiedStack)
   assert('parsed 2 frames', frames.length === 2)
@@ -191,12 +191,12 @@ async function testHandlerEmulatorSkipsSymbolication() {
   clearSourceMapCache()
 
   const handler = createClientLogHandler({})
-  const minifiedStack = `duplicate@https://neatpour.app/assets/${BUNDLE_NAME}:1:4`
+  const minifiedStack = `duplicate@https://acme.example.com/assets/${BUNDLE_NAME}:1:4`
 
   await handler(makeRequest({
     message: 'Test',
     severity: 'ERROR',
-    labels: { appId: 'neatpour', releaseId: 'test-release', errorType: 'Error' },
+    labels: { appId: 'acme', releaseId: 'test-release', errorType: 'Error' },
     jsonPayload: { error: { message: 'Test', name: 'Error', stack: minifiedStack } },
   }))
 

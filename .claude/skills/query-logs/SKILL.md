@@ -14,7 +14,7 @@ All entries written by firebase-structured-logger include these labels:
 
 | Label | Description |
 |-------|-------------|
-| `appId` | Application identifier (e.g. `neatpour`, `fernmath`) |
+| `appId` | Application identifier (e.g. `acme`, `store`) |
 | `userId` | Firebase Auth UID |
 | `screen` | Current screen name |
 | `releaseId` | Git short hash or explicit release ID |

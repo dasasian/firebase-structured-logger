@@ -17,7 +17,7 @@ if (process.env.FUNCTIONS_EMULATOR !== 'true') {
   process.exit(1)
 }
 
-process.env.GOOGLE_APPLICATION_CREDENTIALS = '../../Service.Accounts/neatpour-3f7bd-firebase-adminsdk-fbsvc-d0843b1015.json'
+process.env.GOOGLE_APPLICATION_CREDENTIALS = './service-account.json'
 
 const LOG_DIR = './test-handler-output'
 
@@ -28,11 +28,11 @@ import type { LogPayload } from '../src/shared/types.js'
 import type { CallableRequest } from 'firebase-functions/v2/https'
 
 // Init Firebase Admin (needed by writeLog for storage attachments etc.)
-initializeApp({ projectId: 'neatpour-3f7bd' })
+initializeApp({ projectId: 'acme-app-12345' })
 
 // Init FSL logger in emulator mode — writes to LOG_DIR/dev.jsonl
 fs.mkdirSync(LOG_DIR, { recursive: true })
-initLogger({ appId: 'neatpour', logLocalDir: LOG_DIR })
+initLogger({ appId: 'acme', logLocalDir: LOG_DIR })
 
 // --- Assertion helpers ---
 
@@ -78,7 +78,7 @@ async function testErrorPayloadStructure() {
     message: 'DUPLICATE_PRODUCT:test123',
     severity: 'ERROR',
     labels: {
-      appId: 'neatpour',
+      appId: 'acme',
       userId: 'test-user',
       platform: 'ios',
       releaseId: 'test-release',
@@ -113,7 +113,7 @@ async function testErrorPayloadStructure() {
   assert('jsonPayload.context has no error (no duplicate)', jp?.context?.error === undefined)
   assert('jsonPayload.breadcrumbs written', Array.isArray(jp?.breadcrumbs) && jp.breadcrumbs.length === 1)
   assert('labels.errorType set', (entry?.labels as any)?.errorType === 'DuplicateProductError')
-  assert('labels.appId set', (entry?.labels as any)?.appId === 'neatpour')
+  assert('labels.appId set', (entry?.labels as any)?.appId === 'acme')
   assert('severity is ERROR', entry?.severity === 'ERROR')
 
   console.log('\n  Written entry:')
@@ -128,7 +128,7 @@ async function testSymbolicatedStack() {
     message: 'Test error with minified stack',
     severity: 'ERROR',
     labels: {
-      appId: 'neatpour',
+      appId: 'acme',
       releaseId: 'faeb9a9',  // real release ID with source maps in GCS
       errorType: 'Error',
     },
@@ -136,7 +136,7 @@ async function testSymbolicatedStack() {
       error: {
         message: 'Test error with minified stack',
         name: 'Error',
-        stack: 'ir@https://neatpour.app/assets/index-DmZHAO2r.js:19:21992',
+        stack: 'ir@https://acme.example.com/assets/index-DmZHAO2r.js:19:21992',
       },
     },
   }))
@@ -146,10 +146,10 @@ async function testSymbolicatedStack() {
   const stack = jp?.error?.stack as string | undefined
 
   assert('error.stack is set', !!stack)
-  if (stack?.includes('neatpour.app/assets')) {
+  if (stack?.includes('acme.example.com/assets')) {
     console.log('  ~ stack not symbolicated (source map unavailable — expected in local env)')
   } else {
-    assert('stack is symbolicated (no bundle URL)', !stack?.includes('neatpour.app/assets'))
+    assert('stack is symbolicated (no bundle URL)', !stack?.includes('acme.example.com/assets'))
     console.log('  ~ symbolicated stack:', stack)
   }
 }
@@ -160,7 +160,7 @@ async function testInvalidPayloadRejected() {
 
   let threw = false
   try {
-    await handler(makeRequest({ message: '', severity: 'ERROR', labels: { appId: 'neatpour' } }))
+    await handler(makeRequest({ message: '', severity: 'ERROR', labels: { appId: 'acme' } }))
   } catch (e: any) {
     threw = true
     assert('throws HttpsError for missing message', e?.code === 'invalid-argument' || e?.httpErrorCode?.status === 400)
