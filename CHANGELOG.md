@@ -9,11 +9,14 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Errors consumed two units of the session budget instead of one** — `error()` incremented the counter, then `send()` incremented it again, so a configured `sessionLimit` of 50 was really 25 for errors. Verified: one `error()` call left `logCount` at 2. Errors are the logs least safe to drop silently.
 - **Source-map bucket was process-wide, not per-handler** — two handlers built with different `bucketName`s silently shared one, whichever was constructed last. App A's maps were sought in app B's bucket, found nothing, and stack traces stayed minified with no error raised. The lookup now takes the bucket explicitly, and the cache key includes it.
 - **Built-in labels were rejected on the public log methods** — a consumer declaring `AppLabels` as a type alias could not pass `screen`, `errorType` or any other `BaseLabels` field without a cast: `logger.info('opened', { screen: 'Checkout' })` failed to compile. Widened to `Partial<AppLabels & BaseLabels>`, which is what the payload always accepted.
 
 ### Changed
 
+- **Rate limiting is one atomic operation** — `canLogEvent`/`canLogError` plus `recordLog`/`recordError` collapse into a single `allow(signature?)` that decides and consumes together. Splitting the check from the record across two layers is what produced the double-count and meant an error was tested against the session limit twice. One `sessionStorage` round-trip per log instead of up to six.
+- **Duplicate suppression works for any severity** — it was welded to `error()`; a `warning()` firing on every render had no protection. Pass a signature to opt any log in.
 - **`Logger` is exported as a type, not a constructible class** — the client logger is a session singleton. Breadcrumbs, current screen, active activity and the rate-limit budget are all session-scoped, so a second instance would share them while appearing independent. Use `initLogger()`; annotate with `Logger<AppLabels>`.
 
 ### Removed

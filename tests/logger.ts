@@ -3,7 +3,9 @@
  * Run: npx tsx test-logger.ts
  */
 
+import { sessionStorageStub } from './browserStubs.js'
 import { initLogger } from '../src/client/logger.js'
+import { configureRateLimiter, resetRateLimiter } from '../src/client/rateLimiter.js'
 import type { LogPayload } from '../src/shared/types.js'
 import { assert, reportResults } from './testHelpers.js'
 
@@ -99,6 +101,25 @@ async function testInfoHasNoError() {
   assert('jsonPayload.context is set', !!jp.context)
 }
 
+
+async function testEverySeverityCostsOneUnitOfBudget() {
+  console.log('\nTest: every severity costs exactly one unit of session budget')
+  const budget = () => JSON.parse(sessionStorageStub.peek('fsl_ratelimit') ?? '{"logCount":0}').logCount
+
+  for (const severity of ['info', 'warning', 'debug', 'error'] as const) {
+    configureRateLimiter({ sessionLimit: 50, duplicateLimit: 99, storageKey: 'fsl_ratelimit' })
+    resetRateLimiter()
+    const { logger } = makeLogger()
+    if (severity === 'error') logger.error(new Error('boom'))
+    else logger[severity]('message')
+    await new Promise((r) => setTimeout(r, 10))
+
+    // error() used to spend two: recordError() incremented, then recordLog()
+    // incremented again inside send(). A limit of 50 was really 25 for errors.
+    assert(`${severity}() spends exactly 1`, budget() === 1, `spent ${budget()}`)
+  }
+}
+
 // --- Runner ---
 
 async function run() {
@@ -107,6 +128,7 @@ async function run() {
   await testErrorNameAndCause()
   await testNonErrorInput()
   await testInfoHasNoError()
+  await testEverySeverityCostsOneUnitOfBudget()
 
   reportResults()
 }

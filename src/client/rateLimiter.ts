@@ -13,6 +13,8 @@ interface RateLimitState {
   errorSignatures: Record<string, number>
 }
 
+// Session-scoped by design: one browser session, one budget. Deliberately not
+// per-Logger — see the module-scoped state rule in CLAUDE.md.
 let config: Required<RateLimitConfig> = {
   sessionLimit: DEFAULT_SESSION_LIMIT,
   duplicateLimit: DEFAULT_DUPLICATE_LIMIT,
@@ -23,7 +25,7 @@ export function configureRateLimiter(options: RateLimitConfig): void {
   config = { ...config, ...options }
 }
 
-function getState(): RateLimitState {
+function readState(): RateLimitState {
   try {
     const stored = sessionStorage.getItem(config.storageKey)
     return stored ? JSON.parse(stored) : { logCount: 0, errorSignatures: {} }
@@ -32,68 +34,62 @@ function getState(): RateLimitState {
   }
 }
 
-function saveState(state: RateLimitState): void {
+function writeState(state: RateLimitState): void {
   try {
     sessionStorage.setItem(config.storageKey, JSON.stringify(state))
   } catch {
-    // Silently fail if sessionStorage is full
+    // sessionStorage full or unavailable — rate limiting degrades, logging continues
   }
 }
 
-/** Read-modify-write the persisted state in one round-trip. */
-function mutateState(mutate: (state: RateLimitState) => void): void {
-  const state = getState()
-  mutate(state)
-  saveState(state)
-}
-
-function getErrorSignature(
+/**
+ * Build the key used to recognise a repeat of the same problem. Two occurrences
+ * count as duplicates only if the message, the screen and the activity all match,
+ * so the same error from two different places is not collapsed into one.
+ */
+export function signatureFor(
   error: Error | string,
-  screen: string | undefined,
-  activity: string | undefined,
+  screen?: string,
+  activity?: string,
 ): string {
   const str = error instanceof Error ? `${error.name}:${error.message}` : String(error)
   return `${str}|${screen ?? ''}|${activity ?? ''}`
 }
 
-export function canLogEvent(): boolean {
-  return getState().logCount < config.sessionLimit
-}
+export type RateLimitDecision =
+  | { allowed: true }
+  | { allowed: false; reason: 'session-limit' | 'duplicate'; signature?: string }
 
-export function canLogError(
-  error: Error | string,
-  screen?: string,
-  activity?: string,
-): boolean {
-  const state = getState()
+/**
+ * Decide whether one log may be sent, and consume its budget if so.
+ *
+ * Check and consume are one operation on purpose. They used to be separate
+ * exports called from two different layers, which meant an error was checked
+ * against the session limit twice and counted against it twice — a configured
+ * limit of 50 was really 25 for errors. A single call cannot double-count, and
+ * cannot be checked without consuming.
+ *
+ * Pass a `signature` to opt this log into duplicate suppression. Any severity
+ * may do so; it is not reserved for errors.
+ */
+export function allow(signature?: string): RateLimitDecision {
+  const state = readState()
+
   if (state.logCount >= config.sessionLimit) {
-    console.warn('[fsl] Session log limit reached')
-    return false
+    return { allowed: false, reason: 'session-limit' }
   }
-  const sig = getErrorSignature(error, screen, activity)
-  if ((state.errorSignatures[sig] ?? 0) >= config.duplicateLimit) {
-    console.warn(`[fsl] Duplicate error suppressed: ${sig}`)
-    return false
+
+  if (signature !== undefined) {
+    const seen = state.errorSignatures[signature] ?? 0
+    if (seen >= config.duplicateLimit) {
+      return { allowed: false, reason: 'duplicate', signature }
+    }
+    state.errorSignatures[signature] = seen + 1
   }
-  return true
-}
 
-export function recordLog(): void {
-  mutateState((state) => {
-    state.logCount++
-  })
-}
-
-export function recordError(
-  error: Error | string,
-  screen?: string,
-  activity?: string,
-): void {
-  const sig = getErrorSignature(error, screen, activity)
-  mutateState((state) => {
-    state.errorSignatures[sig] = (state.errorSignatures[sig] ?? 0) + 1
-    state.logCount++
-  })
+  state.logCount++
+  writeState(state)
+  return { allowed: true }
 }
 
 export function resetRateLimiter(): void {

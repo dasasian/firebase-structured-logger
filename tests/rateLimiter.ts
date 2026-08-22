@@ -1,6 +1,12 @@
 /**
  * Rate limiter unit tests.
  *
+ * `allow()` is deliberately one operation: it decides AND consumes. The two
+ * used to be separate exports (`canLogEvent`/`canLogError` + `recordLog`/
+ * `recordError`) called from two different layers, which meant an error was
+ * checked against the session limit twice and counted against it twice — a
+ * configured limit of 50 was really 25 for errors.
+ *
  * Run: npx tsx tests/rateLimiter.ts
  */
 
@@ -8,10 +14,8 @@
 import { sessionStorageStub, listenerCount } from './browserStubs.js'
 
 import {
-  canLogEvent,
-  canLogError,
-  recordLog,
-  recordError,
+  allow,
+  signatureFor,
   configureRateLimiter,
   resetRateLimiter,
 } from '../src/client/rateLimiter.js'
@@ -19,7 +23,6 @@ import { assert, reportResults } from './testHelpers.js'
 
 const STORAGE_KEY = 'fsl_ratelimit'
 
-/** Back to a clean session and the default limits. */
 function reset() {
   configureRateLimiter({ sessionLimit: 50, duplicateLimit: 3, storageKey: STORAGE_KEY })
   sessionStorageStub.failing = false
@@ -38,70 +41,98 @@ function testSessionLimit() {
   reset()
   configureRateLimiter({ sessionLimit: 3 })
 
-  assert('a fresh session may log', canLogEvent())
+  assert('1st is allowed', allow().allowed)
+  assert('2nd is allowed', allow().allowed)
+  assert('3rd is allowed', allow().allowed)
 
-  recordLog()
-  recordLog()
-  assert('under the limit it may still log', canLogEvent())
-
-  recordLog()
-  assert('at the limit it may not log', !canLogEvent())
-
-  recordLog()
-  assert('past the limit it still may not log', !canLogEvent())
+  const fourth = allow()
+  assert('4th is refused', !fourth.allowed)
+  assert('and the reason is the session limit', !fourth.allowed && fourth.reason === 'session-limit')
+  assert('5th is still refused', !allow().allowed)
 }
 
-function testRecordLogPersists() {
-  console.log('\nTest: counts persist to sessionStorage')
+function testEachAllowCostsExactlyOne() {
+  console.log('\nTest: one allowed log costs exactly one unit of budget')
   reset()
 
-  assert('nothing stored before the first log', storedState() === null)
+  allow()
+  assert('a plain log increments once', storedState()?.logCount === 1, `got: ${storedState()?.logCount}`)
 
-  recordLog()
-  assert('logCount is 1 after one log', storedState()?.logCount === 1)
+  // The regression this file exists for. An error used to be counted twice:
+  // once by recordError() and again by recordLog() inside send().
+  reset()
+  allow(signatureFor(new Error('boom'), 'Home'))
+  assert('a signed log also increments once', storedState()?.logCount === 1, `got: ${storedState()?.logCount}`)
+}
 
-  recordLog()
-  recordLog()
-  assert('logCount is 3 after three logs', storedState()?.logCount === 3)
+function testRefusedLogsCostNothing() {
+  console.log('\nTest: a refused log does not consume budget')
+  reset()
+  configureRateLimiter({ sessionLimit: 2, duplicateLimit: 1 })
+
+  const sig = signatureFor(new Error('dupe'), 'Home')
+  allow(sig)                                   // 1st: allowed, count = 1
+  const refused = allow(sig)                   // 2nd: duplicate, refused
+  assert('the duplicate was refused', !refused.allowed)
+  assert('a refused duplicate did not spend budget', storedState()?.logCount === 1, `got: ${storedState()?.logCount}`)
+
+  assert('the remaining budget is still usable', allow().allowed)
 }
 
 // --- Duplicate suppression ---
 
 function testDuplicateSuppression() {
-  console.log('\nTest: duplicate error suppression')
+  console.log('\nTest: duplicate suppression')
   reset()
   configureRateLimiter({ duplicateLimit: 2 })
 
-  const error = new Error('same failure')
+  const sig = signatureFor(new Error('same failure'), 'Checkout', 'pay')
+  assert('1st occurrence allowed', allow(sig).allowed)
+  assert('2nd occurrence allowed', allow(sig).allowed)
 
-  assert('the first occurrence is allowed', canLogError(error, 'Checkout', 'pay'))
-  recordError(error, 'Checkout', 'pay')
+  const third = allow(sig)
+  assert('3rd is suppressed', !third.allowed)
+  assert('reason is duplicate', !third.allowed && third.reason === 'duplicate')
+  assert('the signature is reported back', !third.allowed && third.signature === sig)
+}
 
-  assert('the second occurrence is allowed', canLogError(error, 'Checkout', 'pay'))
-  recordError(error, 'Checkout', 'pay')
+function testUnsignedLogsAreNeverSuppressedAsDuplicates() {
+  console.log('\nTest: a log with no signature opts out of duplicate suppression')
+  reset()
+  configureRateLimiter({ sessionLimit: 50, duplicateLimit: 1 })
 
-  assert('the third occurrence is suppressed', !canLogError(error, 'Checkout', 'pay'))
+  for (let i = 0; i < 10; i++) {
+    assert(`unsigned log ${i + 1} allowed`, allow().allowed)
+  }
+}
+
+function testSuppressionIsAvailableToAnySeverity() {
+  console.log('\nTest: suppression is keyed on the signature, not on being an error')
+  reset()
+  configureRateLimiter({ duplicateLimit: 1 })
+
+  // A warning can opt in with a plain string — nothing here is error-specific.
+  const warnSig = signatureFor('deprecated_api_used', 'Settings')
+  assert('1st warning allowed', allow(warnSig).allowed)
+  assert('repeat warning suppressed', !allow(warnSig).allowed)
 }
 
 function testSignatureIsScopedToContext() {
-  console.log('\nTest: the duplicate signature includes screen and activity')
+  console.log('\nTest: the signature includes screen and activity')
   reset()
   configureRateLimiter({ duplicateLimit: 1 })
 
   const error = new Error('same failure')
+  allow(signatureFor(error, 'Checkout', 'pay'))
 
-  recordError(error, 'Checkout', 'pay')
-  assert('the same error on the same screen is suppressed', !canLogError(error, 'Checkout', 'pay'))
-  assert('the same error on another screen is allowed', canLogError(error, 'Settings', 'pay'))
-  assert('the same error in another activity is allowed', canLogError(error, 'Checkout', 'refund'))
+  assert('same error, same place → suppressed', !allow(signatureFor(error, 'Checkout', 'pay')).allowed)
+  assert('same error, other screen → allowed', allow(signatureFor(error, 'Settings', 'pay')).allowed)
+  assert('same error, other activity → allowed', allow(signatureFor(error, 'Checkout', 'refund')).allowed)
+  assert('different message → allowed', allow(signatureFor(new Error('other'), 'Checkout', 'pay')).allowed)
 
-  // Name and message both feed the signature.
-  const differentMessage = new Error('another failure')
-  assert('a different message is allowed', canLogError(differentMessage, 'Checkout', 'pay'))
-
-  const differentName = new Error('same failure')
-  differentName.name = 'TypeError'
-  assert('a different error name is allowed', canLogError(differentName, 'Checkout', 'pay'))
+  const named = new Error('same failure')
+  named.name = 'TypeError'
+  assert('different error name → allowed', allow(signatureFor(named, 'Checkout', 'pay')).allowed)
 }
 
 function testStringErrorsAreSupported() {
@@ -109,42 +140,36 @@ function testStringErrorsAreSupported() {
   reset()
   configureRateLimiter({ duplicateLimit: 1 })
 
-  assert('a string error is allowed first', canLogError('plain failure', 'Home'))
-  recordError('plain failure', 'Home')
-  assert('the same string is suppressed', !canLogError('plain failure', 'Home'))
-  assert('a different string is allowed', canLogError('other failure', 'Home'))
+  assert('1st string allowed', allow(signatureFor('plain failure', 'Home')).allowed)
+  assert('repeat string suppressed', !allow(signatureFor('plain failure', 'Home')).allowed)
+  assert('different string allowed', allow(signatureFor('other failure', 'Home')).allowed)
 }
 
-function testErrorsCountTowardTheSessionLimit() {
-  console.log('\nTest: errors count toward the session limit')
+function testSessionLimitOutranksDuplicate() {
+  console.log('\nTest: the session limit is checked before the duplicate rule')
   reset()
   configureRateLimiter({ sessionLimit: 2, duplicateLimit: 99 })
 
-  recordError(new Error('a'), 'Home')
-  recordError(new Error('b'), 'Home')
-
-  assert('the session limit is reached by errors alone', !canLogEvent())
-  assert('canLogError also refuses once the session limit is hit', !canLogError(new Error('c'), 'Home'))
+  allow(); allow()
+  const refused = allow(signatureFor(new Error('fresh'), 'Home'))
+  assert('a brand-new error is still refused at the cap', !refused.allowed)
+  assert('reported as the session limit, not a duplicate', !refused.allowed && refused.reason === 'session-limit')
 }
 
 // --- Config and reset ---
 
-function testConfigureOverrides() {
+function testConfigureMerges() {
   console.log('\nTest: configureRateLimiter merges, it does not replace')
   reset()
   configureRateLimiter({ duplicateLimit: 2 })
+  configureRateLimiter({ sessionLimit: 10 })    // only sessionLimit
 
-  // A second call passing only sessionLimit must leave duplicateLimit alone.
-  configureRateLimiter({ sessionLimit: 10 })
+  const sig = signatureFor(new Error('dupe'), 'Home')
+  allow(sig); allow(sig)
+  assert('the earlier duplicateLimit of 2 survived', !allow(sig).allowed)
 
-  const error = new Error('dupe')
-  recordError(error, 'Home')
-  recordError(error, 'Home')
-  assert('the earlier duplicateLimit of 2 survived the merge', !canLogError(error, 'Home'))
-
-  // And the newly set sessionLimit is in force.
-  for (let i = 0; i < 8; i++) recordLog()
-  assert('the new session limit applies', !canLogEvent())
+  for (let i = 0; i < 8; i++) allow()
+  assert('the new session limit applies', !allow().allowed)
 }
 
 function testCustomStorageKey() {
@@ -153,7 +178,7 @@ function testCustomStorageKey() {
   configureRateLimiter({ storageKey: 'custom_key' })
   resetRateLimiter()
 
-  recordLog()
+  allow()
   assert('state lands under the custom key', JSON.parse(sessionStorageStub.peek('custom_key')!).logCount === 1)
   assert('the default key is untouched', sessionStorageStub.peek(STORAGE_KEY) === null)
 
@@ -165,13 +190,12 @@ function testResetClearsState() {
   reset()
   configureRateLimiter({ sessionLimit: 2 })
 
-  recordLog()
-  recordLog()
-  assert('the limit is reached', !canLogEvent())
+  allow(); allow()
+  assert('the limit is reached', !allow().allowed)
 
   resetRateLimiter()
   assert('reset clears the stored state', storedState() === null)
-  assert('logging is allowed again', canLogEvent())
+  assert('logging is allowed again', allow().allowed)
 }
 
 function testResetIsWiredToBeforeUnload() {
@@ -188,10 +212,8 @@ function testStorageFailureIsNonFatal() {
 
   let threw = false
   try {
-    assert('canLogEvent falls back to allowing the log', canLogEvent())
-    recordLog()
-    assert('canLogError falls back to allowing the error', canLogError(new Error('x'), 'Home'))
-    recordError(new Error('x'), 'Home')
+    assert('allow() falls back to permitting the log', allow().allowed)
+    assert('a signed log is permitted too', allow(signatureFor(new Error('x'), 'Home')).allowed)
     resetRateLimiter()
   } catch {
     threw = true
@@ -205,12 +227,15 @@ function testStorageFailureIsNonFatal() {
 
 function run() {
   testSessionLimit()
-  testRecordLogPersists()
+  testEachAllowCostsExactlyOne()
+  testRefusedLogsCostNothing()
   testDuplicateSuppression()
+  testUnsignedLogsAreNeverSuppressedAsDuplicates()
+  testSuppressionIsAvailableToAnySeverity()
   testSignatureIsScopedToContext()
   testStringErrorsAreSupported()
-  testErrorsCountTowardTheSessionLimit()
-  testConfigureOverrides()
+  testSessionLimitOutranksDuplicate()
+  testConfigureMerges()
   testCustomStorageKey()
   testResetClearsState()
   testResetIsWiredToBeforeUnload()

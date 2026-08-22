@@ -10,10 +10,8 @@ import {
   clearBreadcrumbs,
 } from './breadcrumbs'
 import {
-  canLogEvent,
-  canLogError,
-  recordLog,
-  recordError,
+  allow,
+  signatureFor,
   configureRateLimiter,
   type RateLimitConfig,
 } from './rateLimiter'
@@ -127,15 +125,6 @@ export class Logger<
     attachments?: Record<string, Blob | File | string>,
   ): void {
     const error = toError(raw)
-    const screen = getCurrentScreen()
-    const activity = getActiveActivity()
-
-    if (!canLogError(error, screen, activity)) {
-      console.error('[fsl] Error suppressed:', error.message)
-      return
-    }
-
-    recordError(error, screen, activity)
 
     const errorLabels: Record<string, string | undefined> = {
       errorType: error.name || 'UnknownError',
@@ -149,6 +138,7 @@ export class Logger<
       context,
       attachments,
       toErrorPayload(error),
+      signatureFor(error, getCurrentScreen(), getActiveActivity()),
     )
   }
 
@@ -186,11 +176,20 @@ export class Logger<
     context?: Record<string, unknown>,
     attachments?: Record<string, Blob | File | string>,
     error?: ErrorPayload,
+    signature?: string,
   ): Promise<void> {
     if (SEVERITY_ORDER[severity] > this.minLevel) return
 
-    if (!canLogEvent()) {
-      console.warn('[fsl] Rate limit exceeded')
+    // One gate for every severity. Passing a signature opts this log into
+    // duplicate suppression; the check and the budget spend are one operation,
+    // so a log can neither be counted twice nor checked without being counted.
+    const decision = allow(signature)
+    if (!decision.allowed) {
+      if (decision.reason === 'duplicate') {
+        console.warn(`[fsl] Duplicate suppressed: ${decision.signature}`)
+      } else {
+        console.warn('[fsl] Session log limit reached')
+      }
       return
     }
 
@@ -225,8 +224,6 @@ export class Logger<
         },
         ...(base64Attachments ? { attachments: base64Attachments } : {}),
       }
-
-      recordLog()
 
       await this.config.logFunction(payload)
     } catch (err) {

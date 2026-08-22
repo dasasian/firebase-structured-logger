@@ -22,7 +22,7 @@ if (process.env.FUNCTIONS_EMULATOR !== 'true') {
 }
 
 import { initializeApp } from 'firebase-admin/app'
-import { configureRateLimiter, canLogEvent, recordLog, resetRateLimiter } from '../src/client/rateLimiter.js'
+import { configureRateLimiter, allow, resetRateLimiter } from '../src/client/rateLimiter.js'
 import { configureSourceMapBucket, getBucket } from '../src/functions/sourceMapCache.js'
 import { assert, reportResults } from './testHelpers.js'
 
@@ -36,12 +36,12 @@ function testConfigureRateLimiterTwice() {
   configureRateLimiter({ sessionLimit: 3 })          // only sessionLimit
 
   // Documented semantics: MERGE, last value wins per field.
-  for (let i = 0; i < 3; i++) recordLog()
-  assert('the newer sessionLimit is in force', !canLogEvent())
+  for (let i = 0; i < 3; i++) allow()
+  assert('the newer sessionLimit is in force', !allow().allowed)
 
   resetRateLimiter()
-  for (let i = 0; i < 2; i++) recordLog()
-  assert('the untouched duplicateLimit survived the merge', canLogEvent())
+  for (let i = 0; i < 2; i++) allow()
+  assert('the untouched duplicateLimit survived the merge', allow().allowed)
 
   // This is process-wide by design: one browser session, one budget. It is not
   // per-Logger, which is why Logger is not exported as a constructible class.
