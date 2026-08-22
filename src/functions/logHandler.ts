@@ -32,6 +32,7 @@ function bundleFileFromUrl(url: string): string | null {
 async function symbolicateError(
   releaseId: string,
   error: ErrorPayload | undefined,
+  bucketName?: string,
 ): Promise<ErrorPayload | undefined> {
   if (!error?.stack) return error
 
@@ -53,7 +54,7 @@ async function symbolicateError(
     const sourceMaps = new Map<string, Awaited<ReturnType<typeof getSourceMap>>>()
     await Promise.all(
       Array.from(bundleFiles).map(async (bundle) => {
-        const map = await getSourceMap(releaseId, bundle)
+        const map = await getSourceMap(releaseId, bundle, bucketName)
         if (map) sourceMaps.set(bundle, map)
       }),
     )
@@ -101,7 +102,7 @@ export function createClientLogHandler(config: ClientLogHandlerConfig) {
       let processedError = jsonPayload?.error
       if (processedError?.stack && !isEmulator) {
         const releaseId = labels?.releaseId ?? 'unknown'
-        processedError = await symbolicateError(releaseId, processedError)
+        processedError = await symbolicateError(releaseId, processedError, config.bucketName)
       }
 
       writeLog({

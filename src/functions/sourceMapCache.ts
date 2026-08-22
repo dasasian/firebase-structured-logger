@@ -10,10 +10,14 @@ const cache = new Map<string, EncodedSourceMap | null>()
 // Separate cache for the embedded (current release) maps, keyed by bundle filename.
 const embeddedCache = new Map<string, EncodedSourceMap | null>()
 
-let configuredBucket: string | undefined
+// Process-wide fallback bucket. Used by writeLog() for attachments, which has
+// no per-handler config to draw on. Source-map lookups do NOT rely on this —
+// they take the bucket explicitly, so two handlers configured with different
+// buckets cannot silently resolve to whichever was constructed last.
+let defaultBucket: string | undefined
 
 export function configureSourceMapBucket(bucketName: string): void {
-  configuredBucket = bucketName
+  defaultBucket = bucketName
 }
 
 /**
@@ -23,7 +27,7 @@ export function configureSourceMapBucket(bucketName: string): void {
  * `.d.ts` would need to name `Bucket` from a path inside `node_modules`, which
  * TypeScript 7 rejects as non-portable (TS2883).
  */
-export function getBucket(bucketName = configuredBucket): Bucket {
+export function getBucket(bucketName = defaultBucket): Bucket {
   return bucketName ? getStorage().bucket(bucketName) : getStorage().bucket()
 }
 
@@ -58,12 +62,15 @@ function readEmbeddedSourceMap(fileName: string): EncodedSourceMap | null {
 async function loadStorageSourceMap(
   releaseId: string,
   fileName: string,
+  bucketName?: string,
 ): Promise<EncodedSourceMap | null> {
-  const cacheKey = `${releaseId}/${fileName}`
+  // The bucket is part of the key: the same release/file in two buckets is two
+  // different maps, and caching them under one key would serve the wrong one.
+  const cacheKey = `${bucketName ?? defaultBucket ?? ''}/${releaseId}/${fileName}`
   if (cache.has(cacheKey)) return cache.get(cacheKey) ?? null
 
   try {
-    const file = getBucket().file(`sourcemaps/${releaseId}/${fileName}.map`)
+    const file = getBucket(bucketName).file(`sourcemaps/${releaseId}/${fileName}.map`)
     const [exists] = await file.exists()
 
     if (!exists) {
@@ -77,7 +84,7 @@ async function loadStorageSourceMap(
     return sourceMap
   } catch (err) {
     console.warn(`[fsl] Failed to load Storage map for ${releaseId}/${fileName}:`, err)
-    cache.set(`${releaseId}/${fileName}`, null)
+    cache.set(cacheKey, null)
     return null
   }
 }
@@ -88,10 +95,11 @@ async function loadStorageSourceMap(
 export async function getSourceMap(
   releaseId: string,
   fileName: string,
+  bucketName?: string,
 ): Promise<EncodedSourceMap | null> {
   const embedded = loadEmbeddedSourceMap(fileName)
   if (embedded) return embedded
-  return loadStorageSourceMap(releaseId, fileName)
+  return loadStorageSourceMap(releaseId, fileName, bucketName)
 }
 
 export function clearSourceMapCache(): void {

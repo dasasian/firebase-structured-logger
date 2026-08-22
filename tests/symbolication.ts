@@ -26,7 +26,7 @@ import {
   symbolicateStackTrace,
   formatStackTrace,
 } from '../src/functions/symbolicate.js'
-import { getSourceMap, clearSourceMapCache } from '../src/functions/sourceMapCache.js'
+import { getSourceMap, clearSourceMapCache, getBucket } from '../src/functions/sourceMapCache.js'
 import { createClientLogHandler } from '../src/functions/logHandler.js'
 import { initLogger } from '../src/functions/logger.js'
 import type { LogPayload } from '../src/shared/types.js'
@@ -59,6 +59,11 @@ function writeTestSourceMap() {
     path.join(SOURCE_MAP_DIR, `${BUNDLE_NAME}.map`),
     JSON.stringify(TEST_SOURCE_MAP),
   )
+}
+
+function cleanupMapFile() {
+  const mapFile = path.join(SOURCE_MAP_DIR, `${BUNDLE_NAME}.map`)
+  if (fs.existsSync(mapFile)) fs.unlinkSync(mapFile)
 }
 
 function cleanup() {
@@ -211,6 +216,51 @@ function testMultiBundleSymbolication() {
   console.log('\n  Multi-bundle stack:\n' + formatted.split('\n').map(l => '    ' + l).join('\n'))
 }
 
+
+function testPerHandlerBucketIsolation() {
+  console.log('\nTest: source-map lookups are scoped per handler, not last-one-wins')
+  clearSourceMapCache()
+
+  // Two handlers configured with different buckets. Before this fix,
+  // createClientLogHandler recorded the bucket in module state and the lookup
+  // read that state, so whichever handler was constructed LAST silently won for
+  // both — app A's maps were sought in app B's bucket, found nothing, and the
+  // stack stayed minified with no error raised anywhere.
+  createClientLogHandler({ bucketName: 'app-a-sourcemaps' })
+  createClientLogHandler({ bucketName: 'app-b-sourcemaps' })
+
+  // The module default is now whatever was set last...
+  assert(
+    'module default is the last-configured bucket',
+    getBucket().name === 'app-b-sourcemaps',
+    `got: ${getBucket().name}`,
+  )
+
+  // ...but an explicit bucket overrides it, which is what the lookup path uses.
+  assert(
+    'an explicit bucket wins over the module default',
+    getBucket('app-a-sourcemaps').name === 'app-a-sourcemaps',
+    `got: ${getBucket('app-a-sourcemaps').name}`,
+  )
+  assert(
+    'two explicit buckets resolve differently',
+    getBucket('app-a-sourcemaps').name !== getBucket('app-b-sourcemaps').name,
+  )
+}
+
+async function testCacheKeyIncludesBucket() {
+  console.log('\nTest: the same release/file in two buckets are cached separately')
+  clearSourceMapCache()
+  cleanupMapFile()   // no embedded map, so both fall through to the Storage path
+
+  // Both miss (no live Storage), but they must not share one cache entry —
+  // the same release+file in two buckets is two different source maps.
+  const a = await getSourceMap('rel-1', 'index-AAAA.js', 'app-a-sourcemaps')
+  const b = await getSourceMap('rel-1', 'index-AAAA.js', 'app-b-sourcemaps')
+  assert('bucket A lookup resolved', a === null)
+  assert('bucket B was not served A\'s cached entry', b === null)
+}
+
 async function testHandlerEmulatorSkipsSymbolication() {
   console.log('\nTest: handler in emulator mode skips symbolication (by design)')
   writeTestSourceMap()
@@ -241,6 +291,8 @@ async function run() {
   testFormatStackTrace()
   await testSymbolicationPipelineWithEmbeddedSourceMap()
   testMultiBundleSymbolication()
+  testPerHandlerBucketIsolation()
+  await testCacheKeyIncludesBucket()
   await testHandlerEmulatorSkipsSymbolication()
 
   cleanup()
