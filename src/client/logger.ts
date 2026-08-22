@@ -1,4 +1,4 @@
-import type { LogSeverity, LogPayload, ErrorPayload } from '../shared/types'
+import type { LogSeverity, LogPayload, ErrorPayload, BaseLabels } from '../shared/types'
 import { SEVERITY_ORDER } from '../shared/severity'
 import { toError, toErrorPayload } from '../shared/error'
 import {
@@ -122,7 +122,7 @@ export class Logger<
 
   error(
     raw: unknown,
-    labels?: Partial<AppLabels>,
+    labels?: Partial<AppLabels & BaseLabels>,
     context?: Record<string, unknown>,
     attachments?: Record<string, Blob | File | string>,
   ): void {
@@ -154,7 +154,7 @@ export class Logger<
 
   info(
     message: string,
-    labels?: Partial<AppLabels>,
+    labels?: Partial<AppLabels & BaseLabels>,
     context?: Record<string, unknown>,
     attachments?: Record<string, Blob | File | string>,
   ): void {
@@ -163,7 +163,7 @@ export class Logger<
 
   warning(
     message: string,
-    labels?: Partial<AppLabels>,
+    labels?: Partial<AppLabels & BaseLabels>,
     context?: Record<string, unknown>,
     attachments?: Record<string, Blob | File | string>,
   ): void {
@@ -172,7 +172,7 @@ export class Logger<
 
   debug(
     message: string,
-    labels?: Partial<AppLabels>,
+    labels?: Partial<AppLabels & BaseLabels>,
     context?: Record<string, unknown>,
     attachments?: Record<string, Blob | File | string>,
   ): void {
