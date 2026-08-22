@@ -3,13 +3,13 @@
  * Run: npx tsx test-logger.ts
  */
 
-import { Logger } from '../src/client/logger.js'
+import { initLogger } from '../src/client/logger.js'
 import type { LogPayload } from '../src/shared/types.js'
 import { assert, reportResults } from './testHelpers.js'
 
 function makeLogger(): { logger: Logger; lastPayload: () => LogPayload | undefined } {
   let captured: LogPayload | undefined
-  const logger = new Logger({
+  const logger = initLogger({
     appId: 'test-app',
     releaseId: 'test-release',
     logFunction: async (data) => { captured = data },

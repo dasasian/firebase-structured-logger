@@ -29,6 +29,43 @@ Two support modules, not suites themselves:
 `errorPayload` is the parity suite: the client and functions loggers must build an identical
 `ErrorPayload`. They share `src/shared/error.ts` now, but they drifted once before.
 
+## Module-scoped state — the rule
+
+Two bugs came from the same mistake, so it is worth stating plainly:
+
+> **A config value stored in module scope must not be accepted as a per-call or
+> per-instance parameter.**
+
+`new Logger({ rateLimitOptions })` and `createClientLogHandler({ bucketName })`
+both *looked* scoped to the thing being constructed. Neither was — a second call
+silently changed the first caller's behaviour, with no error. The parameter
+position was the lie, not the global state.
+
+Two honest resolutions when you hit this: make it global in the API too (a
+separate `configureX()` the caller invokes once), or make it genuinely
+per-instance.
+
+What is legitimately module-scoped here, and why:
+
+| State | Why global is correct |
+|---|---|
+| breadcrumbs, current screen, active activity | one user, one session, one path |
+| the client `Logger` singleton | see below |
+| source-map and TraceMap caches | pure caches, keyed by content |
+| `AsyncLocalStorage` in `requestLogger` | per-request by design, not global |
+
+**The client logger is a session singleton.** `Logger` is exported as a *type
+only* — annotate with `Logger<AppLabels>`, construct via `initLogger()`. A
+second instance would silently share breadcrumbs, screen, activity and the
+rate-limit budget while looking independent. The functions side is the opposite
+and correctly so: requests are concurrent, so each gets its own writer via
+`AsyncLocalStorage`.
+
+`tests/publicApi.ts` pins the exported names of each entry point.
+`tests/configureTwice.ts` asserts the second-call semantics of every
+`configureX`/`init`. **A new configure/init function needs a case in that
+file** — its absence is what let both bugs ship.
+
 ## Releasing
 
 A library → **npm only** (no registry, no `server.json`, no tag-triggered publish workflow).

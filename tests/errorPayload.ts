@@ -24,7 +24,7 @@ if (process.env.FUNCTIONS_EMULATOR !== 'true') {
 const LOG_DIR = './test-errorpayload-output'
 
 import { toError, toErrorPayload } from '../src/shared/error.js'
-import { Logger } from '../src/client/logger.js'
+import { initLogger as initClientLogger } from '../src/client/logger.js'
 import { initLogger, createLogWriter } from '../src/functions/logger.js'
 import type { LogPayload, ErrorPayload } from '../src/shared/types.js'
 import { assert, reportResults, readLastEntry, clearLog } from './testHelpers.js'
@@ -112,7 +112,7 @@ function testToErrorPayloadCause() {
 
 function clientErrorPayload(raw: unknown): ErrorPayload | undefined {
   let captured: LogPayload | undefined
-  const logger = new Logger({
+  const logger = initClientLogger({
     appId: 'acme',
     releaseId: 'test-release',
     logFunction: async (data) => {

@@ -65,7 +65,7 @@
     "build:watch": "tsc --watch",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
-    "test": "tsx tests/logger.ts && tsx tests/breadcrumbs.ts && tsx tests/rateLimiter.ts && tsx tests/errorHandler.ts && FUNCTIONS_EMULATOR=true tsx tests/errorPayload.ts && FUNCTIONS_EMULATOR=true tsx tests/requestLogger.ts && FUNCTIONS_EMULATOR=true tsx tests/handler.ts && FUNCTIONS_EMULATOR=true tsx tests/symbolication.ts",
+    "test": "tsx tests/logger.ts && tsx tests/breadcrumbs.ts && tsx tests/rateLimiter.ts && tsx tests/errorHandler.ts && FUNCTIONS_EMULATOR=true tsx tests/errorPayload.ts && FUNCTIONS_EMULATOR=true tsx tests/requestLogger.ts && FUNCTIONS_EMULATOR=true tsx tests/handler.ts && FUNCTIONS_EMULATOR=true tsx tests/symbolication.ts && FUNCTIONS_EMULATOR=true tsx tests/publicApi.ts && FUNCTIONS_EMULATOR=true tsx tests/configureTwice.ts",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
