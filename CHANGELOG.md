@@ -7,6 +7,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.2.0] — 2026-08-22
+
 ### Fixed
 
 - **Errors consumed two units of the session budget instead of one** — `error()` incremented the counter, then `send()` incremented it again, so a configured `sessionLimit` of 50 was really 25 for errors. Verified: one `error()` call left `logCount` at 2. Errors are the logs least safe to drop silently.
@@ -15,12 +19,15 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+**Breaking: `Logger` is no longer exported as a constructible class.** Construct via `initLogger()`; `Logger<AppLabels>` still works as a type annotation. Nothing in the README ever showed `new Logger(...)`, so most consumers are unaffected.
+
 - **Rate limiting is one atomic operation** — `canLogEvent`/`canLogError` plus `recordLog`/`recordError` collapse into a single `allow(signature?)` that decides and consumes together. Splitting the check from the record across two layers is what produced the double-count and meant an error was tested against the session limit twice. One `sessionStorage` round-trip per log instead of up to six.
 - **Duplicate suppression works for any severity** — it was welded to `error()`; a `warning()` firing on every render had no protection. Pass a signature to opt any log in.
 - **`Logger` is exported as a type, not a constructible class** — the client logger is a session singleton. Breadcrumbs, current screen, active activity and the rate-limit budget are all session-scoped, so a second instance would share them while appearing independent. Use `initLogger()`; annotate with `Logger<AppLabels>`.
 
 ### Removed
 
+- **`ulid` upgraded to 3.x** — verified format-compatible with 2.x: still 26 characters, Crockford base32, ordered across milliseconds. Existing `logId`s and the GCS attachment paths keyed on them are unaffected.
 - **Three `as never` casts in `errorHandler.ts`** — they were never load-bearing and disabled type checking entirely at those call sites.
 
 ## [0.1.1] — 2026-08-16
@@ -61,6 +68,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Emulator mode** — under `FUNCTIONS_EMULATOR=true`, entries are written to a local `dev.jsonl` with rotation instead of Cloud Logging, so local development needs no live credentials.
 - **`fsl` CLI** — source map upload to Storage, deploy packing, and skill installation.
 
-[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/dasasian/firebase-structured-logger/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/dasasian/firebase-structured-logger/releases/tag/v0.1.0
