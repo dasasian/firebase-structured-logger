@@ -149,25 +149,55 @@ async function testNoAttachmentsKeyWhenNonePassed() {
 
 // --- Failure path ---
 
-async function testUnreadableAttachmentDropsTheLogSilently() {
-  console.log('\nTest: an unreadable attachment drops the whole log, silently')
+async function testUnreadableAttachmentDoesNotDropTheLog() {
+  console.log('\nTest: an unreadable attachment does not take the log down with it')
   const { send, last } = makeLogger()
 
-  // Something that is not a Blob and not a string. `assetToBase64` hands it to
-  // FileReader.readAsDataURL, which rejects.
+  // Not a Blob and not a string: assetToBase64 hands it to
+  // FileReader.readAsDataURL, which rejects. A real browser raises
+  // NotReadableError when a File is moved or deleted between selection and send.
   send({ bad: { not: 'a blob' } as unknown as Blob })
   await flush()
 
-  // Documenting the current behaviour rather than endorsing it: send() awaits
-  // the conversion inside its try, so the rejection is swallowed by the generic
-  // catch and the ENTIRE log is dropped — message, labels, breadcrumbs and all,
-  // not just the attachment. A user reporting a crash with a broken screenshot
-  // loses the crash report too.
+  const p = last()
+  assert('the log was still sent', !!p, 'the entry was lost with the attachment')
+  assert('the message survived', p?.message === 'with attachment')
+  assert('no attachments key, since none converted', p?.attachments === undefined)
   assert(
-    'the log never reached logFunction',
-    last() === undefined,
-    `got: ${JSON.stringify(last()?.message)}`,
+    'the failure is recorded as a queryable label',
+    p?.labels.attachmentsFailed === 'bad',
+    `got: ${p?.labels.attachmentsFailed}`,
   )
+}
+
+async function testPartialAttachmentFailure() {
+  console.log('\nTest: one bad attachment does not discard the good ones')
+  const { send, last } = makeLogger()
+
+  send({
+    good: new Blob(['keep me']),
+    bad: { not: 'a blob' } as unknown as Blob,
+    alsoGood: 'already-encoded',
+  })
+  await flush()
+
+  const p = last()
+  assert('the log was sent', !!p)
+  assert('the good Blob converted', p?.attachments?.good === b64('keep me'), `got: ${p?.attachments?.good}`)
+  assert('the string passed through', p?.attachments?.alsoGood === 'already-encoded')
+  assert('the bad one is absent', p?.attachments?.bad === undefined)
+  assert('only the bad one is named', p?.labels.attachmentsFailed === 'bad', `got: ${p?.labels.attachmentsFailed}`)
+}
+
+async function testNoFailureLabelWhenAllSucceed() {
+  console.log('\nTest: attachmentsFailed is absent when everything converts')
+  const { send, last } = makeLogger()
+
+  send({ a: new Blob(['x']) })
+  await flush()
+
+  assert('no attachmentsFailed label', last()?.labels.attachmentsFailed === undefined,
+    `got: ${last()?.labels.attachmentsFailed}`)
 }
 
 // --- Runner ---
@@ -180,7 +210,9 @@ async function run() {
   await testEmptyBlob()
   await testSeveralAttachments()
   await testNoAttachmentsKeyWhenNonePassed()
-  await testUnreadableAttachmentDropsTheLogSilently()
+  await testUnreadableAttachmentDoesNotDropTheLog()
+  await testPartialAttachmentFailure()
+  await testNoFailureLabelWhenAllSucceed()
   reportResults()
 }
 

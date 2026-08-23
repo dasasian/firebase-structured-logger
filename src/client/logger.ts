@@ -205,12 +205,34 @@ export class Logger<
         ...labels,
       }
 
+      // Each attachment is converted in its own try. A Blob or File can fail to
+      // read — a user picks a file from <input type="file">, moves or deletes it,
+      // then submits, and the browser raises NotReadableError. Previously one
+      // such failure escaped to the outer catch and the ENTIRE entry was lost:
+      // message, labels, breadcrumbs and all. The message and breadcrumbs are
+      // the valuable part; an attachment is a bonus.
       let base64Attachments: Record<string, string> | undefined
+      const failedAttachments: string[] = []
       if (attachments && Object.keys(attachments).length > 0) {
-        base64Attachments = {}
+        const converted: Record<string, string> = {}
         for (const [name, attachment] of Object.entries(attachments)) {
-          base64Attachments[name] = await assetToBase64(attachment)
+          try {
+            converted[name] = await assetToBase64(attachment)
+          } catch (err) {
+            failedAttachments.push(name)
+            console.warn(
+              `[fsl] Could not read attachment "${name}" — sending the log without it:`,
+              err instanceof Error ? err.message : err,
+            )
+          }
         }
+        if (Object.keys(converted).length > 0) base64Attachments = converted
+      }
+
+      // Without this the absence of hasAttachments is a mystery. Labels are
+      // promoted to Cloud Logging entry labels, so this is filterable.
+      if (failedAttachments.length > 0) {
+        allLabels.attachmentsFailed = failedAttachments.join(',')
       }
 
       const payload: LogPayload = {
