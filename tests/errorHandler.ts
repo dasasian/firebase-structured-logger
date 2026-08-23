@@ -6,7 +6,7 @@
 
 // Must come first — errorHandler reads `window`, and the client logger reads
 // `navigator` at module load.
-import { dispatchWindowEvent, listenerCount } from './browserStubs.js'
+import { dispatchErrorEvent, dispatchRejectionEvent, listenerCount } from './browserStubs.js'
 
 import { initLogger } from '../src/client/logger.js'
 import { setupGlobalErrorHandler, handleReactError } from '../src/client/errorHandler.js'
@@ -60,7 +60,7 @@ async function testUncaughtError() {
   reset()
 
   const error = new TypeError('boom from window')
-  dispatchWindowEvent('error', { error })
+  dispatchErrorEvent({ error })
   await flush()
 
   assert('exactly one log was sent', captured.length === 1, `got: ${captured.length}`)
@@ -79,7 +79,7 @@ async function testUnhandledRejection() {
   console.log('\nTest: an unhandled promise rejection is logged')
   reset()
 
-  dispatchWindowEvent('unhandledrejection', { reason: new Error('rejected promise') })
+  dispatchRejectionEvent(new Error('rejected promise'))
   await flush()
 
   assert('exactly one log was sent', captured.length === 1, `got: ${captured.length}`)
@@ -94,7 +94,7 @@ async function testRejectionWithNonError() {
   console.log('\nTest: a rejection with a non-Error reason still logs')
   reset()
 
-  dispatchWindowEvent('unhandledrejection', { reason: 'just a string' })
+  dispatchRejectionEvent('just a string')
   await flush()
 
   assert('a log was still sent', captured.length === 1, `got: ${captured.length}`)
@@ -134,11 +134,83 @@ async function testDuplicateCrashesAreSuppressed() {
 
   // The same error, over and over, from the same (absent) screen.
   for (let i = 0; i < 5; i++) {
-    dispatchWindowEvent('error', { error: new Error('same crash') })
+    dispatchErrorEvent({ error: new Error('same crash') })
     await flush()
   }
 
   assert('the flood was capped at the duplicate limit', captured.length === 2, `got: ${captured.length}`)
+}
+
+
+// --- Cross-origin errors (#13) ---
+
+async function testCrossOriginScriptError() {
+  console.log('\nTest: a cross-origin script error keeps the information the event carried')
+  reset()
+
+  // A script loaded cross-origin without CORS: the browser withholds the error
+  // object entirely and gives only the event's own fields.
+  dispatchErrorEvent({
+    error: null,
+    message: 'Script error.',
+    filename: 'https://cdn.example.com/vendor.js',
+    lineno: 1,
+    colno: 0,
+  })
+  await flush()
+
+  assert('a log was sent', captured.length === 1, `got: ${captured.length}`)
+
+  const payload = captured[0]
+  assert(
+    'the message is the event message, not the string "null"',
+    payload?.message.startsWith('Script error.') === true,
+    `got: ${payload?.message}`,
+  )
+  assert(
+    'the message carries the locator, so entries stay distinct',
+    payload?.message.includes('vendor.js') === true,
+    `got: ${payload?.message}`,
+  )
+  assert(
+    'errorType marks it as cross-origin, so it is filterable',
+    payload?.labels.errorType === 'CrossOriginError',
+    `got: ${payload?.labels.errorType}`,
+  )
+
+  const context = payload?.jsonPayload?.context as Record<string, unknown> | undefined
+  assert('the filename is kept as context', context?.filename === 'https://cdn.example.com/vendor.js', `got: ${context?.filename}`)
+  assert('the line number is kept', context?.lineno === 1, `got: ${context?.lineno}`)
+}
+
+async function testCrossOriginErrorsAreNotAllTheSame() {
+  console.log('\nTest: two different cross-origin errors are not collapsed into one signature')
+  reset()
+  configureRateLimiter({ duplicateLimit: 1 })
+
+  dispatchErrorEvent({ error: null, message: 'Script error.', filename: 'https://cdn.example.com/a.js', lineno: 1 })
+  await flush()
+  dispatchErrorEvent({ error: null, message: 'Script error.', filename: 'https://cdn.example.com/b.js', lineno: 9 })
+  await flush()
+
+  // Before the fix every cross-origin error became Error("null"), so they all
+  // shared one signature and duplicate suppression swallowed the rest.
+  assert('both were logged', captured.length === 2, `got: ${captured.length}`)
+}
+
+async function testRejectionWithNoReason() {
+  console.log('\nTest: a rejection with no reason still says something useful')
+  reset()
+
+  dispatchRejectionEvent(undefined)
+  await flush()
+
+  assert('a log was sent', captured.length === 1, `got: ${captured.length}`)
+  assert(
+    'the message is not the string "undefined"',
+    captured[0]?.message !== 'undefined',
+    `got: ${captured[0]?.message}`,
+  )
 }
 
 // --- Runner ---
@@ -150,6 +222,9 @@ async function run() {
   await testRejectionWithNonError()
   await testHandleReactError()
   await testDuplicateCrashesAreSuppressed()
+  await testCrossOriginScriptError()
+  await testCrossOriginErrorsAreNotAllTheSame()
+  await testRejectionWithNoReason()
 
   reportResults()
 }
