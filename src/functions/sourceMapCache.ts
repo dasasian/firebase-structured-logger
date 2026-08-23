@@ -10,6 +10,11 @@ const cache = new Map<string, EncodedSourceMap | null>()
 // Separate cache for the embedded (current release) maps, keyed by bundle filename.
 const embeddedCache = new Map<string, EncodedSourceMap | null>()
 
+// Which release the embedded maps belong to, written by
+// `fsl upload-sourcemaps --embed-sourcemaps`. undefined = not yet read,
+// null = no marker (older deploys, or embedding was never used).
+let embeddedRelease: string | null | undefined
+
 // Process-wide fallback bucket. Used by writeLog() for attachments, which has
 // no per-handler config to draw on. Source-map lookups do NOT rely on this —
 // they take the bucket explicitly, so two handlers configured with different
@@ -43,6 +48,20 @@ function loadEmbeddedSourceMap(fileName: string): EncodedSourceMap | null {
   const sourceMap = readEmbeddedSourceMap(fileName)
   embeddedCache.set(fileName, sourceMap)
   return sourceMap
+}
+
+/** The release the embedded maps were built from, or null if unmarked. */
+function readEmbeddedRelease(): string | null {
+  if (embeddedRelease !== undefined) return embeddedRelease
+  try {
+    const markerPath = path.join(process.cwd(), 'sourcemaps', 'current', '.release')
+    embeddedRelease = fs.existsSync(markerPath)
+      ? fs.readFileSync(markerPath, 'utf-8').trim() || null
+      : null
+  } catch {
+    embeddedRelease = null
+  }
+  return embeddedRelease
 }
 
 function readEmbeddedSourceMap(fileName: string): EncodedSourceMap | null {
@@ -92,17 +111,64 @@ async function loadStorageSourceMap(
 /**
  * Get source map — checks embedded first (instant), then Storage (for old releases).
  */
+/**
+ * Resolve the source map for a bundle in a given release.
+ *
+ * The embedded directory is keyed by filename alone and holds exactly one
+ * release's maps, so preferring it unconditionally meant an old stack could be
+ * resolved with the CURRENT release's map — plausible-looking wrong line
+ * numbers, which is worse than none. But requiring an exact match would break
+ * apps that simply deploy and never version anything: they have one release's
+ * maps, never need Storage, and their releaseId will not match a marker.
+ *
+ * So Storage is preferred only when it actually has something better:
+ *
+ *   matches the embedded release  -> embedded, no network
+ *   differs                       -> Storage, falling back to embedded on a miss
+ *
+ * That is strictly better than preferring embedded in every case, and it leaves
+ * the unversioned setup working exactly as before.
+ */
 export async function getSourceMap(
   releaseId: string,
   fileName: string,
   bucketName?: string,
 ): Promise<EncodedSourceMap | null> {
   const embedded = loadEmbeddedSourceMap(fileName)
-  if (embedded) return embedded
-  return loadStorageSourceMap(releaseId, fileName, bucketName)
+  const marker = readEmbeddedRelease()
+
+  // No marker means we cannot tell whether this stack belongs to the embedded
+  // release. Older deploys have none, so keep the previous behaviour.
+  if (embedded && (marker === null || marker === releaseId)) return embedded
+
+  const stored = await loadStorageSourceMap(releaseId, fileName, bucketName)
+  if (stored) return stored
+
+  if (embedded) {
+    warnReleaseFallback(releaseId, marker)
+    return embedded
+  }
+  return null
+}
+
+// Warn once per (release, marker) pair — this sits on the per-error path.
+const warnedFallbacks = new Set<string>()
+function warnReleaseFallback(releaseId: string, marker: string | null): void {
+  const key = `${releaseId}|${marker}`
+  if (warnedFallbacks.has(key)) return
+  warnedFallbacks.add(key)
+  console.warn(
+    `[fsl] Stack is from release '${releaseId}' but the deployed maps are for ` +
+      `'${marker}', and Storage has no map for '${releaseId}'. Symbolicating with ` +
+      'the deployed maps — line numbers may be wrong if the bundle changed between ' +
+      'releases. If you did not mean to version releases, ignore this; if you did, ' +
+      'check that the client\'s releaseId matches the one used at upload time.',
+  )
 }
 
 export function clearSourceMapCache(): void {
   cache.clear()
   embeddedCache.clear()
+  embeddedRelease = undefined
+  warnedFallbacks.clear()
 }

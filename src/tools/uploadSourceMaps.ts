@@ -12,6 +12,16 @@ import { Storage } from '@google-cloud/storage'
  */
 export const EXIT_UPLOAD_FAILED_BUT_EMBEDDED = 3
 
+/**
+ * Records which release the embedded maps belong to.
+ *
+ * Without it the runtime cannot tell "this stack is from the deployed release"
+ * from "this stack is from an older one" — the embedded directory is keyed only
+ * by filename, so an old stack naming a bundle that still exists would be
+ * resolved with the current map, giving confidently wrong line numbers.
+ */
+export const EMBEDDED_RELEASE_MARKER = '.release'
+
 export interface UploadOptions {
   bucket: string        // resolved by caller — falls back to env vars in CLI
   release?: string
