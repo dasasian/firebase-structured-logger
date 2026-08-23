@@ -4,10 +4,77 @@ import { getStorage } from 'firebase-admin/storage'
 import type { Bucket } from '@google-cloud/storage'
 import type { EncodedSourceMap } from '@jridgewell/trace-mapping'
 
-// In-memory cache: cacheKey → EncodedSourceMap | null (null = confirmed not found)
-const cache = new Map<string, EncodedSourceMap | null>()
+/**
+ * Storage-map cache, bounded by approximate bytes with LRU eviction.
+ *
+ * This grows with releases x bundles and lives for the instance's lifetime, so
+ * unbounded it is a plausible out-of-memory on a 256MB Cloud Function —
+ * presenting as random instance crashes rather than a logging fault, which is
+ * miserable to attribute. A real Vite map is ~580KB after `sourcesContent` is
+ * stripped, and maps uploaded before 0.4.0 still carry theirs at ~2.2MB.
+ *
+ * Negative entries (null = confirmed not found) are exempt from the budget.
+ * They cost nothing and each one prevents a repeated Storage round-trip on the
+ * per-error path — more valuable since a release mismatch now consults Storage
+ * first and usually misses.
+ */
+const MAX_CACHE_BYTES = 64 * 1024 * 1024
 
-// Separate cache for the embedded (current release) maps, keyed by bundle filename.
+interface CacheEntry {
+  map: EncodedSourceMap | null
+  bytes: number
+}
+
+const cache = new Map<string, CacheEntry>()
+let cacheBytes = 0
+
+/** Read, moving the entry to the most-recent position. */
+function cacheGet(key: string): CacheEntry | undefined {
+  const entry = cache.get(key)
+  if (!entry) return undefined
+  // Map iterates in insertion order, so delete + re-insert makes it LRU.
+  cache.delete(key)
+  cache.set(key, entry)
+  return entry
+}
+
+function cacheSet(key: string, map: EncodedSourceMap | null, bytes: number): void {
+  const existing = cache.get(key)
+  if (existing) cacheBytes -= existing.bytes
+
+  const size = map === null ? 0 : bytes
+  cache.set(key, { map, bytes: size })
+  cacheBytes += size
+
+  // Evict oldest first, skipping negative entries — they are free and useful.
+  for (const [k, entry] of cache) {
+    if (cacheBytes <= MAX_CACHE_BYTES) break
+    if (k === key || entry.map === null) continue
+    cache.delete(k)
+    cacheBytes -= entry.bytes
+  }
+}
+
+/**
+ * Test-only handle on the cache internals. Not exported from the package entry
+ * point, so it is not public API — the eviction policy is worth asserting
+ * directly rather than inferring from behaviour through a live bucket.
+ */
+export const __cacheForTests = {
+  get: (key: string) => cacheGet(key),
+  set: (key: string, map: EncodedSourceMap | null, bytes: number) => cacheSet(key, map, bytes),
+  clear: () => clearSourceMapCache(),
+  stats: () => ({ entries: cache.size, bytes: cacheBytes, limit: MAX_CACHE_BYTES }),
+}
+
+/**
+ * Embedded (deployed release) maps, keyed by bundle filename.
+ *
+ * Deliberately unbounded: this only ever holds the maps for the one release the
+ * function was deployed with, so it is bounded by that build's chunk count and
+ * every entry is hot. The Storage cache is the one that grows without limit —
+ * it accumulates across releases.
+ */
 const embeddedCache = new Map<string, EncodedSourceMap | null>()
 
 // Which release the embedded maps belong to, written by
@@ -86,24 +153,27 @@ async function loadStorageSourceMap(
   // The bucket is part of the key: the same release/file in two buckets is two
   // different maps, and caching them under one key would serve the wrong one.
   const cacheKey = `${bucketName ?? defaultBucket ?? ''}/${releaseId}/${fileName}`
-  if (cache.has(cacheKey)) return cache.get(cacheKey) ?? null
+  const hit = cacheGet(cacheKey)
+  if (hit) return hit.map
 
   try {
     const file = getBucket(bucketName).file(`sourcemaps/${releaseId}/${fileName}.map`)
     const [exists] = await file.exists()
 
     if (!exists) {
-      cache.set(cacheKey, null)
+      cacheSet(cacheKey, null, 0)
       return null
     }
 
     const [content] = await file.download()
     const sourceMap = JSON.parse(content.toString()) as EncodedSourceMap
-    cache.set(cacheKey, sourceMap)
+    // content.length is the byte size we already hold — no re-serialising a
+    // half-megabyte object just to measure it.
+    cacheSet(cacheKey, sourceMap, content.length)
     return sourceMap
   } catch (err) {
     console.warn(`[fsl] Failed to load Storage map for ${releaseId}/${fileName}:`, err)
-    cache.set(cacheKey, null)
+    cacheSet(cacheKey, null, 0)
     return null
   }
 }
@@ -168,6 +238,7 @@ function warnReleaseFallback(releaseId: string, marker: string | null): void {
 
 export function clearSourceMapCache(): void {
   cache.clear()
+  cacheBytes = 0
   embeddedCache.clear()
   embeddedRelease = undefined
   warnedFallbacks.clear()
