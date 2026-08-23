@@ -7,6 +7,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+**Node 22 is now the supported floor** (`engines.node: ">=22"`, was `">=18"`). `firebase-admin` 14 requires Node 22, and `/functions` exists to be used alongside it, so `>=18` was only ever true for consumers still on `firebase-admin` 13. Node 18 also reached end-of-life in April 2025 and Google has been retiring the `nodejs18` Cloud Functions runtime. npm warns rather than fails on an `engines` mismatch, so this is a support statement, not a hard gate. CI now runs Node 20 and 22 — 20 as a courtesy check for consumers on `firebase-admin` 13, 22 as the supported floor.
+
 ### Fixed
 
 - **Cross-origin script errors were logged as `Error("null")`** — a script loaded cross-origin without CORS has its error withheld by the browser (`event.error === null`), and that null was passed straight through. Every such error produced an identical entry, so they were indistinguishable in Cloud Logging *and* shared one rate-limit signature — after three, the rest were silently suppressed as duplicates. The event's own `message`, `filename`, `lineno` and `colno` are now used, and `errorType` is set to `CrossOriginError` so they are filterable. An unhandled rejection with no reason gets a stated message rather than `Error("undefined")`.

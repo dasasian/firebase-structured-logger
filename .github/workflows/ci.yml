@@ -10,7 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: ['18', '20', '22']
+        # 22 is the supported floor (firebase-admin 14 requires it, and it is
+        # the Cloud Functions runtime people deploy to). 20 is kept as a
+        # courtesy check for consumers still on firebase-admin 13.
+        node-version: ['20', '22']
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

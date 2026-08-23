@@ -11,6 +11,11 @@ no MCP registry step.
 
 `npm run build` (tsc) · `npm run typecheck` (tsc --noEmit) · `npm test`.
 
+**Node 22 is the supported floor.** `firebase-admin` 14 requires it, and it is the Cloud
+Functions runtime people deploy to. CI runs 20 and 22 — 20 only as a courtesy check for
+consumers still on `firebase-admin` 13. If you change the matrix, update the required
+status checks on `main` too, or PRs wait forever on a check that never runs.
+
 `npm test` runs the `tests/*.ts` tsx suites. Keep them green.
 
 Most functions-side suites — `errorPayload`, `requestLogger`, `handler`, `symbolication` —
