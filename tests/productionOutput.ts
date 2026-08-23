@@ -250,6 +250,90 @@ function testUnknownSeverityBypassedTheFloor() {
   initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
 }
 
+
+// --- NOTICE on the production branch (#9) ---
+
+function testNoticeIsEmittedVerbatim() {
+  console.log('\nTest: NOTICE reaches Cloud Logging as NOTICE')
+  initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
+
+  // firebase-functions maps NOTICE to console.info, so it lands on stdout — but
+  // the severity FIELD must still say NOTICE, because that is what Cloud Logging
+  // reads. If the mapping leaked into the field, feedback would arrive as INFO
+  // and the severity dropdown would not separate it.
+  const [entry] = captureEntries(() =>
+    writeLog({ message: 'user feedback', severity: 'NOTICE', labels: { appId: 'acme' } as never }),
+  )
+
+  assert('an entry was written', !!entry)
+  assert('severity is NOTICE, not INFO', entry?.severity === 'NOTICE', `got: ${entry?.severity}`)
+}
+
+function testNoticeRanksBetweenWarningAndInfo() {
+  console.log('\nTest: NOTICE ranks between WARNING and INFO')
+
+  // A NOTICE floor admits NOTICE and above, and excludes routine INFO. That
+  // ordering is the reason NOTICE was chosen: feedback from a person outranks
+  // status chatter without being a warning about system health.
+  initLogger({ appId: 'acme', minSeverity: 'NOTICE' })
+
+  const notice = captureEntries(() =>
+    writeLog({ message: 'n', severity: 'NOTICE', labels: { appId: 'acme' } as never }),
+  )
+  const info = captureEntries(() =>
+    writeLog({ message: 'i', severity: 'INFO', labels: { appId: 'acme' } as never }),
+  )
+  const warning = captureEntries(() =>
+    writeLog({ message: 'w', severity: 'WARNING', labels: { appId: 'acme' } as never }),
+  )
+
+  assert('NOTICE is admitted at a NOTICE floor', notice.length === 1)
+  assert('WARNING is admitted', warning.length === 1)
+  assert('INFO is excluded', info.length === 0, 'NOTICE is not ranked above INFO')
+
+  initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
+}
+
+function testPlainNoticeStillRespectsTheFloor() {
+  console.log('\nTest: an ordinary NOTICE still respects the floor')
+
+  // The exemption must key on the record being feedback, not on the severity.
+  // Otherwise NOTICE becomes a level that silently defeats filtering for
+  // everyone, and any `severity >= WARNING` sink starts behaving unpredictably.
+  initLogger({ appId: 'acme', minSeverity: 'WARNING' })
+  const dropped = captureEntries(() =>
+    writeLog({ message: 'not feedback', severity: 'NOTICE', labels: { appId: 'acme' } as never }),
+  )
+  assert('a bare NOTICE is dropped at a WARNING floor', dropped.length === 0, `got ${dropped.length}`)
+
+  initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
+}
+
+function testFeedbackSurvivesTheServerFloor() {
+  console.log('\nTest: feedback survives the SERVER floor, not just the client one')
+
+  // The client exempts itself from its own floor, but the payload still passes
+  // through writeLog on its way to Cloud Logging — and this floor defaults to
+  // WARNING in production. Implementing only the client half meant every report
+  // was dropped here instead, silently, in production only. It was, until this
+  // test existed.
+  initLogger({ appId: 'acme', minSeverity: 'WARNING' })
+
+  const [entry] = captureEntries(() =>
+    writeLog({
+      message: 'the discount did not apply',
+      severity: 'NOTICE',
+      labels: { appId: 'acme', feedback: 'true' } as never,
+    }),
+  )
+
+  assert('the report was written', !!entry, 'feedback was dropped at the server floor')
+  assert('at NOTICE', entry?.severity === 'NOTICE', `got: ${entry?.severity}`)
+  assert('the text survived', entry?.message === 'the discount did not apply')
+
+  initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
+}
+
 // --- A full entry, pinned ---
 
 function testWholeEntryShape() {
@@ -290,6 +374,10 @@ function run() {
   testUnknownSeverityDoesNotCrash()
   testUnknownSeverityIsNotSilent()
   testUnknownSeverityBypassedTheFloor()
+  testNoticeIsEmittedVerbatim()
+  testNoticeRanksBetweenWarningAndInfo()
+  testPlainNoticeStillRespectsTheFloor()
+  testFeedbackSurvivesTheServerFloor()
   testWholeEntryShape()
   reportResults()
 }

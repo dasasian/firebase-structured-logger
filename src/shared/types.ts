@@ -1,4 +1,4 @@
-export type LogSeverity = 'ERROR' | 'WARNING' | 'INFO' | 'DEBUG'
+export type LogSeverity = 'ERROR' | 'WARNING' | 'NOTICE' | 'INFO' | 'DEBUG'
 
 export interface BaseLabels {
   appId: string

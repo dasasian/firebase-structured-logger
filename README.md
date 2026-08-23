@@ -160,6 +160,37 @@ logger.addBreadcrumb(type, name, data?)
 
 **Attachments** (images, snapshots, captured data) upload to GCS at `logAttachments/{logId}/{name}`; the same `logId` is on the entry's `labels.logId`. Add a lifecycle rule to auto-delete `logAttachments/` after N days.
 
+### User feedback
+
+```ts
+import { sendFeedback } from '@dasasian/firebase-structured-logger/client'
+
+sendFeedback("the discount didn't apply")
+sendFeedback(text, { attachments: { screenshot }, labels: { orderId } })
+```
+
+Error tracking only sees things that **throw**. A button that does nothing, a total that
+comes out wrong, the wrong data rendered — none of them throw, so none are captured, and
+you hear about them weeks later. `sendFeedback` captures that class, and it is actionable
+because the breadcrumb trail is already in memory when the user hits send: *"the discount
+didn't apply"* is a complaint; the same sentence plus `nav→Checkout · apply_discount ·
+total_recalculated · tap_place_order` is a reproduction.
+
+It carries everything a log carries — breadcrumbs, `screen`, `userId`, `releaseId`,
+`platform`, `browser`, and any labels seeded via `setUser`.
+
+Headless: the package renders nothing, so the UI is yours. It returns nothing either —
+a reference number is meaningless to a user with no portal to check it against. Say thank
+you and move on; if the app wants correlation, pass its own id as a label.
+
+Entries are written at **`NOTICE`**, which ranks between `INFO` and `WARNING`: feedback
+from a person outranks routine status, and is not a warning about system health. Find it
+with the severity dropdown, or `labels.feedback="true"`. Any existing `severity >= WARNING`
+alert ignores it with no configuration.
+
+Feedback is exempt from the severity floor and the rate limiter — those are volume controls
+for events the system emits, and someone hitting send twice is not a duplicate to throttle.
+
 ## Functions API
 
 ```ts

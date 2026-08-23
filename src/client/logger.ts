@@ -1,5 +1,5 @@
 import type { LogSeverity, LogPayload, ErrorPayload, BaseLabels } from '../shared/types'
-import { SEVERITY_ORDER } from '../shared/severity'
+import { SEVERITY_ORDER, FEEDBACK_LABEL } from '../shared/severity'
 import { toError, toErrorPayload } from '../shared/error'
 import {
   addBreadcrumb,
@@ -18,6 +18,15 @@ import {
 export type { RateLimitConfig }
 
 type LogCallable = (data: LogPayload) => Promise<unknown>
+
+export interface FeedbackOptions<
+  AppLabels extends Record<string, string | undefined> = Record<string, string | undefined>,
+> {
+  /** A screenshot or any file. Rides the same GCS path as error attachments. */
+  attachments?: Record<string, Blob | File | string>
+  /** Anything the app wants to tag — which widget, which flow, its own ticket id. */
+  labels?: Partial<AppLabels & BaseLabels>
+}
 
 export interface InitLoggerConfig<
   AppLabels extends Record<string, string | undefined> = Record<string, string | undefined>,
@@ -168,6 +177,34 @@ export class Logger<
     void this.send(message, 'DEBUG', labels as Record<string, string | undefined>, context, attachments)
   }
 
+  /**
+   * Send feedback a user typed, carrying everything the logger already knows.
+   *
+   * This exists because error tracking only sees things that throw. A button
+   * that does nothing, a total that comes out wrong, the wrong data rendered —
+   * none of them throw, so none are captured, and you hear about them weeks
+   * later. Feedback is the capture mechanism for that whole class, and it is
+   * actionable only because the breadcrumb trail is already in memory when the
+   * user hits send: "the discount didn't apply" is a complaint, the same
+   * sentence plus the trail is a reproduction.
+   *
+   * Headless — the app owns the UI. Returns nothing: a reference number is
+   * meaningless to a user with no portal to check it against. An app wanting
+   * correlation passes its own id as a label, which it knows before sending.
+   */
+  sendFeedback(text: string, extras?: FeedbackOptions<AppLabels>): void {
+    void this.send(
+      text,
+      'NOTICE',
+      { [FEEDBACK_LABEL]: 'true', ...(extras?.labels as Record<string, string | undefined>) },
+      undefined,
+      extras?.attachments,
+      undefined,
+      undefined,
+      true, // exempt from the severity floor and the rate limiter
+    )
+  }
+
   private async send(
     message: string,
     severity: LogSeverity,
@@ -176,13 +213,19 @@ export class Logger<
     attachments?: Record<string, Blob | File | string>,
     error?: ErrorPayload,
     signature?: string,
+    // Both gates below are volume and cost controls for events the SYSTEM
+    // emits. Feedback is a person sending a message that happens to travel the
+    // same pipe — it is rare by nature and there is nothing to throttle. The
+    // exemption keys on the record being feedback, not on its severity, so a
+    // NOTICE emitted for anything else still behaves normally.
+    bypassVolumeControls = false,
   ): Promise<void> {
-    if (SEVERITY_ORDER[severity] > this.minLevel) return
+    if (!bypassVolumeControls && SEVERITY_ORDER[severity] > this.minLevel) return
 
     // One gate for every severity. Passing a signature opts this log into
     // duplicate suppression; the check and the budget spend are one operation,
     // so a log can neither be counted twice nor checked without being counted.
-    const decision = allow(signature)
+    const decision = bypassVolumeControls ? ({ allowed: true } as const) : allow(signature)
     if (!decision.allowed) {
       if (decision.reason === 'duplicate') {
         console.warn(`[fsl] Duplicate suppressed: ${decision.signature}`)
@@ -251,6 +294,18 @@ export class Logger<
       console.error('[fsl] Failed to send log:', err instanceof Error ? err.message : err)
     }
   }
+}
+
+/**
+ * Send user feedback through the configured logger.
+ *
+ * Module-level for the same reason as `addBreadcrumb` and `bc`: the app calls
+ * it from wherever its feedback UI lives, without threading a logger through.
+ */
+export function sendFeedback<
+  AppLabels extends Record<string, string | undefined> = Record<string, string | undefined>,
+>(text: string, extras?: FeedbackOptions<AppLabels>): void {
+  getClientLogger<AppLabels>().sendFeedback(text, extras)
 }
 
 /**

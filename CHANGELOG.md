@@ -7,6 +7,11 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`sendFeedback(text, extras?)`** — capture what error tracking structurally cannot see. A button that does nothing, a wrong total, the wrong data rendered: none of them throw, so none are logged. Feedback captures that class, and the breadcrumb trail already in memory turns *"the discount didn't apply"* from a complaint into a reproduction. Headless — the app owns the UI. Carries the same labels and breadcrumbs as any log, plus an optional screenshot.
+- **`NOTICE` severity** — ranks between `INFO` and `WARNING`, matching Cloud Logging's own ordering. Feedback from a person outranks routine status without being a warning about system health, and any existing `severity >= WARNING` alert ignores it with no configuration. **This widens the public `LogSeverity` union**, which is breaking for exhaustive `switch` statements and `Record<LogSeverity, T>` in consumer code.
+
 ### Removed
 
 **Breaking: `initRequestLogger` is gone. Use `withLogging`.** It bound the request scope with `AsyncLocalStorage.enterWith()`, which is never unwound, so a request's labels outlived the request — a later handler that did *not* call it inherited whichever user last touched the warm instance. Deprecated in 0.5.0 with a warning naming the leak. `withLogging` binds with `run()`, which restores the previous context when the handler settles, including on a throw.

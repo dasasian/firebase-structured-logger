@@ -3,7 +3,7 @@ import * as path from "path";
 import { write as ffWrite } from "firebase-functions/logger";
 import { ulid } from "ulid";
 import type { LogSeverity, LogPayload } from "../shared/types";
-import { SEVERITY_ORDER, SEVERITIES, isLogSeverity } from "../shared/severity";
+import { SEVERITY_ORDER, SEVERITIES, isLogSeverity, isFeedback } from "../shared/severity";
 import { toError, toErrorPayload } from "../shared/error";
 import { getBucket } from "./sourceMapCache";
 
@@ -110,6 +110,9 @@ const CONSOLE_FN: Record<
 > = {
   ERROR: console.error,
   WARNING: console.warn,
+  // There is no console.notice. firebase-functions maps NOTICE to console.info
+  // on the production side, so match that rather than inventing a mapping.
+  NOTICE: console.info,
   DEBUG: console.debug,
   INFO: console.log,
 };
@@ -153,9 +156,18 @@ export function writeLog(
     ? payload.severity
     : coerceUnknownSeverity(payload.severity);
 
+  // Feedback bypasses the floor. The client already bypassed its own, but the
+  // payload still passes through here on its way to Cloud Logging, and this
+  // floor defaults to WARNING in production — so without the exemption every
+  // report would be dropped here instead. Verified: it was.
   const minSeverity =
     globalConfig?.minSeverity ?? (IS_EMULATOR ? "DEBUG" : "WARNING");
-  if (SEVERITY_ORDER[severity] > SEVERITY_ORDER[minSeverity]) return;
+  if (
+    !isFeedback(payload.labels) &&
+    SEVERITY_ORDER[severity] > SEVERITY_ORDER[minSeverity]
+  ) {
+    return;
+  }
 
   const logId = ulid();
   const hasAttachments =
