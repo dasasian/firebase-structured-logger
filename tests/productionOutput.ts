@@ -184,6 +184,72 @@ function testMinSeverityFloorAppliesInProductionToo() {
   initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
 }
 
+
+// --- Unknown severity (#28) ---
+
+function testUnknownSeverityDoesNotCrash() {
+  console.log('\nTest: an unrecognised severity is written as ERROR, not lost')
+
+  // writeLog is exported, so a caller can reach it with a value read from
+  // config, crossing a type boundary, or from plain JavaScript. ffWrite looks
+  // the severity up in a fixed table; a miss resolves to undefined and calling
+  // it throws — swallowed by Logger.send()'s catch, so the entry vanishes with
+  // no diagnostic, in production only.
+  let threw = false
+  let entries: Record<string, unknown>[] = []
+  try {
+    entries = captureEntries(() =>
+      writeLog({
+        message: 'from a bad severity',
+        severity: 'DEFAULT' as never,
+        labels: { appId: 'acme' } as never,
+      }),
+    )
+  } catch {
+    threw = true
+  }
+
+  assert('nothing was thrown', !threw, 'ffWrite crashed on the unknown value')
+  assert('the entry survived', entries.length === 1, `got ${entries.length} entries`)
+  assert('it was written as ERROR', entries[0]?.severity === 'ERROR', `got: ${entries[0]?.severity}`)
+  assert('the message is intact', entries[0]?.message === 'from a bad severity')
+}
+
+function testUnknownSeverityIsNotSilent() {
+  console.log('\nTest: the coercion warns, naming the bad value')
+
+  const warned: string[] = []
+  const realWarn = console.warn
+  console.warn = (...args: unknown[]) => { warned.push(args.map(String).join(' ')) }
+  try {
+    captureEntries(() =>
+      writeLog({ message: 'x', severity: 'NOPE' as never, labels: { appId: 'acme' } as never }),
+    )
+  } finally {
+    console.warn = realWarn
+  }
+
+  assert('it warned', warned.length > 0)
+  assert('the bad value is named', warned.some((w) => w.includes('NOPE')), `warnings: ${JSON.stringify(warned)}`)
+  assert('the valid values are listed', warned.some((w) => w.includes('ERROR') && w.includes('DEBUG')))
+}
+
+function testUnknownSeverityBypassedTheFloor() {
+  console.log('\nTest: an unknown severity no longer slips past the min-severity floor')
+  initLogger({ appId: 'acme', minSeverity: 'ERROR' })
+
+  // SEVERITY_ORDER[unknown] is undefined and `undefined > n` is false, so the
+  // floor check used to pass for any unrecognised value. Coerced to ERROR it is
+  // now ranked, and an ERROR floor admits it.
+  const kept = captureEntries(() =>
+    writeLog({ message: 'coerced', severity: 'WHATEVER' as never, labels: { appId: 'acme' } as never }),
+  )
+  assert('it is ranked, not unranked', kept.length === 1, `got ${kept.length}`)
+  assert('as ERROR', kept[0]?.severity === 'ERROR')
+
+  initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
+}
+
 // --- A full entry, pinned ---
 
 function testWholeEntryShape() {
@@ -221,6 +287,9 @@ function run() {
   testAttachmentsAreStrippedButFlagged()
   testHasAttachmentsAbsentWhenNoneGiven()
   testMinSeverityFloorAppliesInProductionToo()
+  testUnknownSeverityDoesNotCrash()
+  testUnknownSeverityIsNotSilent()
+  testUnknownSeverityBypassedTheFloor()
   testWholeEntryShape()
   reportResults()
 }

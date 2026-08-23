@@ -3,7 +3,7 @@ import * as path from "path";
 import { write as ffWrite } from "firebase-functions/logger";
 import { ulid } from "ulid";
 import type { LogSeverity, LogPayload } from "../shared/types";
-import { SEVERITY_ORDER } from "../shared/severity";
+import { SEVERITY_ORDER, SEVERITIES, isLogSeverity } from "../shared/severity";
 import { toError, toErrorPayload } from "../shared/error";
 import { getBucket } from "./sourceMapCache";
 
@@ -89,6 +89,21 @@ async function uploadLogAttachments(
   );
 }
 
+// Warn once per bad value: writeLog is on the per-log path, and a caller with a
+// broken severity will hit it every time.
+const warnedSeverities = new Set<string>();
+function coerceUnknownSeverity(value: unknown): LogSeverity {
+  const shown = typeof value === "string" ? value : String(value);
+  if (!warnedSeverities.has(shown)) {
+    warnedSeverities.add(shown);
+    console.warn(
+      `[fsl] Unknown severity ${JSON.stringify(shown)} — writing as ERROR. ` +
+        `Valid values: ${SEVERITIES.join(", ")}.`,
+    );
+  }
+  return "ERROR";
+}
+
 const CONSOLE_FN: Record<
   LogSeverity,
   (message: string, ...args: unknown[]) => void
@@ -121,9 +136,26 @@ export function cleanLabels(
 export function writeLog(
   payload: LogPayload & { functionName?: string; requestId?: string },
 ): void {
+  // An unrecognised severity is not merely mislabelled — it is fatal. Both
+  // dispatches look the value up in a fixed table: CONSOLE_FN below, and
+  // firebase-functions' own CONSOLE_SEVERITY inside ffWrite. A miss resolves to
+  // undefined and calling it throws, which Logger.send()'s catch then swallows,
+  // so the entry disappears with no useful diagnostic — and only in production,
+  // since the emulator takes the other branch.
+  //
+  // It also slips past the floor: SEVERITY_ORDER[unknown] is undefined, and
+  // `undefined > n` is false, so the check below would not have stopped it.
+  //
+  // writeLog is exported, so a caller can reach this with a value read from
+  // config, crossing a type boundary, or from plain JavaScript. Coerce to ERROR
+  // rather than drop: an entry arriving loud beats one vanishing quietly.
+  const severity = isLogSeverity(payload.severity)
+    ? payload.severity
+    : coerceUnknownSeverity(payload.severity);
+
   const minSeverity =
     globalConfig?.minSeverity ?? (IS_EMULATOR ? "DEBUG" : "WARNING");
-  if (SEVERITY_ORDER[payload.severity] > SEVERITY_ORDER[minSeverity]) return;
+  if (SEVERITY_ORDER[severity] > SEVERITY_ORDER[minSeverity]) return;
 
   const logId = ulid();
   const hasAttachments =
@@ -145,7 +177,7 @@ export function writeLog(
       try {
         const entry = {
           timestamp: new Date().toISOString(),
-          severity: payload.severity,
+          severity,
           message: payload.message,
           labels,
           jsonPayload: payload.jsonPayload,
@@ -169,8 +201,8 @@ export function writeLog(
     }
 
     // Also write to console for immediate visibility
-    CONSOLE_FN[payload.severity](
-      `[${payload.severity}] ${payload.message}`,
+    CONSOLE_FN[severity](
+      `[${severity}] ${payload.message}`,
       labels,
     );
     return;
@@ -187,7 +219,7 @@ export function writeLog(
   // filters match nothing. Verified live: the smoke run's entry labels contained only
   // Cloud Functions' own platform labels until this changed.
   ffWrite({
-    severity: payload.severity,
+    severity,
     message: payload.message,
     "logging.googleapis.com/labels": labels,
     ...payload.jsonPayload,

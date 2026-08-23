@@ -13,3 +13,8 @@ export const SEVERITY_ORDER: Record<LogSeverity, number> = {
 }
 
 export const SEVERITIES = Object.keys(SEVERITY_ORDER) as LogSeverity[]
+
+/** Is this a severity the loggers know how to dispatch? */
+export function isLogSeverity(value: unknown): value is LogSeverity {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(SEVERITY_ORDER, value)
+}

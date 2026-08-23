@@ -7,7 +7,9 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **An unrecognised severity crashed `writeLog` and destroyed the entry** — both dispatch paths look the value up in a fixed table (`CONSOLE_FN` in emulator mode, `firebase-functions`' own `CONSOLE_SEVERITY` inside `ffWrite`), and a miss resolves to `undefined`; calling it throws, `Logger.send()`'s catch swallows it, and the entry disappears with no diagnostic. It also slipped past the min-severity floor, since `SEVERITY_ORDER[unknown]` is `undefined` and `undefined > n` is `false`. `writeLog` is exported, so a caller could reach it with a value read from config, crossing a type boundary, or from plain JavaScript. Unknown severities are now written as `ERROR` with a warning naming the bad value — an entry arriving loud beats one vanishing quietly.
 
 ## [0.5.0] — 2026-08-23
 

@@ -101,11 +101,36 @@ async function testInvalidPayloadRejected() {
   assert('invalid payload was rejected', threw)
 }
 
+
+async function testUnknownSeverityInEmulatorMode() {
+  console.log('\nTest: an unknown severity is coerced on the emulator branch too')
+  clearLog(LOG_DIR)
+
+  // The emulator branch has its OWN dispatch table (CONSOLE_FN), separate from
+  // ffWrite's. Guarding one and not the other would leave the crash reachable
+  // in whichever branch was missed — and the emulator is where it would look
+  // fine while production burned.
+  const { writeLog } = await import('../src/functions/logger.js')
+  let threw = false
+  try {
+    writeLog({ message: 'bad severity, emulator', severity: 'DEFAULT' as never, labels: { appId: 'acme' } as never })
+  } catch {
+    threw = true
+  }
+
+  assert('nothing was thrown', !threw)
+  const entry = readLastEntry(LOG_DIR)
+  assert('the entry was written to JSONL', !!entry)
+  assert('coerced to ERROR', entry?.severity === 'ERROR', `got: ${entry?.severity}`)
+  assert('the message is intact', entry?.message === 'bad severity, emulator')
+}
+
 // --- Runner ---
 
 async function run() {
   await testErrorPayloadStructure()
   await testInvalidPayloadRejected()
+  await testUnknownSeverityInEmulatorMode()
 
   // Cleanup
   fs.rmSync(LOG_DIR, { recursive: true, force: true })
