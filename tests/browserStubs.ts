@@ -68,14 +68,34 @@ export function dispatchErrorEvent(init: {
   )
 }
 
-/** Dispatch a real `PromiseRejectionEvent`. */
+/**
+ * Dispatch an `unhandledrejection` event.
+ *
+ * jsdom only gained `PromiseRejectionEvent` in v27, and v27 requires Node 20
+ * while this package supports Node 18. So on v26 we subclass jsdom's real
+ * `Event` and attach the two fields the spec defines. It goes through the real
+ * dispatch machinery; only the constructor is ours.
+ */
 export function dispatchRejectionEvent(reason: unknown): void {
-  // jsdom's constructor requires a promise; it is never awaited here.
   const promise = Promise.reject(reason)
   promise.catch(() => {})
-  win.dispatchEvent(
-    new win.PromiseRejectionEvent('unhandledrejection', { promise, reason }),
-  )
+
+  const Ctor = (win as unknown as { PromiseRejectionEvent?: new (t: string, i: object) => Event })
+    .PromiseRejectionEvent
+  if (Ctor) {
+    win.dispatchEvent(new Ctor('unhandledrejection', { promise, reason }))
+    return
+  }
+
+  const event = new win.Event('unhandledrejection') as Event & {
+    promise: Promise<unknown>
+    reason: unknown
+  }
+  Object.defineProperties(event, {
+    promise: { value: promise, enumerable: true },
+    reason: { value: reason, enumerable: true },
+  })
+  win.dispatchEvent(event)
 }
 
 /** How many listeners the module under test registered for an event type. */
