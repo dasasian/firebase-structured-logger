@@ -22,12 +22,20 @@ Most functions-side suites — `errorPayload`, `requestLogger`, `handler`, `symb
 run under `FUNCTIONS_EMULATOR=true` (already set in the `test` script) so they exercise
 emulator mode without live credentials, writing to a throwaway `dev.jsonl`.
 
-**`productionOutput` deliberately runs with that flag UNSET.** `writeLog` has two branches
+**`productionOutput` and `handlerSymbolication` deliberately run with that flag UNSET.** `writeLog` has two branches
 that emit structurally different entries — emulator nests `jsonPayload`, production spreads
 it to top level — and for a long time only the emulator branch was tested. It captures
 **stdout and stderr** (firebase-functions routes ERROR to `console.error`, so a stdout-only
 capture misses every error entry) and asserts the exact bytes Cloud Logging ingests. Change
 the emitted shape and this is the suite that should stop you.
+
+`handlerSymbolication` drives `createClientLogHandler` end to end — minified stack in,
+source location out. It needs no cloud: `getSourceMap` checks the embedded map before
+falling through to Storage, so maps written to `sourcemaps/current/` satisfy the whole
+path. `FUNCTIONS_EMULATOR` is an environment **variable**, not a process — nothing has to
+be started. It uses `app-HANDLER1.js` and friends because `symbolication` writes to the
+same directory under the same cwd, and a shared fixture name would let one suite's map
+silently satisfy the other's lookup.
 
 Two support modules, not suites themselves:
 
