@@ -7,6 +7,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.5.0] — 2026-08-23
+
 ### Added
 
 - **`withLogging(options, handler)`** — the correct way to scope a request logger. Wraps an `onCall` handler, binds the request's labels with `AsyncLocalStorage.run()`, and unwinds when the handler settles. Options may be an object or a function of the request, for labels derived from the payload.
@@ -107,7 +111,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Emulator mode** — under `FUNCTIONS_EMULATOR=true`, entries are written to a local `dev.jsonl` with rotation instead of Cloud Logging, so local development needs no live credentials.
 - **`fsl` CLI** — source map upload to Storage, deploy packing, and skill installation.
 
-[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.1.1...v0.2.0
