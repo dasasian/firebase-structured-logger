@@ -1,0 +1,14 @@
+{
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "smoke",
+      "runtime": "nodejs22",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "*.log"
+      ]
+    }
+  ]
+}

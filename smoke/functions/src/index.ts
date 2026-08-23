@@ -1,0 +1,70 @@
+/**
+ * Smoke-test Cloud Functions.
+ *
+ * Deployed to a dedicated smoke project so the runner can write real logs and
+ * query them back. Never published — `files` in the root package.json is
+ * ["dist", "skills"], so `smoke/` stays out of the tarball.
+ *
+ * They depend on the PUBLISHED package, not the local build, so a run exercises
+ * the artifact a consumer actually installs: the exports map, the files
+ * contents, and the peer dependencies.
+ *
+ * All project-specific values come from the environment — see .env.example.
+ * Nothing identifying is committed.
+ */
+
+import { onCall, HttpsError } from 'firebase-functions/v2/https'
+import { initializeApp } from 'firebase-admin/app'
+import {
+  initLogger,
+  createClientLogFunction,
+  initRequestLogger,
+  logError,
+  logInfo,
+  logWarn,
+} from '@dasasian/firebase-structured-logger/functions'
+
+initializeApp()
+
+const APP_ID = process.env.FSL_SMOKE_APP_ID ?? 'smoke-app'
+const BUCKET = process.env.FSL_SMOKE_BUCKET
+
+// The production floor defaults to WARNING. The run asserts on INFO entries
+// too, so without this half of them would never be emitted — and the failure
+// would look like an ingestion problem rather than a config one.
+initLogger({ appId: APP_ID, minSeverity: 'DEBUG' })
+
+const OPTS = { maxInstances: 1, cors: true }
+
+/** Client path with the bucket resolved by default — what most consumers do. */
+export const fslSmokeClient = createClientLogFunction(OPTS)
+
+/**
+ * Client path with an explicit bucket.
+ *
+ * What this does NOT prove: with a single bucket both functions resolve to the
+ * same place, so this covers the explicit-bucketName code path, not
+ * per-handler isolation. Isolation is covered deterministically in
+ * tests/configureTwice.ts.
+ */
+export const fslSmokeClientBucket = createClientLogFunction(
+  BUCKET ? { ...OPTS, bucketName: BUCKET } : OPTS,
+)
+
+/** Backend path — initRequestLogger + AsyncLocalStorage, a different route to writeLog. */
+export const fslSmokeBackend = onCall(OPTS, async (request) => {
+  const { runId } = (request.data ?? {}) as { runId?: string }
+  if (!runId) throw new HttpsError('invalid-argument', 'runId is required')
+
+  initRequestLogger(request, {
+    functionName: 'fslSmokeBackend',
+    appId: APP_ID,
+    labels: { smokeRunId: runId },
+  })
+
+  logInfo('[fsl-verify] backend info', { errorType: 'fsl-verify' }, { via: 'logInfo' })
+  logWarn('[fsl-verify] backend warning', { errorType: 'fsl-verify' })
+  logError(new Error('[fsl-verify] backend error'), { errorType: 'fsl-verify' }, { via: 'logError' })
+
+  return { ok: true, runId }
+})
