@@ -185,7 +185,8 @@ npx fsl upload-sourcemaps [--bucket=<name>] [--functions=<path>] [--embed-source
 npx fsl install-skills
 ```
 
-> The `fsl pack` / `pack-restore` commands exist only for consuming this package via a local `file:` dependency (they vendor a tgz so `firebase deploy` can bundle it). When you install from npm — as above — you don't need them.
+> To try an unreleased change in a real deployment, publish a prerelease and install it:
+> `npm publish --tag beta`, then `npm i @dasasian/firebase-structured-logger@beta`. For local work against a checkout, `npm link` avoids publishing entirely.
 
 ## Skills
 

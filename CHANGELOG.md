@@ -11,6 +11,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Labels were not queryable in Cloud Logging** — every documented filter returned nothing. `labels.errorType="fsl-verify"` matched zero entries because a plain `labels` key is not one of the fields Cloud Logging promotes to `LogEntry.labels`; it landed in `jsonPayload.labels` instead. Labels are now emitted under `logging.googleapis.com/labels`, which is the field name Cloud Logging recognises. Everything `skills/query-logs/SKILL.md` documents — `labels.userId`, `labels.screen`, `labels.releaseId`, `labels.errorCategory`, `labels.hasAttachments` — works as written for the first time. Confirmed against real Cloud Logging, not just the emitted bytes.
 
+### Removed
+
+- **`fsl pack` and `fsl pack-restore`** — they existed only to vendor a tarball into `functions/` so `firebase deploy` could bundle an unreleased local build. They had also been broken since the move to the `@dasasian` scope: `findFslDep` looked up the unscoped dependency key, so the command exited 1 on any correctly-installed project — after already writing a tarball into the user's `functions/vendor/`. To try an unreleased change in a real deployment, publish a prerelease (`npm publish --tag beta`) and install it; `npm link` covers local work. That tests the published artifact rather than a local build, and rewrites nobody's `package.json`.
+
 ### Changed
 
 **`fsl upload-sourcemaps` no longer uploads `sourcesContent`.** Source maps are stripped of it before being written to Storage and before being embedded into `{functionsDir}/sourcemaps/current/`. Symbolication never read it — `originalPositionFor` needs only `sources`, `names` and `mappings` — and it was **74.6%** of a real Vite map (2.23 MB → 580 KB). It also meant a logging tool was shipping your original source code into a Storage bucket. Maps with no `sourcesContent` are passed through byte for byte, and an unparseable map is uploaded unchanged rather than dropped.

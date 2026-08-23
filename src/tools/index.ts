@@ -3,7 +3,6 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { uploadSourceMaps } from './uploadSourceMaps'
 import { installSkills } from './installSkills'
-import { pack, packRestore } from './packDeploy'
 
 const [, , command, ...rawArgs] = process.argv
 
@@ -66,24 +65,6 @@ async function main() {
       break
     }
 
-    case 'pack': {
-      if (!args.functions) {
-        console.error('Usage: fsl pack --functions=<path>')
-        process.exit(1)
-      }
-      await pack({ functionsDir: args.functions })
-      break
-    }
-
-    case 'pack-restore': {
-      if (!args.functions) {
-        console.error('Usage: fsl pack-restore --functions=<path>')
-        process.exit(1)
-      }
-      await packRestore({ functionsDir: args.functions })
-      break
-    }
-
     default: {
       console.log(`
 firebase-structured-logger (fsl)
@@ -101,12 +82,7 @@ Commands:
       Copy skills/ to .claude/skills/ (project) or ~/.claude/skills/ (--global).
       Prompts before overwriting existing skills. Use --force to skip prompts.
 
-  fsl pack --functions=<path>
-      Build + pack firebase-structured-logger, copy tgz to functions/vendor/,
-      and patch functions/package.json. Run before firebase deploy.
 
-  fsl pack-restore --functions=<path>
-      Restore functions/package.json to its file: reference after deploy.
 `)
       if (command) {
         console.error(`Unknown command: ${command}`)
