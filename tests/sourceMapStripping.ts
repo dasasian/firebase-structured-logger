@@ -12,7 +12,10 @@
  * Run: npx tsx tests/sourceMapStripping.ts
  */
 
-import { stripSourcesContent } from '../src/tools/uploadSourceMaps.js'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import { stripSourcesContent, uploadSourceMaps } from '../src/tools/uploadSourceMaps.js'
 import { symbolicate } from '../src/functions/symbolicate.js'
 import type { EncodedSourceMap } from '@jridgewell/trace-mapping'
 import { assert, reportResults } from './testHelpers.js'
@@ -100,14 +103,76 @@ function testSizeReductionIsRealistic() {
   console.log(`    ${Math.round(raw.length / 1024)}KB → ${Math.round(json.length / 1024)}KB  (-${pct}%)`)
 }
 
-function run() {
+// --- the embed path, end to end ---
+
+/**
+ * Exercises uploadSourceMaps itself rather than the pure helper.
+ *
+ * The embedded copies ship INSIDE the deployed function, so if they carried
+ * sourcesContent the original source would be in the deployed artifact and in
+ * instance memory for the container's life. That path had no coverage — it
+ * happened to be correct, which is exactly how the labels bug survived.
+ *
+ * The upload is pointed at a bucket that cannot exist, so it fails after the
+ * embed step. That also covers the failure branch.
+ */
+async function testEmbedStripsSourceAndReportsFailure() {
+  console.log('\nTest: --embed-sourcemaps writes a stripped map, and a failed upload is reported')
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fsl-embed-'))
+  const cwd = process.cwd()
+  try {
+    fs.mkdirSync(path.join(tmp, 'dist', 'assets'), { recursive: true })
+    fs.mkdirSync(path.join(tmp, 'functions'), { recursive: true })
+    const SECRET = 'super-secret-original-source'
+    fs.writeFileSync(
+      path.join(tmp, 'dist', 'assets', 'app-EMBED1.js.map'),
+      JSON.stringify({ ...BASE, sourcesContent: [`const KEY = "${SECRET}"`] }),
+    )
+
+    process.chdir(tmp)
+    const result = await uploadSourceMaps({
+      bucket: 'fsl-no-such-bucket-should-not-exist-xyz',
+      release: 'r1',
+      distDir: './dist',
+      functionsDir: './functions',
+      embedSourcemaps: true,
+    })
+
+    assert('a failed upload is reported, not swallowed', result.uploaded === false)
+
+    const embedded = path.join(tmp, 'functions', 'sourcemaps', 'current', 'app-EMBED1.js.map')
+    assert('the map was embedded', fs.existsSync(embedded))
+
+    const text = fs.readFileSync(embedded, 'utf-8')
+    assert('the embedded copy has no sourcesContent', !text.includes('sourcesContent'))
+    assert('the original source is NOT in the deployed artifact', !text.includes(SECRET), 'source would ship inside the function')
+    assert('the embedded map still symbolicates', JSON.parse(text).mappings === BASE.mappings)
+
+    // Deleted on purpose even though the upload failed: leaving them in dist/
+    // would serve source maps to browsers, which is worse than the gap.
+    assert(
+      'the local map is removed from dist/ so it cannot reach hosting',
+      !fs.existsSync(path.join(tmp, 'dist', 'assets', 'app-EMBED1.js.map')),
+    )
+  } finally {
+    process.chdir(cwd)
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+}
+
+async function run() {
   testRemovesSourcesContent()
   testKeepsEverythingSymbolicationNeeds()
   testStrippedMapStillSymbolicates()
   testMapWithoutContentIsUntouched()
   testUnparseableMapIsPassedThrough()
   testSizeReductionIsRealistic()
+  await testEmbedStripsSourceAndReportsFailure()
   reportResults()
 }
 
-run()
+run().catch((err) => {
+  console.error('Fatal:', err)
+  process.exit(1)
+})

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as fs from 'fs'
 import * as path from 'path'
-import { uploadSourceMaps } from './uploadSourceMaps'
+import { uploadSourceMaps, EXIT_UPLOAD_FAILED_BUT_EMBEDDED } from './uploadSourceMaps'
 import { installSkills } from './installSkills'
 
 const [, , command, ...rawArgs] = process.argv
@@ -50,13 +50,16 @@ async function main() {
         console.error('Bucket can also be set via VITE_FIREBASE_STORAGE_BUCKET or FIREBASE_STORAGE_BUCKET env var (loaded from .env.local automatically).')
         process.exit(1)
       }
-      await uploadSourceMaps({
+      const result = await uploadSourceMaps({
         bucket,
         release: args.release,
         distDir: args.dist,
         functionsDir: args.functions,
         embedSourcemaps: args['embed-sourcemaps'] === 'true',
       })
+      // Distinct code so a deploy chain can choose to continue:
+      //   npx fsl upload-sourcemaps … || [ $? -eq 3 ]
+      if (!result.uploaded) process.exit(EXIT_UPLOAD_FAILED_BUT_EMBEDDED)
       break
     }
 

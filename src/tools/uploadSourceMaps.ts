@@ -2,6 +2,16 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { Storage } from '@google-cloud/storage'
 
+/**
+ * Exit code used when maps were embedded but the Storage upload failed.
+ *
+ * Distinct from 1 so a deploy script can decide: `|| [ $? -eq 3 ]` to continue
+ * anyway, or let it stop the chain. Exiting 0 was too quiet — the deploy script
+ * is a `&&` chain, so the deploy proceeded and the only signal was a warning
+ * scrolling past in CI output.
+ */
+export const EXIT_UPLOAD_FAILED_BUT_EMBEDDED = 3
+
 export interface UploadOptions {
   bucket: string        // resolved by caller — falls back to env vars in CLI
   release?: string
@@ -66,7 +76,7 @@ function findMapFiles(dir: string): string[] {
   return results
 }
 
-export async function uploadSourceMaps(options: UploadOptions): Promise<void> {
+export async function uploadSourceMaps(options: UploadOptions): Promise<{ uploaded: boolean }> {
   const releaseId = options.release ?? process.env.VITE_RELEASE_ID ?? process.env.RELEASE_ID
   if (!releaseId) {
     console.error('[fsl] Release ID required. Set RELEASE_ID (or VITE_RELEASE_ID) in .env.local or pass --release=<id>.')
@@ -77,7 +87,7 @@ export async function uploadSourceMaps(options: UploadOptions): Promise<void> {
 
   if (mapFiles.length === 0) {
     console.log('[fsl] No .map files found in', distDir)
-    return
+    return { uploaded: true }
   }
 
   console.log(`[fsl] Uploading ${mapFiles.length} source map(s) for release ${releaseId}...`)
@@ -124,19 +134,29 @@ export async function uploadSourceMaps(options: UploadOptions): Promise<void> {
     }
 
     console.log('[fsl] Source map upload complete.')
+    return { uploaded: true }
   } catch (err) {
-    if (options.embedSourcemaps) {
-      console.warn('[fsl] Warning: GCS upload failed — symbolication will work for this release only (via embedded maps). Previous releases will not be symbolicated.')
-      console.warn('[fsl] GCS error:', (err as any)?.message ?? err)
-      // Delete local .map files even though GCS upload failed — they are embedded and should not be deployed to hosting
-      for (const localPath of mapFiles) {
-        if (fs.existsSync(localPath)) {
-          fs.unlinkSync(localPath)
-          console.log(`  ✗ deleted ${path.relative(process.cwd(), localPath)}`)
-        }
+    if (!options.embedSourcemaps) throw err
+
+    // Be precise about the consequence. Previous releases are unaffected —
+    // their maps reached Storage on earlier runs. What is at risk is THIS
+    // release: its maps never got there, and the embedded copy lives in
+    // {functionsDir}/sourcemaps/current/, which the next deploy wipes.
+    console.warn(`[fsl] GCS upload FAILED for release ${releaseId}.`)
+    console.warn('[fsl] GCS error:', (err as Error)?.message ?? err)
+    console.warn(`[fsl] Errors from ${releaseId} will still symbolicate while it is the deployed`)
+    console.warn('[fsl]   release, because the embedded copy is checked first. Once a newer release')
+    console.warn(`[fsl]   is deployed, sourcemaps/current/ is replaced and ${releaseId} can no`)
+    console.warn('[fsl]   longer be symbolicated. Re-run upload-sourcemaps before deploying again.')
+
+    // Deleted regardless: the maps are embedded, and leaving them in dist/ would
+    // ship source maps to browsers, which is the worse outcome.
+    for (const localPath of mapFiles) {
+      if (fs.existsSync(localPath)) {
+        fs.unlinkSync(localPath)
+        console.log(`  ✗ deleted ${path.relative(process.cwd(), localPath)}`)
       }
-    } else {
-      throw err
     }
+    return { uploaded: false }
   }
 }

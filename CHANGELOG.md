@@ -7,7 +7,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **`fsl upload-sourcemaps` exited 0 when the Storage upload failed** — with `--embed-sourcemaps`, a failed upload was warned about and then swallowed. Deploy scripts are `&&` chains, so `firebase deploy` proceeded and the only signal was a warning scrolling past in CI. It now exits **3** (`EXIT_UPLOAD_FAILED_BUT_EMBEDDED`), distinct from a hard failure so a deploy chain can opt to continue with `|| [ $? -eq 3 ]` rather than facing an all-or-nothing choice.
+- **The failed-upload warning described the wrong releases** — it said "previous releases will not be symbolicated". Previous releases are unaffected; their maps reached Storage on earlier runs. The release at risk is the *current* one: its maps never arrived, and the embedded copy in `sourcemaps/current/` is replaced by the next deploy. The message now says that.
 
 ## [0.4.0] — 2026-08-23
 
