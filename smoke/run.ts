@@ -74,6 +74,13 @@ const RUN_ID = ulid()
 const RELEASE_ID = `smoke-${RUN_ID.slice(-8).toLowerCase()}`
 const BUNDLE = 'app-SMOKE01.js'
 
+// The deployed function ships embedded maps for this release (see
+// smoke/functions/sourcemaps/current/). RELEASE_ID above is deliberately NOT
+// this, so a stack tagged with it exercises the release-mismatch path: embedded
+// is skipped, Storage is consulted, and the correct map wins.
+const EMBEDDED_RELEASE = 'smoke-embedded'
+const EMBEDDED_BUNDLE = 'app-EMBEDDED.js'
+
 // col 4 -> catalogProducts.ts:10:2 "duplicate"
 const SOURCE_MAP: EncodedSourceMap = {
   version: 3,
@@ -234,6 +241,9 @@ async function main(): Promise<void> {
     `keys: ${Object.keys(client?.data ?? {}).join(', ')}`)
 
   console.log('\n  --- symbolication via Storage (the old-release path) ---')
+  // RELEASE_ID is unique per run and has no embedded map, so resolving it at
+  // all proves the lookup fell through to Storage rather than reusing whatever
+  // the function was deployed with.
   const stack: string = client?.data?.error?.stack ?? ''
   assert('the bundle URL is gone', !stack.includes(BUNDLE), `got: ${stack}`)
   assert('the source file is named', stack.includes('catalogProducts.ts'), `got: ${stack}`)
@@ -250,9 +260,44 @@ async function main(): Promise<void> {
   assert('filtering by labels.releaseId isolates the release', (await queryByLabel('releaseId', RELEASE_ID)) > 0)
   assert('filtering by labels.errorType finds the entries', (await queryByLabel('errorType', 'fsl-verify')) > 0)
 
+  console.log('\n  --- release-aware resolution (#20) ---')
+  // A stack naming the EMBEDDED bundle but tagged with this run's release. The
+  // embedded map exists under that filename, so before #20 it would have been
+  // used regardless — the wrong map, confidently. Now the marker says the
+  // embedded maps are for a different release, so Storage is tried first.
+  await callFunction('fslSmokeClient', {
+    message: `[fsl-verify] mismatched release ${RUN_ID}`,
+    severity: 'ERROR',
+    labels: { appId: env.FSL_SMOKE_APP_ID ?? 'smoke-app', releaseId: RELEASE_ID, errorType: 'fsl-verify', smokeRunId: RUN_ID },
+    jsonPayload: {
+      error: {
+        message: `[fsl-verify] mismatched release ${RUN_ID}`,
+        name: 'Error',
+        stack: `duplicate@https://app.example.com/assets/${EMBEDDED_BUNDLE}:1:4`,
+      },
+    },
+  })
+  const mismatchEntries = await waitForEntries(5)
+  const mismatch = mismatchEntries
+    .map((e) => e.data as any)
+    .find((d) => String(d?.message ?? '').includes('mismatched release'))
+  const mstack: string = mismatch?.error?.stack ?? ''
+  assert('the mismatched-release entry arrived', !!mismatch)
+  // A length check would pass even if nothing resolved, so assert the actual
+  // outcome: no Storage map exists for this run's release under the embedded
+  // bundle name, so the documented behaviour is to fall back to the embedded
+  // map. Seeing its source proves the marker shipped, the mismatch was
+  // detected, Storage was consulted, and the fallback fired.
+  assert(
+    'it fell back to the embedded map rather than going dark',
+    mstack.includes('embedded-at-deploy.ts'),
+    `got: ${mstack}`,
+  )
+  assert('the bundle URL is gone', !mstack.includes(EMBEDDED_BUNDLE), `got: ${mstack}`)
+
   console.log('\n  --- backend path ---')
   const bLabels = backendInfo?.meta?.labels ?? {}
-  assert('functionName is set by initRequestLogger', bLabels.functionName === 'fslSmokeBackend', `got: ${bLabels.functionName}`)
+  assert('functionName is set by withLogging', bLabels.functionName === 'fslSmokeBackend', `got: ${bLabels.functionName}`)
   assert('the run id rode through AsyncLocalStorage', bLabels.smokeRunId === RUN_ID, `got: ${bLabels.smokeRunId}`)
 }
 

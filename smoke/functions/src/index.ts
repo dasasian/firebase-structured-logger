@@ -18,7 +18,7 @@ import { initializeApp } from 'firebase-admin/app'
 import {
   initLogger,
   createClientLogFunction,
-  initRequestLogger,
+  withLogging,
   logError,
   logInfo,
   logWarn,
@@ -51,20 +51,31 @@ export const fslSmokeClientBucket = createClientLogFunction(
   BUCKET ? { ...OPTS, bucketName: BUCKET } : OPTS,
 )
 
-/** Backend path — initRequestLogger + AsyncLocalStorage, a different route to writeLog. */
-export const fslSmokeBackend = onCall(OPTS, async (request) => {
-  const { runId } = (request.data ?? {}) as { runId?: string }
-  if (!runId) throw new HttpsError('invalid-argument', 'runId is required')
+/**
+ * Backend path — withLogging + AsyncLocalStorage, a different route to writeLog.
+ *
+ * Deploying this is the only way to confirm the wrapper's returned signature
+ * genuinely satisfies onCall with the real firebase-functions types and runtime.
+ * A unit test drives it with a synthetic CallableRequest, which cannot settle
+ * that.
+ */
+export const fslSmokeBackend = onCall(
+  OPTS,
+  withLogging(
+    (request) => ({
+      functionName: 'fslSmokeBackend',
+      appId: APP_ID,
+      labels: { smokeRunId: (request.data as { runId?: string })?.runId },
+    }),
+    async (request) => {
+      const { runId } = (request.data ?? {}) as { runId?: string }
+      if (!runId) throw new HttpsError('invalid-argument', 'runId is required')
 
-  initRequestLogger(request, {
-    functionName: 'fslSmokeBackend',
-    appId: APP_ID,
-    labels: { smokeRunId: runId },
-  })
+      logInfo('[fsl-verify] backend info', { errorType: 'fsl-verify' }, { via: 'logInfo' })
+      logWarn('[fsl-verify] backend warning', { errorType: 'fsl-verify' })
+      logError(new Error('[fsl-verify] backend error'), { errorType: 'fsl-verify' }, { via: 'logError' })
 
-  logInfo('[fsl-verify] backend info', { errorType: 'fsl-verify' }, { via: 'logInfo' })
-  logWarn('[fsl-verify] backend warning', { errorType: 'fsl-verify' })
-  logError(new Error('[fsl-verify] backend error'), { errorType: 'fsl-verify' }, { via: 'logError' })
-
-  return { ok: true, runId }
-})
+      return { ok: true, runId }
+    },
+  ),
+)

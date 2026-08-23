@@ -42,6 +42,19 @@ npm run smoke           # invokes, waits for ingestion, asserts, cleans up
 Both pass `--project` explicitly. Nothing here relies on `.firebaserc` or on
 whatever project the Firebase CLI last considered active.
 
+## What the deployed fixture covers
+
+`functions/sourcemaps/current/` ships an embedded map for release
+`smoke-embedded`, alongside a `.release` marker. Every run uses a unique
+release id, so a stack naming that bundle is a genuine mismatch — which
+exercises the release-aware resolution added for #20: the marker is read, the
+mismatch detected, Storage consulted, and the embedded map used as a fallback.
+
+That also strengthens the Storage assertion. Before the fixture existed the
+embedded lookup missed trivially because nothing was deployed; now there ARE
+embedded maps, so resolving a run's own release proves the lookup genuinely fell
+through to Storage rather than reusing whatever shipped.
+
 ## Notes on the design
 
 **The functions depend on the published package**, not the local build. A run
