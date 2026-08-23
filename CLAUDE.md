@@ -13,9 +13,16 @@ no MCP registry step.
 
 `npm test` runs the `tests/*.ts` tsx suites. Keep them green.
 
-The functions-side suites — `errorPayload`, `requestLogger`, `handler`, `symbolication` — run
-under `FUNCTIONS_EMULATOR=true` (already set in the `test` script) so they exercise emulator
-mode without live credentials, writing to a throwaway `dev.jsonl` instead of Cloud Logging.
+Most functions-side suites — `errorPayload`, `requestLogger`, `handler`, `symbolication` —
+run under `FUNCTIONS_EMULATOR=true` (already set in the `test` script) so they exercise
+emulator mode without live credentials, writing to a throwaway `dev.jsonl`.
+
+**`productionOutput` deliberately runs with that flag UNSET.** `writeLog` has two branches
+that emit structurally different entries — emulator nests `jsonPayload`, production spreads
+it to top level — and for a long time only the emulator branch was tested. It captures
+**stdout and stderr** (firebase-functions routes ERROR to `console.error`, so a stdout-only
+capture misses every error entry) and asserts the exact bytes Cloud Logging ingests. Change
+the emitted shape and this is the suite that should stop you.
 
 Two support modules, not suites themselves:
 
