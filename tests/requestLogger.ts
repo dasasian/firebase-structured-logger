@@ -21,7 +21,7 @@ const LOG_DIR = './test-requestlogger-output'
 
 import type { CallableRequest } from 'firebase-functions/v2/https'
 import { initLogger } from '../src/functions/logger.js'
-import { initRequestLogger, getLogger } from '../src/functions/requestLogger.js'
+import { withLogging, initRequestLogger, getLogger } from '../src/functions/requestLogger.js'
 import { assert, reportResults, readLastEntry, clearLog } from './testHelpers.js'
 
 fs.mkdirSync(LOG_DIR, { recursive: true })
@@ -205,11 +205,124 @@ function testAllSeveritiesReachTheLog() {
   assert('error() kept the request labels', (entry?.labels as Record<string, string>)?.functionName === 'severityFunc')
 }
 
+
+// --- Scope isolation (#19) ---
+
+async function testWithLoggingDoesNotLeakAfterTheRequest() {
+  console.log('\nTest: withLogging does not leak the scope past the request')
+  clearLog(LOG_DIR)
+
+  await withLogging({ functionName: 'chargeCard' }, async () => {
+    getLogger().info('inside the request')
+  })(makeCallableRequest('alice'))
+
+  assert('the request itself was labelled', lastLabels().userId === 'alice', `got: ${lastLabels().userId}`)
+
+  // A later handler that does NOT scope itself — a scheduled function, a
+  // Firestore trigger, or anything leaning on the anonymous fallback.
+  clearLog(LOG_DIR)
+  getLogger().info('outside any request')
+  const after = lastLabels()
+
+  assert('it does NOT inherit the previous userId', after.userId === undefined, `got: ${after.userId}`)
+  assert('it does NOT inherit the previous functionName', after.functionName === undefined, `got: ${after.functionName}`)
+}
+
+async function testWithLoggingIsolatesConcurrentRequests() {
+  console.log('\nTest: concurrent requests do not see each other\'s labels')
+
+  const seen: Record<string, string | undefined> = {}
+  const handler = (uid: string, delayMs: number) =>
+    withLogging({ functionName: 'concurrent' }, async () => {
+      await new Promise((r) => setTimeout(r, delayMs))
+      clearLog(LOG_DIR)
+      getLogger().info(`log from ${uid}`)
+      seen[uid] = lastLabels().userId
+    })(makeCallableRequest(uid))
+
+  // Deliberately interleaved: the slower request starts first.
+  await Promise.all([handler('alice', 30), handler('bob', 5)])
+
+  assert('alice saw her own id', seen.alice === 'alice', `got: ${seen.alice}`)
+  assert('bob saw his own id', seen.bob === 'bob', `got: ${seen.bob}`)
+}
+
+async function testWithLoggingComputesLabelsPerRequest() {
+  console.log('\nTest: labels can be derived from the request')
+  clearLog(LOG_DIR)
+
+  await withLogging(
+    (req) => ({ functionName: 'perRequest', labels: { tenant: (req.data as { tenant?: string })?.tenant } }),
+    async () => { getLogger().info('with derived labels') },
+  )({ data: { tenant: 'acme-co' }, auth: { uid: 'u1', token: {} }, rawRequest: {} } as never)
+
+  assert('the derived label is present', lastLabels().tenant === 'acme-co', `got: ${lastLabels().tenant}`)
+}
+
+async function testWithLoggingReturnsTheHandlerResult() {
+  console.log('\nTest: the wrapper returns whatever the handler returns')
+  const result = await withLogging({ functionName: 'returns' }, async () => ({ ok: true, n: 42 }))(
+    makeCallableRequest('u1'),
+  )
+  assert('the value passes through', (result as { n: number }).n === 42)
+}
+
+async function testWithLoggingPropagatesErrors() {
+  console.log('\nTest: a throwing handler still throws, and the scope is unwound')
+  clearLog(LOG_DIR)
+
+  let caught = false
+  try {
+    await withLogging({ functionName: 'throws' }, async () => {
+      throw new Error('handler exploded')
+    })(makeCallableRequest('alice'))
+  } catch (err) {
+    caught = (err as Error).message === 'handler exploded'
+  }
+  assert('the error reached the caller', caught)
+
+  clearLog(LOG_DIR)
+  getLogger().info('after the throw')
+  assert('the scope was unwound despite the throw', lastLabels().userId === undefined, `got: ${lastLabels().userId}`)
+}
+
+function testInitRequestLoggerStillLeaks() {
+  console.log('\nTest: the deprecated path still leaks — documented, not fixed')
+  clearLog(LOG_DIR)
+
+  // Kept working for one version so consumers can migrate deliberately. The
+  // leak is the reason it is deprecated, so it is asserted rather than assumed.
+  initRequestLogger(makeCallableRequest('carol'), { functionName: 'legacy' })
+  getLogger().info('inside')
+  assert('the request is labelled', lastLabels().userId === 'carol')
+
+  clearLog(LOG_DIR)
+  getLogger().info('after, with no scope of its own')
+  assert(
+    'the previous request\'s id leaks into a later unscoped call',
+    lastLabels().userId === 'carol',
+    'if this now passes as undefined, initRequestLogger was fixed and this test should go',
+  )
+}
+
 // --- Runner ---
 
 async function run() {
-  // First — see the note on testAnonymousFallback.
+  // ORDER MATTERS, and the reason is the bug this file documents.
+  //
+  // initRequestLogger binds with enterWith(), which is never unwound — once any
+  // test calls it, the scope persists for the rest of the process. So every
+  // test that asserts on the ABSENCE of a scope has to run before the first
+  // leaky call: the anonymous fallback, and the withLogging isolation tests.
+  //
+  // testInitRequestLoggerStillLeaks goes last, since leaking is its point.
   testAnonymousFallback()
+
+  await testWithLoggingDoesNotLeakAfterTheRequest()
+  await testWithLoggingIsolatesConcurrentRequests()
+  await testWithLoggingComputesLabelsPerRequest()
+  await testWithLoggingReturnsTheHandlerResult()
+  await testWithLoggingPropagatesErrors()
 
   testSeedsRequestLabels()
   testCustomLabelsAreSeeded()
@@ -219,6 +332,8 @@ async function run() {
   await testScopeSurvivesAwait()
   testLaterRequestReplacesEarlierOne()
   testAllSeveritiesReachTheLog()
+
+  testInitRequestLoggerStillLeaks()
 
   fs.rmSync(LOG_DIR, { recursive: true, force: true })
   reportResults()

@@ -163,15 +163,33 @@ logger.addBreadcrumb(type, name, data?)
 ## Functions API
 
 ```ts
-import { initLogger, initRequestLogger, logError, logInfo } from '@dasasian/firebase-structured-logger/functions'
+import { initLogger, withLogging, logError, logInfo } from '@dasasian/firebase-structured-logger/functions'
 
 initLogger({ appId: 'my-app' }) // at module load
 
-export const myFunction = onCall(async (request) => {
-  initRequestLogger(request, { functionName: 'myFunction' }) // seeds userId + functionName
-  logInfo('started')
-})
+export const myFunction = onCall(
+  withLogging({ functionName: 'myFunction' }, async (request) => {
+    logInfo('started') // carries userId + functionName automatically
+  }),
+)
 ```
+
+`withLogging` binds the request's labels for the duration of the handler and unwinds
+afterwards, so one request's `userId` can never appear on another's logs. Labels that
+depend on the request are computed per call:
+
+```ts
+withLogging(
+  (request) => ({ functionName: 'myFunction', labels: { orgId: request.data.orgId } }),
+  async (request) => { /* … */ },
+)
+```
+
+> **`initRequestLogger` is deprecated and removed in 0.6.0.** It binds the scope with
+> `enterWith()`, which is never unwound — the labels outlive the request, so a later
+> handler that does *not* call it (a scheduled function, a Firestore trigger, or anything
+> relying on `getLogger()`'s anonymous fallback) inherits whichever user last touched the
+> warm instance. Handlers that all call it are unaffected; the hazard is the ones that don't.
 
 Backend log methods also accept an optional `attachments` (`Record<string, string | Buffer>`).
 

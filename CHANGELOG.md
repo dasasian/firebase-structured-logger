@@ -7,6 +7,14 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`withLogging(options, handler)`** — the correct way to scope a request logger. Wraps an `onCall` handler, binds the request's labels with `AsyncLocalStorage.run()`, and unwinds when the handler settles. Options may be an object or a function of the request, for labels derived from the payload.
+
+### Deprecated
+
+- **`initRequestLogger` — removed in 0.6.0.** It binds with `enterWith()`, which is never unwound, so a request's labels outlive the request. A later handler that does *not* call it — a scheduled function, a Firestore or Storage trigger, or anything relying on `getLogger()`'s anonymous fallback — inherits whichever user last touched the warm instance. Reproduced: a handler that never called it logged `userId: alice` from the previous request. Handlers that all call it are unaffected; the hazard is the ones that don't. It still works, and now warns once per function name explaining the leak.
+
 ### Fixed
 
 - **An unreadable attachment dropped the entire log entry** — message, labels, breadcrumbs and all, not just the attachment. Attachment conversion shared a `try` with the send, so a `FileReader` failure meant `logFunction` was never called. A `File` from `<input type="file">` genuinely raises `NotReadableError` when it is moved or deleted between selection and submit. Each attachment now converts in its own `try`: failures are omitted, the rest are kept, and the entry is sent regardless. The names that failed are recorded in an `attachmentsFailed` label so their absence is not a mystery. The misleading `Failed to send log` message no longer covers this case.
