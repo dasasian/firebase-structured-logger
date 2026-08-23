@@ -16,6 +16,12 @@ no MCP registry step.
 its source was removed. `prepublishOnly` runs `clean && build` for that reason. Check
 `npm pack --dry-run` after deleting any source file.
 
+`.nvmrc` pins **22** for local work — `nvm use` picks it up in this directory. It exists
+because Node 20 fails in ways that look like code problems: `firebase-functions` pulls in
+`jwks-rsa` → `jose` 6, which is ESM-only, so `firebase deploy` dies during codebase
+analysis with `ERR_REQUIRE_ESM` and a plain `require()` of the built `/functions` entry
+point does the same. CI deliberately ignores `.nvmrc` and keeps its 20/22 matrix.
+
 **Node 22 is the supported floor.** `firebase-admin` 14 requires it, and it is the Cloud
 Functions runtime people deploy to. CI runs 20 and 22 — 20 only as a courtesy check for
 consumers still on `firebase-admin` 13. If you change the matrix, update the required
