@@ -7,6 +7,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.4.0] — 2026-08-23
+
 ### Fixed
 
 - **Labels were not queryable in Cloud Logging** — every documented filter returned nothing. `labels.errorType="fsl-verify"` matched zero entries because a plain `labels` key is not one of the fields Cloud Logging promotes to `LogEntry.labels`; it landed in `jsonPayload.labels` instead. Labels are now emitted under `logging.googleapis.com/labels`, which is the field name Cloud Logging recognises. Everything `skills/query-logs/SKILL.md` documents — `labels.userId`, `labels.screen`, `labels.releaseId`, `labels.errorCategory`, `labels.hasAttachments` — works as written for the first time. Confirmed against real Cloud Logging, not just the emitted bytes.
@@ -88,7 +92,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Emulator mode** — under `FUNCTIONS_EMULATOR=true`, entries are written to a local `dev.jsonl` with rotation instead of Cloud Logging, so local development needs no live credentials.
 - **`fsl` CLI** — source map upload to Storage, deploy packing, and skill installation.
 
-[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/dasasian/firebase-structured-logger/compare/v0.1.0...v0.1.1
