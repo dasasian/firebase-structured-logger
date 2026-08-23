@@ -4,7 +4,6 @@ const MAX_BREADCRUMBS = 50
 const MAX_AGE_MS = 5 * 60 * 1000 // 5 minutes
 
 let currentScreen: string | undefined
-let activeActivity: string | undefined
 let breadcrumbs: BreadcrumbEntry[] = []
 
 export function setCurrentScreen(screen: string): void {
@@ -12,16 +11,8 @@ export function setCurrentScreen(screen: string): void {
   addBreadcrumb('nav', `navigate_${screen}`)
 }
 
-export function setActiveActivity(activity: string | undefined): void {
-  activeActivity = activity
-}
-
 export function getCurrentScreen(): string | undefined {
   return currentScreen
-}
-
-export function getActiveActivity(): string | undefined {
-  return activeActivity
 }
 
 export function addBreadcrumb(
@@ -52,7 +43,6 @@ export function getLastBreadcrumbs(count: number): BreadcrumbEntry[] {
 export function clearBreadcrumbs(): void {
   breadcrumbs = []
   currentScreen = undefined
-  activeActivity = undefined
 }
 
 export const bc = {

@@ -7,6 +7,12 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+**Breaking: `initRequestLogger` is gone. Use `withLogging`.** It bound the request scope with `AsyncLocalStorage.enterWith()`, which is never unwound, so a request's labels outlived the request — a later handler that did *not* call it inherited whichever user last touched the warm instance. Deprecated in 0.5.0 with a warning naming the leak. `withLogging` binds with `run()`, which restores the previous context when the handler settles, including on a throw.
+
+**Breaking: `setActiveActivity` and `BaseLabels.activity` are gone.** `activity` was ambient state with no natural end — nothing cleared it automatically, so a forgotten one contaminated the rest of the session, and because it fed the dedup signature a stale value distorted which errors were suppressed. A wrong signal in a filtering rule is worse than a missing one. `screen` looks similar but is self-correcting: the next `setScreen()` overwrites it. Nothing set `activity` in practice, so removing it from the signature changes no behaviour — the segment was always empty. See #29 for restoring path discrimination from breadcrumbs, which are derived rather than manually maintained and therefore cannot go stale.
+
 ### Fixed
 
 - **An unrecognised severity crashed `writeLog` and destroyed the entry** — both dispatch paths look the value up in a fixed table (`CONSOLE_FN` in emulator mode, `firebase-functions`' own `CONSOLE_SEVERITY` inside `ffWrite`), and a miss resolves to `undefined`; calling it throws, `Logger.send()`'s catch swallows it, and the entry disappears with no diagnostic. It also slipped past the min-severity floor, since `SEVERITY_ORDER[unknown]` is `undefined` and `undefined > n` is `false`. `writeLog` is exported, so a caller could reach it with a value read from config, crossing a type boundary, or from plain JavaScript. Unknown severities are now written as `ERROR` with a warning naming the bad value — an entry arriving loud beats one vanishing quietly.

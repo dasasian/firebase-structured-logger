@@ -86,7 +86,7 @@ function testDuplicateSuppression() {
   reset()
   configureRateLimiter({ duplicateLimit: 2 })
 
-  const sig = signatureFor(new Error('same failure'), 'Checkout', 'pay')
+  const sig = signatureFor(new Error('same failure'), 'Checkout')
   assert('1st occurrence allowed', allow(sig).allowed)
   assert('2nd occurrence allowed', allow(sig).allowed)
 
@@ -118,21 +118,20 @@ function testSuppressionIsAvailableToAnySeverity() {
 }
 
 function testSignatureIsScopedToContext() {
-  console.log('\nTest: the signature includes screen and activity')
+  console.log('\nTest: the signature includes the screen')
   reset()
   configureRateLimiter({ duplicateLimit: 1 })
 
   const error = new Error('same failure')
-  allow(signatureFor(error, 'Checkout', 'pay'))
+  allow(signatureFor(error, 'Checkout'))
 
-  assert('same error, same place → suppressed', !allow(signatureFor(error, 'Checkout', 'pay')).allowed)
-  assert('same error, other screen → allowed', allow(signatureFor(error, 'Settings', 'pay')).allowed)
-  assert('same error, other activity → allowed', allow(signatureFor(error, 'Checkout', 'refund')).allowed)
-  assert('different message → allowed', allow(signatureFor(new Error('other'), 'Checkout', 'pay')).allowed)
+  assert('same error, same place → suppressed', !allow(signatureFor(error, 'Checkout')).allowed)
+  assert('same error, other screen → allowed', allow(signatureFor(error, 'Settings')).allowed)
+  assert('different message → allowed', allow(signatureFor(new Error('other'), 'Checkout')).allowed)
 
   const named = new Error('same failure')
   named.name = 'TypeError'
-  assert('different error name → allowed', allow(signatureFor(named, 'Checkout', 'pay')).allowed)
+  assert('different error name → allowed', allow(signatureFor(named, 'Checkout')).allowed)
 }
 
 function testStringErrorsAreSupported() {

@@ -9,7 +9,6 @@ export interface BaseLabels {
   releaseId?: string
   errorType?: string
   errorCategory?: string
-  activity?: string
 }
 
 export interface ErrorPayload {

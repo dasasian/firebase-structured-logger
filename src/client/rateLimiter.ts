@@ -44,16 +44,20 @@ function writeState(state: RateLimitState): void {
 
 /**
  * Build the key used to recognise a repeat of the same problem. Two occurrences
- * count as duplicates only if the message, the screen and the activity all match,
- * so the same error from two different places is not collapsed into one.
+ * count as duplicates only if the message and the screen both match, so the same
+ * error from two different screens is not collapsed into one.
+ *
+ * This is coarse: the same error reached by two different paths on ONE screen
+ * still collapses, and the second path can be suppressed before anyone sees it.
+ * See #29 — deriving the path from breadcrumbs would discriminate properly,
+ * without the staleness of a span someone has to remember to clear.
  */
 export function signatureFor(
   error: Error | string,
   screen?: string,
-  activity?: string,
 ): string {
   const str = error instanceof Error ? `${error.name}:${error.message}` : String(error)
-  return `${str}|${screen ?? ''}|${activity ?? ''}`
+  return `${str}|${screen ?? ''}`
 }
 
 export type RateLimitDecision =

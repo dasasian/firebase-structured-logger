@@ -3,7 +3,7 @@ import type { LogWriter } from './logger'
 
 export { initLogger } from './logger'
 export type { LogWriter } from './logger'
-export { withLogging, initRequestLogger, getLogger } from './requestLogger'
+export { withLogging, getLogger } from './requestLogger'
 export { createClientLogHandler, createClientLogFunction } from './logHandler'
 export type { ClientLogHandlerConfig } from './logHandler'
 export type { LogSeverity, LogPayload, BaseLabels } from '../shared/types'

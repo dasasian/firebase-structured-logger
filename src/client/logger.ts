@@ -5,7 +5,6 @@ import {
   addBreadcrumb,
   getLastBreadcrumbs,
   getCurrentScreen,
-  getActiveActivity,
   setCurrentScreen,
   clearBreadcrumbs,
 } from './breadcrumbs'
@@ -138,7 +137,7 @@ export class Logger<
       context,
       attachments,
       toErrorPayload(error),
-      signatureFor(error, getCurrentScreen(), getActiveActivity()),
+      signatureFor(error, getCurrentScreen()),
     )
   }
 

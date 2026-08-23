@@ -21,7 +21,7 @@ const LOG_DIR = './test-requestlogger-output'
 
 import type { CallableRequest } from 'firebase-functions/v2/https'
 import { initLogger } from '../src/functions/logger.js'
-import { withLogging, initRequestLogger, getLogger } from '../src/functions/requestLogger.js'
+import { withLogging, getLogger } from '../src/functions/requestLogger.js'
 import { assert, reportResults, readLastEntry, clearLog } from './testHelpers.js'
 
 fs.mkdirSync(LOG_DIR, { recursive: true })
@@ -41,16 +41,13 @@ function lastLabels(): Record<string, string> {
 
 // --- Label seeding ---
 
-function testSeedsRequestLabels() {
+async function testSeedsRequestLabels() {
   console.log('\nTest: request labels are seeded on every log in the request')
   clearLog(LOG_DIR)
 
-  const writer = initRequestLogger(makeCallableRequest('user_abc'), {
-    functionName: 'createProduct',
-    appId: 'acme',
-  })
-
-  writer.info('started')
+  await withLogging({ functionName: 'createProduct', appId: 'acme' }, async () => {
+    getLogger().info('started')
+  })(makeCallableRequest('user_abc'))
 
   const labels = lastLabels()
   assert('functionName is seeded', labels.functionName === 'createProduct', `got: ${labels.functionName}`)
@@ -58,16 +55,14 @@ function testSeedsRequestLabels() {
   assert('appId is seeded', labels.appId === 'acme')
 }
 
-function testCustomLabelsAreSeeded() {
+async function testCustomLabelsAreSeeded() {
   console.log('\nTest: caller-supplied labels are seeded too')
   clearLog(LOG_DIR)
 
-  const writer = initRequestLogger(makeCallableRequest('user_abc'), {
-    functionName: 'createProduct',
-    labels: { organizationId: 'org_42', tenant: 'acme' },
-  })
-
-  writer.info('started')
+  await withLogging(
+    { functionName: 'createProduct', labels: { organizationId: 'org_42', tenant: 'acme' } },
+    async () => { getLogger().info('started') },
+  )(makeCallableRequest('user_abc'))
 
   const labels = lastLabels()
   assert('a custom label is seeded', labels.organizationId === 'org_42', `got: ${labels.organizationId}`)
@@ -75,13 +70,14 @@ function testCustomLabelsAreSeeded() {
   assert('built-in labels survive alongside them', labels.functionName === 'createProduct')
 }
 
-function testUndefinedLabelsAreStripped() {
+async function testUndefinedLabelsAreStripped() {
   console.log('\nTest: undefined labels are stripped, not written as "undefined"')
   clearLog(LOG_DIR)
 
   // No auth, no appId, no extra labels.
-  const writer = initRequestLogger(makeCallableRequest(), { functionName: 'anonFunc' })
-  writer.info('started')
+  await withLogging({ functionName: 'anonFunc' }, async () => {
+    getLogger().info('started')
+  })(makeCallableRequest())
 
   const labels = lastLabels()
   assert('functionName is present', labels.functionName === 'anonFunc')
@@ -89,16 +85,14 @@ function testUndefinedLabelsAreStripped() {
   assert('appId is absent', !('appId' in labels))
 }
 
-function testPerCallLabelsOverrideSeeded() {
+async function testPerCallLabelsOverrideSeeded() {
   console.log('\nTest: per-call labels override the seeded ones')
   clearLog(LOG_DIR)
 
-  const writer = initRequestLogger(makeCallableRequest('user_abc'), {
-    functionName: 'createProduct',
-    labels: { stage: 'start' },
-  })
-
-  writer.info('finished', { stage: 'end' })
+  await withLogging(
+    { functionName: 'createProduct', labels: { stage: 'start' } },
+    async () => { getLogger().info('finished', { stage: 'end' }) },
+  )(makeCallableRequest('user_abc'))
 
   const labels = lastLabels()
   assert('the per-call label wins', labels.stage === 'end', `got: ${labels.stage}`)
@@ -107,13 +101,13 @@ function testPerCallLabelsOverrideSeeded() {
 
 // --- Scoping ---
 
-function testGetLoggerReturnsTheRequestWriter() {
+async function testGetLoggerReturnsTheRequestWriter() {
   console.log('\nTest: getLogger returns the request-scoped writer')
   clearLog(LOG_DIR)
 
-  initRequestLogger(makeCallableRequest('user_xyz'), { functionName: 'scopedFunc' })
-
-  getLogger().info('written through getLogger')
+  await withLogging({ functionName: 'scopedFunc' }, async () => {
+    getLogger().info('written through getLogger')
+  })(makeCallableRequest('user_xyz'))
 
   const labels = lastLabels()
   assert('the request labels are present', labels.functionName === 'scopedFunc', `got: ${labels.functionName}`)
@@ -124,37 +118,50 @@ async function testScopeSurvivesAwait() {
   console.log('\nTest: the request scope survives an await')
   clearLog(LOG_DIR)
 
-  initRequestLogger(makeCallableRequest('user_async'), { functionName: 'asyncFunc' })
-
-  await new Promise((resolve) => setTimeout(resolve, 1))
-  getLogger().info('after await')
+  await withLogging({ functionName: 'asyncFunc' }, async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1))
+    getLogger().info('after await')
+  })(makeCallableRequest('user_async'))
 
   const labels = lastLabels()
   assert('labels survive the await', labels.functionName === 'asyncFunc', `got: ${labels.functionName}`)
   assert('the user survives the await', labels.userId === 'user_async')
 }
 
-function testLaterRequestReplacesEarlierOne() {
-  console.log('\nTest: a later request replaces the earlier scope')
+async function testSequentialRequestsAreIndependent() {
+  console.log('\nTest: sequential requests each get their own scope')
+
+  // This used to assert "a later request replaces the earlier scope", which
+  // only made sense while the scope leaked — the question was which stale value
+  // won. With run() there is no shared scope to replace: each request has its
+  // own and gives it back.
   clearLog(LOG_DIR)
+  await withLogging({ functionName: 'first' }, async () => {
+    getLogger().info('from the first request')
+  })(makeCallableRequest('user_one'))
+  const first = lastLabels()
 
-  initRequestLogger(makeCallableRequest('user_one'), { functionName: 'first' })
-  initRequestLogger(makeCallableRequest('user_two'), { functionName: 'second' })
+  clearLog(LOG_DIR)
+  await withLogging({ functionName: 'second' }, async () => {
+    getLogger().info('from the second request')
+  })(makeCallableRequest('user_two'))
+  const second = lastLabels()
 
-  getLogger().info('which request am I in?')
-
-  const labels = lastLabels()
-  assert('the newest request wins', labels.functionName === 'second', `got: ${labels.functionName}`)
-  assert('the newest user wins', labels.userId === 'user_two', `got: ${labels.userId}`)
-  assert('the old user is gone', labels.userId !== 'user_one')
+  assert('the first saw its own labels', first.functionName === 'first' && first.userId === 'user_one',
+    `got: ${JSON.stringify(first)}`)
+  assert('the second saw its own labels', second.functionName === 'second' && second.userId === 'user_two',
+    `got: ${JSON.stringify(second)}`)
+  assert('no bleed between them', second.userId !== 'user_one')
 }
 
 // --- Fallback outside a request ---
 
 /**
- * MUST run before any initRequestLogger call. `enterWith` sets the store for
- * the whole current execution context, so once a request scope is entered
- * there is no way back to "outside a request" in this process.
+ * This used to have to run first. While `initRequestLogger` bound the scope
+ * with `enterWith()`, the first call leaked it for the rest of the process and
+ * there was no way back to "outside a request". `withLogging` unwinds, so the
+ * ordering constraint is gone — kept as a note because the constraint was the
+ * bug, described as a quirk.
  */
 function testAnonymousFallback() {
   console.log('\nTest: getLogger outside a request falls back to an anonymous writer')
@@ -179,9 +186,11 @@ function testAnonymousFallback() {
   assert('a logId is still assigned', typeof labels.logId === 'string' && labels.logId.length > 0)
 }
 
-function testAllSeveritiesReachTheLog() {
+async function testAllSeveritiesReachTheLog() {
   console.log('\nTest: every severity from the request writer reaches the log')
-  const writer = initRequestLogger(makeCallableRequest('user_abc'), { functionName: 'severityFunc' })
+  const writer = await withLogging({ functionName: 'severityFunc' }, async () =>
+    getLogger(),
+  )(makeCallableRequest('user_abc'))
 
   for (const [name, write] of [
     ['info', () => writer.info('info message')],
@@ -286,36 +295,12 @@ async function testWithLoggingPropagatesErrors() {
   assert('the scope was unwound despite the throw', lastLabels().userId === undefined, `got: ${lastLabels().userId}`)
 }
 
-function testInitRequestLoggerStillLeaks() {
-  console.log('\nTest: the deprecated path still leaks — documented, not fixed')
-  clearLog(LOG_DIR)
-
-  // Kept working for one version so consumers can migrate deliberately. The
-  // leak is the reason it is deprecated, so it is asserted rather than assumed.
-  initRequestLogger(makeCallableRequest('carol'), { functionName: 'legacy' })
-  getLogger().info('inside')
-  assert('the request is labelled', lastLabels().userId === 'carol')
-
-  clearLog(LOG_DIR)
-  getLogger().info('after, with no scope of its own')
-  assert(
-    'the previous request\'s id leaks into a later unscoped call',
-    lastLabels().userId === 'carol',
-    'if this now passes as undefined, initRequestLogger was fixed and this test should go',
-  )
-}
-
 // --- Runner ---
 
 async function run() {
-  // ORDER MATTERS, and the reason is the bug this file documents.
-  //
-  // initRequestLogger binds with enterWith(), which is never unwound — once any
-  // test calls it, the scope persists for the rest of the process. So every
-  // test that asserts on the ABSENCE of a scope has to run before the first
-  // leaky call: the anonymous fallback, and the withLogging isolation tests.
-  //
-  // testInitRequestLoggerStillLeaks goes last, since leaking is its point.
+  // Order no longer matters. Every scope here is bound with run() and unwinds
+  // when its handler settles, so a test asserting the ABSENCE of a scope can run
+  // at any point. That was not true while initRequestLogger existed.
   testAnonymousFallback()
 
   await testWithLoggingDoesNotLeakAfterTheRequest()
@@ -324,16 +309,15 @@ async function run() {
   await testWithLoggingReturnsTheHandlerResult()
   await testWithLoggingPropagatesErrors()
 
-  testSeedsRequestLabels()
-  testCustomLabelsAreSeeded()
-  testUndefinedLabelsAreStripped()
-  testPerCallLabelsOverrideSeeded()
-  testGetLoggerReturnsTheRequestWriter()
+  await testSeedsRequestLabels()
+  await testCustomLabelsAreSeeded()
+  await testUndefinedLabelsAreStripped()
+  await testPerCallLabelsOverrideSeeded()
+  await testGetLoggerReturnsTheRequestWriter()
   await testScopeSurvivesAwait()
-  testLaterRequestReplacesEarlierOne()
-  testAllSeveritiesReachTheLog()
+  await testSequentialRequestsAreIndependent()
+  await testAllSeveritiesReachTheLog()
 
-  testInitRequestLoggerStillLeaks()
 
   fs.rmSync(LOG_DIR, { recursive: true, force: true })
   reportResults()

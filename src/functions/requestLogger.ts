@@ -64,55 +64,11 @@ export function withLogging<
 }
 
 /**
- * Initialize a request-scoped logger and store it in AsyncLocalStorage.
- *
- * @deprecated Use {@link withLogging}. This leaks the request scope: it binds
- * with `AsyncLocalStorage.enterWith()`, which persists for the remainder of the
- * execution context and is never unwound. The labels therefore outlive the
- * request, and any later handler that does NOT call this — a scheduled
- * function, a Firestore or Storage trigger, or anything relying on
- * `getLogger()`'s anonymous fallback — inherits whichever user last touched the
- * warm instance.
- *
- * Handlers that all call this are unaffected: each overwrites the store with
- * its own labels. The hazard is the handlers that do not.
- *
- * Removed in 0.6.0.
- */
-export function initRequestLogger<
-  AppLabels extends Record<string, string | undefined> = Record<string, string | undefined>,
->(
-  request: CallableRequest,
-  extra?: RequestLoggerOptions<AppLabels>,
-): LogWriter {
-  warnDeprecated(extra?.functionName)
-  const writer = writerFor<AppLabels>(request, extra)
-  storage.enterWith(writer)
-  return writer
-}
-
-// Warn once per function name rather than per invocation — a per-request warning
-// on a hot path is noise that gets filtered out and then ignored.
-const warned = new Set<string>()
-function warnDeprecated(functionName: string | undefined): void {
-  const key = functionName ?? '(unnamed)'
-  if (warned.has(key)) return
-  warned.add(key)
-  console.warn(
-    `[fsl] initRequestLogger() is deprecated (${key}). It binds the request scope with ` +
-      'enterWith(), which is never unwound — the labels outlive the request, so a later ' +
-      'handler that does not call it inherits this request\'s userId. Wrap the handler ' +
-      'with withLogging() instead. Removed in 0.6.0.',
-  )
-}
-
-/**
  * Retrieve the request-scoped logger.
  *
  * Returns an anonymous writer (no request labels) when called outside a
- * request. That is only reliable when requests are scoped with
- * {@link withLogging} — under the deprecated `initRequestLogger`, a previous
- * request's writer can still be in scope here.
+ * request. `withLogging` unwinds the scope when a handler settles, so this is
+ * genuinely anonymous rather than whatever ran last.
  */
 export function getLogger(): LogWriter {
   return storage.getStore() ?? createLogWriter({})

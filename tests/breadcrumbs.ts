@@ -10,8 +10,6 @@ import {
   clearBreadcrumbs,
   setCurrentScreen,
   getCurrentScreen,
-  setActiveActivity,
-  getActiveActivity,
   bc,
 } from '../src/client/breadcrumbs.js'
 import { assert, reportResults } from './testHelpers.js'
@@ -126,7 +124,7 @@ function testEverythingCanExpire() {
   assert('only the new entry remains', names.join(',') === 'fresh', `got: ${names.join(',')}`)
 }
 
-// --- Screen and activity ---
+// --- Screen ---
 
 function testScreenTracking() {
   console.log('\nTest: setCurrentScreen tracks the screen and leaves a breadcrumb')
@@ -141,31 +139,15 @@ function testScreenTracking() {
   assert('it names the screen', entry.name === 'navigate_ProductEntryModal', `got: ${entry.name}`)
 }
 
-function testActivityTracking() {
-  console.log('\nTest: the active activity is tracked without a breadcrumb')
-  clearBreadcrumbs()
-
-  assert('no activity by default', getActiveActivity() === undefined)
-
-  setActiveActivity('checkout')
-  assert('the activity is readable', getActiveActivity() === 'checkout')
-  assert('setting an activity adds no breadcrumb', getLastBreadcrumbs(10).length === 0)
-
-  setActiveActivity(undefined)
-  assert('the activity can be cleared', getActiveActivity() === undefined)
-}
-
 function testClearResetsEverything() {
-  console.log('\nTest: clearBreadcrumbs resets the trail, screen and activity')
+  console.log('\nTest: clearBreadcrumbs resets the trail and the screen')
   addBreadcrumb('action', 'something')
   setCurrentScreen('Checkout')
-  setActiveActivity('pay')
 
   clearBreadcrumbs()
 
   assert('the trail is empty', getLastBreadcrumbs(10).length === 0)
   assert('the screen is cleared', getCurrentScreen() === undefined)
-  assert('the activity is cleared', getActiveActivity() === undefined)
 }
 
 // --- Shorthand helpers ---
@@ -200,7 +182,6 @@ function run() {
   testNothingExpiresWhenAllAreFresh()
   testEverythingCanExpire()
   testScreenTracking()
-  testActivityTracking()
   testClearResetsEverything()
   testShorthandHelpers()
 
