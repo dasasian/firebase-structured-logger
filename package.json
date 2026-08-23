@@ -1,7 +1,7 @@
 {
   "name": "@dasasian/firebase-structured-logger",
-  "version": "0.5.0",
-  "description": "Structured logging for Firebase apps \u2014 client, functions, and tools",
+  "version": "0.6.0",
+  "description": "Structured logging for Firebase apps — client, functions, and tools",
   "license": "MIT",
   "author": "Dasasian",
   "keywords": [

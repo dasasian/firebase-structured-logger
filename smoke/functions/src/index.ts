@@ -18,10 +18,12 @@ import { initializeApp } from 'firebase-admin/app'
 import {
   initLogger,
   createClientLogFunction,
+  createClientLogHandler,
   withLogging,
   logError,
   logInfo,
   logWarn,
+  type LogPayload,
 } from '@dasasian/firebase-structured-logger/functions'
 
 initializeApp()
@@ -79,3 +81,18 @@ export const fslSmokeBackend = onCall(
     },
   ),
 )
+
+/**
+ * Feedback path, behind a WARNING floor — the half of the exemption that only
+ * production can prove.
+ *
+ * Deployed functions do not share instances, so this one owning a WARNING floor
+ * cannot affect the others. That floor is the point: it is what a real consumer
+ * runs, and it is what silently swallowed feedback when only the CLIENT floor
+ * had been exempted. The runner sends a plain NOTICE and a feedback NOTICE
+ * through here and asserts that exactly one survives.
+ */
+export const fslSmokeFeedback = onCall<LogPayload, void>(OPTS, async (request) => {
+  initLogger({ appId: APP_ID, minSeverity: 'WARNING' })
+  return createClientLogHandler({})(request)
+})

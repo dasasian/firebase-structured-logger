@@ -295,6 +295,51 @@ async function main(): Promise<void> {
   )
   assert('the bundle URL is gone', !mstack.includes(EMBEDDED_BUNDLE), `got: ${mstack}`)
 
+  console.log('\n  --- feedback behind a WARNING floor (#9) ---')
+  // fslSmokeFeedback runs a WARNING floor, so on severity alone both of these
+  // are below it. Only the feedback marker should get one through. Sending the
+  // plain NOTICE too is what makes this a test rather than a demonstration: if
+  // the exemption ever keys on the severity instead of the marker, both arrive
+  // and NOTICE has quietly become a level that defeats filtering.
+  const FEEDBACK_TEXT = `[fsl-verify] the discount did not apply ${RUN_ID}`
+  await callFunction('fslSmokeFeedback', {
+    message: FEEDBACK_TEXT,
+    severity: 'NOTICE',
+    labels: { appId: env.FSL_SMOKE_APP_ID ?? 'smoke-app', feedback: 'true', errorType: 'fsl-verify', smokeRunId: RUN_ID, screen: 'Checkout', userId: 'smoke-user' },
+    jsonPayload: {
+      breadcrumbs: [
+        { timestamp: Date.now(), type: 'nav', name: 'navigate_Checkout' },
+        { timestamp: Date.now(), type: 'action', name: 'apply_discount' },
+      ],
+    },
+  })
+  await callFunction('fslSmokeFeedback', {
+    message: `[fsl-verify] plain notice ${RUN_ID}`,
+    severity: 'NOTICE',
+    labels: { appId: env.FSL_SMOKE_APP_ID ?? 'smoke-app', errorType: 'fsl-verify', smokeRunId: RUN_ID },
+  })
+  console.log('  invoked fslSmokeFeedback twice (feedback + plain)')
+
+  const afterFeedback = await waitForEntries(6)
+  const seen = afterFeedback.map((e) => ({ data: e.data as any, meta: e.metadata as any }))
+  const feedback = seen.find((p) => String(p.data?.message ?? '').includes('the discount did not apply'))
+  const plainNotice = seen.find((p) => String(p.data?.message ?? '').includes('plain notice'))
+
+  assert('the feedback entry survived the server floor', !!feedback,
+    'it was dropped — the exemption is missing on the server side')
+  assert('a plain NOTICE was still filtered out', !plainNotice,
+    'the exemption is keying on the severity, not on the feedback marker')
+  assert('Cloud Logging kept the NOTICE severity', feedback?.meta?.severity === 'NOTICE',
+    `got: ${feedback?.meta?.severity}`)
+  const fLabels = feedback?.meta?.labels ?? {}
+  assert('feedback is an ENTRY label, so the console can filter on it', fLabels.feedback === 'true',
+    `got: ${JSON.stringify(fLabels)}`)
+  assert('the user is identified', fLabels.userId === 'smoke-user', `got: ${fLabels.userId}`)
+  assert('the screen they were on rode along', fLabels.screen === 'Checkout', `got: ${fLabels.screen}`)
+  assert('the breadcrumb trail rode along — this is what makes it reproducible',
+    feedback?.data?.breadcrumbs?.length === 2, `got: ${JSON.stringify(feedback?.data?.breadcrumbs)}`)
+  assert('filtering by labels.feedback finds it', (await queryByLabel('feedback', 'true')) > 0)
+
   console.log('\n  --- backend path ---')
   const bLabels = backendInfo?.meta?.labels ?? {}
   assert('functionName is set by withLogging', bLabels.functionName === 'fslSmokeBackend', `got: ${bLabels.functionName}`)
