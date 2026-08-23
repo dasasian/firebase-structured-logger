@@ -179,10 +179,17 @@ export function writeLog(
   // Production: use firebase-functions/logger write() directly, bypassing entryFromArgs.
   // This avoids server-side stack injection and jsonPayload nesting, while preserving
   // automatic trace context injection for request correlation in Cloud Logging.
+  //
+  // Labels MUST be emitted under "logging.googleapis.com/labels". ffWrite does no
+  // mapping — it JSON-stringifies the object straight to stdout — and Cloud Logging
+  // only promotes specifically-named fields to the LogEntry. A plain `labels` key is
+  // not one of them, so it lands in jsonPayload.labels and `labels.appId="..."`
+  // filters match nothing. Verified live: the smoke run's entry labels contained only
+  // Cloud Functions' own platform labels until this changed.
   ffWrite({
     severity: payload.severity,
     message: payload.message,
-    labels: labels,
+    "logging.googleapis.com/labels": labels,
     ...payload.jsonPayload,
   });
 }

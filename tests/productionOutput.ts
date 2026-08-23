@@ -88,7 +88,7 @@ function testJsonPayloadIsSpreadNotNested() {
 }
 
 function testLabelsArePromotedToEntryLabels() {
-  console.log('\nTest: labels sit at top level so Cloud Logging promotes them')
+  console.log('\nTest: labels are emitted under the key Cloud Logging promotes')
 
   const [entry] = captureEntries(() =>
     writeLog({
@@ -98,8 +98,13 @@ function testLabelsArePromotedToEntryLabels() {
     }),
   )
 
-  const labels = entry.labels as Record<string, string> | undefined
-  assert('labels is a top-level key', !!labels, `keys: ${Object.keys(entry).join(', ')}`)
+  // The key name is load-bearing. ffWrite does no mapping, and Cloud Logging only
+  // promotes specifically-named fields to LogEntry.labels. A plain `labels` key
+  // lands in jsonPayload instead, and `labels.appId="..."` filters match nothing —
+  // confirmed live before this was fixed.
+  const labels = entry['logging.googleapis.com/labels'] as Record<string, string> | undefined
+  assert('labels use the logging.googleapis.com/labels key', !!labels, `keys: ${Object.keys(entry).join(', ')}`)
+  assert('a plain "labels" key is NOT emitted', !('labels' in entry), `keys: ${Object.keys(entry).join(', ')}`)
   assert('appId survived', labels?.appId === 'acme')
   assert('screen survived', labels?.screen === 'Home')
   assert('userId survived', labels?.userId === 'u_1')
@@ -147,7 +152,7 @@ function testAttachmentsAreStrippedButFlagged() {
     }),
   )
 
-  const labels = entry.labels as Record<string, string>
+  const labels = entry['logging.googleapis.com/labels'] as Record<string, string>
   assert('hasAttachments label is set', labels.hasAttachments === 'true', `got: ${labels.hasAttachments}`)
   assert('the base64 payload is NOT in the log entry', !('attachments' in entry), `keys: ${Object.keys(entry).join(', ')}`)
 }
@@ -157,7 +162,7 @@ function testHasAttachmentsAbsentWhenNoneGiven() {
   const [entry] = captureEntries(() =>
     writeLog({ message: 'plain', severity: 'INFO', labels: { appId: 'acme' } as never }),
   )
-  assert('no hasAttachments label', !('hasAttachments' in (entry.labels as object)))
+  assert('no hasAttachments label', !('hasAttachments' in (entry['logging.googleapis.com/labels'] as object)))
 }
 
 // --- The severity floor on this branch ---
@@ -194,7 +199,7 @@ function testWholeEntryShape() {
   )
 
   const keys = Object.keys(entry).sort()
-  const expected = ['context', 'error', 'labels', 'message', 'severity']
+  const expected = ['context', 'error', 'logging.googleapis.com/labels', 'message', 'severity']
   assert(
     'exactly the expected top-level keys',
     JSON.stringify(keys) === JSON.stringify(expected),
