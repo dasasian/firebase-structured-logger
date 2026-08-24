@@ -160,6 +160,37 @@ logger.addBreadcrumb(type, name, data?)
 
 **Attachments** (images, snapshots, captured data) upload to GCS at `logAttachments/{logId}/{name}`; the same `logId` is on the entry's `labels.logId`. Add a lifecycle rule to auto-delete `logAttachments/` after N days.
 
+### Breadcrumbs
+
+```ts
+import { bc } from '@dasasian/firebase-structured-logger/client'
+
+bc.nav('Checkout')                              // also sets labels.screen
+bc.action('apply_discount', { code: 'SAVE10' })
+bc.state('total_recalculated', { total: 42.00 })
+bc.error('ValidationError', { field: 'price' })
+```
+
+A stack trace tells you where the code broke. It cannot tell you what the person did to
+get there, which is usually the part you need to reproduce it. Breadcrumbs are that trail:
+a rolling record of the last steps, attached automatically to every error and every piece
+of feedback, with no correlation work on your side.
+
+Drop a `bc.action` before anything that can fail and a `bc.nav` on every screen change, and
+`total is wrong` arrives as `navigate_Checkout · apply_discount · total_recalculated ·
+tap_place_order`.
+
+The trail is capped at **50 entries** and **5 minutes** — old enough to cover the steps that
+led here, short enough that it stays the current attempt rather than the whole session, and
+bounded so a long-lived tab cannot grow it without limit. It lives in memory only, so it
+never touches storage and never leaves the device except attached to a log you send.
+
+Breadcrumbs are session-global by design: one user, one path. `bc.nav()` also sets the
+current screen, so `labels.screen` stays correct without a second call.
+
+> Record the step, not the data. Breadcrumb `data` is written to your logs verbatim — keep
+> PII, tokens and card numbers out of it, the same as you would for any label.
+
 ### User feedback
 
 ```ts
@@ -216,11 +247,14 @@ withLogging(
 )
 ```
 
-> **`initRequestLogger` is deprecated and removed in 0.6.0.** It binds the scope with
-> `enterWith()`, which is never unwound — the labels outlive the request, so a later
-> handler that does *not* call it (a scheduled function, a Firestore trigger, or anything
-> relying on `getLogger()`'s anonymous fallback) inherits whichever user last touched the
-> warm instance. Handlers that all call it are unaffected; the hazard is the ones that don't.
+> **Migrating from `initRequestLogger`?** It was removed in 0.6.0 — wrap the handler in
+> `withLogging` instead of calling it as the first line. It bound the scope with
+> `enterWith()`, which is never unwound, so the labels outlived the request and a later
+> handler that did *not* call it (a scheduled function, a Firestore trigger, or anything
+> relying on `getLogger()`'s anonymous fallback) inherited whichever user last touched the
+> warm instance. Codebases where every handler called it were unaffected; the hazard was
+> the ones that didn't. `withLogging` uses `run()`, which restores the previous scope when
+> the handler settles.
 
 Backend log methods also accept an optional `attachments` (`Record<string, string | Buffer>`).
 
@@ -245,7 +279,7 @@ npx fsl install-skills
 
 | Skill | Description |
 |-------|-------------|
-| `/logs` | Validate logging in a file — error paths, labels, PII, missing `initRequestLogger`, breadcrumbs |
+| `/logs` | Validate logging in a file — error paths, labels, PII, unwrapped handlers, breadcrumbs |
 | `/query-logs` | Query Cloud Logging or local JSONL via [firebase-mcp-server](https://github.com/dasasian/firebase-mcp-server) |
 
 ## Local log rotation

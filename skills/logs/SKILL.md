@@ -9,7 +9,7 @@ Validate frontend and backend logging implementation for a given file.
 Identify whether the target file is frontend or backend:
 
 **Frontend:** path starts with `src/`, imports from `firebase-structured-logger/client`, uses `logError/logWarn/logInfo/logDebug` or `bc.*`
-**Backend:** path starts with `functions/src/`, imports from `firebase-structured-logger/functions`, uses `initRequestLogger/getLogger/logError/logWarn/logInfo/logDebug`
+**Backend:** path starts with `functions/src/`, imports from `firebase-structured-logger/functions`, uses `withLogging/getLogger/logError/logWarn/logInfo/logDebug`
 
 ---
 
@@ -96,11 +96,16 @@ API:
 - Must import from `firebase-structured-logger/functions`
 - Use `logError/logWarn/logInfo/logDebug` — never `console.log/console.error` directly
 
-**`initRequestLogger` — mandatory at function entry**
-- Every `onCall` handler must call `initRequestLogger<AppLabels>(request, { functionName, labels })` as the first line
+**`withLogging` — mandatory wrapper on every handler**
+- Every `onCall` handler must be wrapped: `onCall(withLogging<AppLabels>({ functionName, labels }, handler))`
 - Auto-seeds `userId` and `functionName` — do not pass these manually in labels
-- Any `AppLabels` fields present in `request.data` or function params should be passed in `labels`
-- Flag missing `initRequestLogger` as a critical violation
+- Any `AppLabels` fields present in `request.data` need the callback form, which is evaluated per request: `withLogging<AppLabels>((request) => ({ functionName, labels: { orgId: request.data.orgId } }), handler)`
+- Flag an unwrapped handler as a critical violation
+- Flag `initRequestLogger` as a critical violation — it was removed in 0.6.0. It bound the
+  scope with `enterWith()`, which never unwinds, so a request's labels outlived the request
+  and any later handler that did *not* call it inherited whichever user last touched the
+  warm instance. `withLogging` uses `run()`, which restores the previous scope when the
+  handler settles.
 
 **Error paths**
 - Every `catch` block must call `logError`
@@ -109,7 +114,7 @@ API:
 
 **Label completeness**
 - For each log call, check which `AppLabels` fields are in scope
-- Fields already seeded via `initRequestLogger` labels do not need repeating
+- Fields already seeded via `withLogging` labels do not need repeating
 - Flag any in-scope fields not seeded at entry or passed on the log call
 
 **PII**
@@ -165,11 +170,28 @@ bc.nav(screen: string): void                                   // on navigation
 bc.error(type: string, data?: Record<string, unknown>): void   // on errors
 ```
 
+Import `sendFeedback` from `firebase-structured-logger/client`:
+```ts
+sendFeedback(text: string, extras?: { labels?: Partial<AppLabels>; attachments?: Record<string, Blob | File | string> }): void
+```
+- For what a user reports, not what the code catches — a wrong total, a button that did
+  nothing. Wire it to a feedback form, never to a `catch` block.
+- Writes at `NOTICE` with `labels.feedback="true"`, and carries the current breadcrumbs,
+  screen and user labels automatically.
+- Exempt from the severity floor and the rate limiter. Returns nothing — tell the user
+  thanks; if the app needs correlation, pass its own id in `labels`.
+
 ### Backend
 Import from `firebase-structured-logger/functions`:
 ```ts
-// Call first in every onCall handler — auto-seeds userId and functionName
-initRequestLogger<AppLabels>(request, { functionName: 'myFunc', labels: { organizationId: request.data.organizationId } })
+// Wrap every onCall handler — auto-seeds userId and functionName, and unwinds
+// the scope when the handler settles
+export const myFunc = onCall(
+  withLogging<AppLabels>(
+    (request) => ({ functionName: 'myFunc', labels: { organizationId: request.data.organizationId } }),
+    async (request) => { /* logError/logWarn/logInfo/logDebug work in here */ },
+  ),
+)
 
 logError(raw: unknown, labels?: Record<string, string | undefined>, context?: Record<string, unknown>, attachments?: Record<string, string | Buffer>): void
 logWarn(message: string, labels?: Record<string, string | undefined>, context?: Record<string, unknown>, attachments?: Record<string, string | Buffer>): void
@@ -180,6 +202,7 @@ logDebug(message: string, labels?: Record<string, string | undefined>, context?:
 ### Key behaviours
 - `logError` auto-derives `errorType` from `error.name` — only pass explicitly to override (e.g. `{ errorType: 'DatabaseError' }`)
 - `logError` accepts `unknown` — never cast with `as Error`
-- `initRequestLogger` auto-seeds `userId` (from `request.auth.uid`) and `functionName` — do not pass these in labels
+- `withLogging` auto-seeds `userId` (from `request.auth.uid`) and `functionName` — do not pass these in labels
+- `getLogger()` outside a wrapped handler returns an anonymous writer, not stale labels
 - Every log entry includes `labels.logId` (ULID) — if `attachments` are passed, they are uploaded to GCS at `logAttachments/{logId}/{name}` fire-and-forget; upload failure never blocks the log entry
 - When catching an error, check if there are attachments in scope (images, file snapshots, captured data) that would help reproduce or diagnose it — if so, pass them via `attachments`
