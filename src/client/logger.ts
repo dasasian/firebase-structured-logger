@@ -4,6 +4,7 @@ import { toError, toErrorPayload } from '../shared/error'
 import {
   addBreadcrumb,
   getLastBreadcrumbs,
+  MAX_BREADCRUMBS,
   getCurrentScreen,
   setCurrentScreen,
   clearBreadcrumbs,
@@ -282,7 +283,7 @@ export class Logger<
         severity,
         labels: allLabels,
         jsonPayload: {
-          breadcrumbs: getLastBreadcrumbs(20),
+          breadcrumbs: getLastBreadcrumbs(MAX_BREADCRUMBS),
           context,
           error,
         },

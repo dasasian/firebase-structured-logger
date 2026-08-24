@@ -15,7 +15,7 @@ import { sessionStorageStub } from './browserStubs.js'
 
 import { initLogger, sendFeedback } from '../src/client/logger.js'
 import { configureRateLimiter, resetRateLimiter } from '../src/client/rateLimiter.js'
-import { addBreadcrumb, clearBreadcrumbs, setCurrentScreen } from '../src/client/breadcrumbs.js'
+import { addBreadcrumb, clearBreadcrumbs, setCurrentScreen, MAX_BREADCRUMBS } from '../src/client/breadcrumbs.js'
 import type { LogPayload, LogSeverity } from '../src/shared/types.js'
 import { assert, reportResults } from './testHelpers.js'
 
@@ -194,6 +194,33 @@ async function testUnreadableScreenshotDoesNotLoseTheReport() {
   assert('the failure is recorded', last()?.labels.attachmentsFailed === 'screenshot')
 }
 
+// --- Retention and transmission are one rule ---
+
+async function testTheWholeRetainedTrailIsSent() {
+  console.log('\nTest: everything retained is everything sent')
+
+  // These were two numbers: the trail retained 50 and the send path asked for
+  // 20. Nothing failed — the 30 oldest were simply unreachable, kept in memory
+  // for a reader that did not exist, and absent from every log without a word.
+  // Asserting the exact retained count is what makes them one rule again;
+  // lowering either number alone fails here.
+  const logger = freshLogger()
+
+  const overflow = MAX_BREADCRUMBS + 10
+  for (let i = 1; i <= overflow; i++) addBreadcrumb('action', `step_${i}`)
+
+  logger.error(new Error('boom'))
+  await flush()
+
+  const sent = last()?.jsonPayload?.breadcrumbs ?? []
+  assert('the trail is sent at its retained size', sent.length === MAX_BREADCRUMBS,
+    `retains ${MAX_BREADCRUMBS}, sent ${sent.length}`)
+  assert('the newest step is included', sent[sent.length - 1]?.name === `step_${overflow}`,
+    `got: ${sent[sent.length - 1]?.name}`)
+  assert('the oldest retained step is included, not trimmed again on the way out',
+    sent[0]?.name === `step_${overflow - MAX_BREADCRUMBS + 1}`, `got: ${sent[0]?.name}`)
+}
+
 // --- Runner ---
 
 async function run() {
@@ -208,6 +235,8 @@ async function run() {
   await testCustomLabels()
   await testScreenshotAttaches()
   await testUnreadableScreenshotDoesNotLoseTheReport()
+  await testTheWholeRetainedTrailIsSent()
+
   reportResults()
 }
 

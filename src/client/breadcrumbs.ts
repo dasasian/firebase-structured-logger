@@ -1,6 +1,19 @@
 import type { BreadcrumbEntry } from '../shared/types'
 
-const MAX_BREADCRUMBS = 50
+/**
+ * How many breadcrumbs are retained — and therefore how many are sent.
+ *
+ * These were two numbers once: the trail kept 50 and the send path asked for
+ * 20, so 30 were retained that nothing could ever read. Exported for the send
+ * path to import rather than restate, because the two drifting apart is silent
+ * — the extra entries simply never appear in any log, and nothing fails.
+ *
+ * MAX_AGE_MS is the filter that actually matters; this is the safety net that
+ * bounds a long-lived tab. Sending the whole retained trail costs ~5 KB, which
+ * is 2% of Cloud Logging's 256 KB entry limit, against losing the steps that
+ * would have reproduced the bug.
+ */
+export const MAX_BREADCRUMBS = 50
 const MAX_AGE_MS = 5 * 60 * 1000 // 5 minutes
 
 let currentScreen: string | undefined
