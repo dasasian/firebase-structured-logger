@@ -14,6 +14,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **The 5-minute breadcrumb cutoff now applies when reading, not only when writing.** It previously lapsed exactly when nothing was happening: a user who went idle for ten minutes and then hit an error shipped a trail of ten-minute-old steps presented as the path that led there.
 - **Every log now carries the full breadcrumb trail (up to 50 entries), not the newest 20.** The trail already retained 50; the send path asked for 20, so 30 were kept in memory that nothing could read. Error and feedback payloads grow by roughly 3 KB, or ~2% of Cloud Logging's 256 KB entry limit.
 
 ### Removed

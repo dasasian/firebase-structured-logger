@@ -83,18 +83,46 @@ function testAgeExpiry() {
   withFrozenTime(start, () => addBreadcrumb('action', 'ancient'))
   withFrozenTime(start + 60_000, () => addBreadcrumb('action', 'recent'))
 
-  assert('both are present before anything expires', getLastBreadcrumbs(10).length === 2)
+  // Read inside the frozen window. The cutoff is relative to Date.now(), so a
+  // read at the real clock would find every fixture entry decades expired.
+  assert('both are present before anything expires',
+    withFrozenTime(start + 60_000, () => getLastBreadcrumbs(10)).length === 2)
 
   // Now add one far enough ahead that 'ancient' is past the cutoff but
-  // 'recent' is not. This is the branch that only runs when the OLDEST
-  // entry has aged out.
+  // 'recent' is not.
   withFrozenTime(start + MAX_AGE_MS + 1, () => addBreadcrumb('action', 'newest'))
 
-  const names = getLastBreadcrumbs(10).map((entry) => entry.name)
+  const names = withFrozenTime(start + MAX_AGE_MS + 1, () =>
+    getLastBreadcrumbs(10).map((entry) => entry.name))
   assert('the expired entry was dropped', !names.includes('ancient'), `got: ${names.join(',')}`)
   assert('the still-fresh entry survived', names.includes('recent'), `got: ${names.join(',')}`)
   assert('the new entry is there', names.includes('newest'))
   assert('exactly two remain', names.length === 2, `got: ${names.join(',')}`)
+}
+
+function testExpiryAppliesOnReadNotOnlyOnWrite() {
+  console.log('\nTest: the cutoff applies when reading, not only when writing')
+
+  // Expiring only on write means the age cap lapses exactly when nothing is
+  // happening. A user does a few things, goes idle for ten minutes, comes back
+  // and hits an error: with a write-only cutoff that error ships a trail of
+  // ten-minute-old steps presented as the path that led to it. No write ever
+  // came to clear them.
+  clearBreadcrumbs()
+  const start = 4_000_000_000_000
+
+  withFrozenTime(start, () => addBreadcrumb('action', 'before_the_pause'))
+
+  const afterIdle = withFrozenTime(start + 10 * 60 * 1000, () => getLastBreadcrumbs(50))
+  assert('a stale trail is not returned to a reader', afterIdle.length === 0,
+    `got: ${afterIdle.map((e) => e.name).join(',')}`)
+
+  // And a read within the window still returns it — the cutoff, not a reset.
+  clearBreadcrumbs()
+  withFrozenTime(start, () => addBreadcrumb('action', 'recent_enough'))
+  const withinWindow = withFrozenTime(start + 60_000, () => getLastBreadcrumbs(50))
+  assert('a fresh trail is untouched', withinWindow.length === 1,
+    `got: ${withinWindow.length}`)
 }
 
 function testNothingExpiresWhenAllAreFresh() {
@@ -106,7 +134,8 @@ function testNothingExpiresWhenAllAreFresh() {
   withFrozenTime(start + 1_000, () => addBreadcrumb('action', 'b'))
   withFrozenTime(start + 2_000, () => addBreadcrumb('action', 'c'))
 
-  const names = getLastBreadcrumbs(10).map((entry) => entry.name)
+  const names = withFrozenTime(start + 2_000, () =>
+    getLastBreadcrumbs(10).map((entry) => entry.name))
   assert('all three survive', names.join(',') === 'a,b,c', `got: ${names.join(',')}`)
 }
 
@@ -118,9 +147,10 @@ function testEverythingCanExpire() {
   withFrozenTime(start, () => addBreadcrumb('action', 'old_a'))
   withFrozenTime(start + 1_000, () => addBreadcrumb('action', 'old_b'))
 
-  withFrozenTime(start + MAX_AGE_MS + 10_000, () => addBreadcrumb('action', 'fresh'))
+  const at = start + MAX_AGE_MS + 10_000
+  withFrozenTime(at, () => addBreadcrumb('action', 'fresh'))
 
-  const names = getLastBreadcrumbs(10).map((entry) => entry.name)
+  const names = withFrozenTime(at, () => getLastBreadcrumbs(10).map((entry) => entry.name))
   assert('only the new entry remains', names.join(',') === 'fresh', `got: ${names.join(',')}`)
 }
 
@@ -179,6 +209,7 @@ function run() {
   testGetLastBreadcrumbsCount()
   testCapAtFifty()
   testAgeExpiry()
+  testExpiryAppliesOnReadNotOnlyOnWrite()
   testNothingExpiresWhenAllAreFresh()
   testEverythingCanExpire()
   testScreenTracking()

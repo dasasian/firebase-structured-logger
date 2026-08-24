@@ -28,21 +28,32 @@ export function getCurrentScreen(): string | undefined {
   return currentScreen
 }
 
+/**
+ * Drop anything past the age cutoff.
+ *
+ * Applied on READ as well as on write. Expiring only on write means the cutoff
+ * lapses exactly when nothing is happening — a user who goes idle for ten
+ * minutes and then hits an error sends a trail of ten-minute-old steps
+ * presented as the path that led there. The steps before a pause are rarely
+ * the ones that explain what happened after it.
+ *
+ * Entries are appended in timestamp order, so the array only needs rebuilding
+ * when the oldest one has actually aged out.
+ */
+function unexpired(entries: BreadcrumbEntry[], now: number): BreadcrumbEntry[] {
+  const cutoff = now - MAX_AGE_MS
+  if (entries.length === 0 || entries[0].timestamp > cutoff) return entries
+  return entries.filter((bc) => bc.timestamp > cutoff)
+}
+
 export function addBreadcrumb(
   type: BreadcrumbEntry['type'],
   name: string,
   data?: Record<string, unknown>,
 ): void {
   const now = Date.now()
-  const entry: BreadcrumbEntry = { timestamp: now, type, name, data }
-  breadcrumbs.push(entry)
-
-  // Entries are appended in timestamp order, so only rebuild the array when the
-  // oldest one has actually aged out — otherwise there is nothing to drop.
-  const cutoff = now - MAX_AGE_MS
-  if (breadcrumbs[0].timestamp <= cutoff) {
-    breadcrumbs = breadcrumbs.filter((bc) => bc.timestamp > cutoff)
-  }
+  breadcrumbs.push({ timestamp: now, type, name, data })
+  breadcrumbs = unexpired(breadcrumbs, now)
 
   if (breadcrumbs.length > MAX_BREADCRUMBS) {
     breadcrumbs = breadcrumbs.slice(breadcrumbs.length - MAX_BREADCRUMBS)
@@ -50,6 +61,9 @@ export function addBreadcrumb(
 }
 
 export function getLastBreadcrumbs(count: number): BreadcrumbEntry[] {
+  // Prune the stored trail too, so an idle tab does not hold expired entries
+  // alive until the next write.
+  breadcrumbs = unexpired(breadcrumbs, Date.now())
   return breadcrumbs.slice(Math.max(0, breadcrumbs.length - count))
 }
 
