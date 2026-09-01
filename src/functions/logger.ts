@@ -7,6 +7,7 @@ import { SEVERITY_ORDER, SEVERITIES, isLogSeverity, isFeedback } from "../shared
 import { toError, toErrorPayload } from "../shared/error";
 import { getAttachmentBucket, getAttachmentPrefix } from "./sourceMapCache";
 import { attachmentPath } from "../shared/paths.js";
+import { traceResourceName } from "./traceContext";
 
 const IS_EMULATOR = process.env.FUNCTIONS_EMULATOR === "true";
 export const LOG_FILENAME = "dev.jsonl";
@@ -231,10 +232,18 @@ export function writeLog(
   // not one of them, so it lands in jsonPayload.labels and `labels.appId="..."`
   // filters match nothing. Verified live: the smoke run's entry labels contained only
   // Cloud Functions' own platform labels until this changed.
+  // Set the trace ourselves when we have one. ffWrite attaches this from
+  // firebase-functions' own store, which is only populated inside their request
+  // wrapper — empty on Cloud Run and anything behind createHttpLogHandler. When
+  // theirs IS populated it overwrites this, which is the right precedence: inside
+  // Cloud Functions their value is authoritative.
+  const trace = traceResourceName();
+
   ffWrite({
     severity,
     message: payload.message,
     "logging.googleapis.com/labels": labels,
+    ...(trace ? { "logging.googleapis.com/trace": trace } : {}),
     ...payload.jsonPayload,
   });
 }

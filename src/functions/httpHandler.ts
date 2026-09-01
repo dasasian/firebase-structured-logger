@@ -16,6 +16,7 @@
 
 import { ClientLogError, createClientLogHandler, type ClientLogHandlerConfig } from './logHandler'
 import type { LogPayload } from '../shared/types'
+import { runWithTrace, traceIdFromHeaders } from './traceContext'
 
 /** The parts of a request this handler reads. */
 export interface HttpLogRequest {
@@ -152,7 +153,13 @@ export function createHttpLogHandler(
     }
 
     try {
-      await handler({ data: req.body as LogPayload })
+      // Cloud Logging groups a request's entries by trace. firebase-functions
+      // only attaches one inside its own wrapper, so out here we read the
+      // headers ourselves — otherwise the logs arrive uncorrelated and nothing
+      // says why.
+      await runWithTrace(traceIdFromHeaders(req.headers), () =>
+        handler({ data: req.body as LogPayload }),
+      )
       return send(res, 204)
     } catch (err) {
       if (err instanceof ClientLogError) {

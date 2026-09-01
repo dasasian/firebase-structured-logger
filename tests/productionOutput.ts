@@ -26,6 +26,7 @@ if (process.env.FUNCTIONS_EMULATOR === 'true') {
 
 import { writeLog, initLogger } from '../src/functions/logger.js'
 import { assert, reportResults } from './testHelpers.js'
+import { runWithTrace, traceIdFromHeaders } from '../src/functions/traceContext.js'
 
 initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
 
@@ -362,6 +363,89 @@ function testWholeEntryShape() {
 
 // --- Runner ---
 
+/**
+ * Cloud Logging groups a request's entries by trace. firebase-functions attaches
+ * `logging.googleapis.com/trace` from its own AsyncLocalStorage, populated only
+ * inside its request wrapper — empty on Cloud Run and anything behind
+ * createHttpLogHandler (#34). Without this the entries arrive uncorrelated and
+ * nothing says why, which is the worst shape a gap can take.
+ */
+function testTraceIsAttachedOutsideCloudFunctions() {
+  console.log('\nTest: a trace id from request headers reaches the entry')
+  initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
+  const previous = process.env.GOOGLE_CLOUD_PROJECT
+  process.env.GOOGLE_CLOUD_PROJECT = 'demo-project'
+
+  try {
+    const traceId = '105445aa7843bc8bf206b12000100000'
+    const [entry] = captureEntries(() =>
+      runWithTrace(traceId, () =>
+        writeLog({ message: 'traced', severity: 'ERROR', labels: { appId: 'acme' } as never }),
+      ),
+    )
+    assert(
+      'the trace is a full resource name, not a bare id',
+      entry?.['logging.googleapis.com/trace'] === `projects/demo-project/traces/${traceId}`,
+      String(entry?.['logging.googleapis.com/trace']),
+    )
+
+    // Outside a request there is nothing to correlate, and an empty or partial
+    // trace field is worse than none — Cloud Logging rejects a malformed one.
+    const [untraced] = captureEntries(() =>
+      writeLog({ message: 'untraced', severity: 'ERROR', labels: { appId: 'acme' } as never }),
+    )
+    assert('and is absent entirely when there is no trace', !('logging.googleapis.com/trace' in (untraced ?? {})))
+
+    // No project means no valid resource name can be built.
+    delete process.env.GOOGLE_CLOUD_PROJECT
+    delete process.env.GCLOUD_PROJECT
+    const [noProject] = captureEntries(() =>
+      runWithTrace(traceId, () =>
+        writeLog({ message: 'no project', severity: 'ERROR', labels: { appId: 'acme' } as never }),
+      ),
+    )
+    assert(
+      'omitted rather than written wrong when the project is unknown',
+      !('logging.googleapis.com/trace' in (noProject ?? {})),
+      String(noProject?.['logging.googleapis.com/trace']),
+    )
+  } finally {
+    if (previous === undefined) delete process.env.GOOGLE_CLOUD_PROJECT
+    else process.env.GOOGLE_CLOUD_PROJECT = previous
+  }
+}
+
+/**
+ * Two formats reach a Google backend: Cloud Trace's own header from Google's
+ * load balancers, and W3C traceparent from OpenTelemetry and most third-party
+ * tracers. A malformed one is dropped rather than guessed at — an invalid trace
+ * resource name costs the whole entry, not just its correlation.
+ */
+function testTraceHeaderParsing() {
+  console.log('\nTest: both trace header formats, and neither when malformed')
+  const id = '105445aa7843bc8bf206b12000100000'
+
+  assert('Cloud Trace with span and sampling flag', traceIdFromHeaders({ 'x-cloud-trace-context': `${id}/1;o=1` }) === id)
+  assert('Cloud Trace with just the id', traceIdFromHeaders({ 'x-cloud-trace-context': id }) === id)
+  assert(
+    'W3C traceparent',
+    traceIdFromHeaders({ traceparent: `00-${id}-00f067aa0ba902b7-01` }) === id,
+  )
+  assert(
+    'Cloud Trace wins when both are present',
+    traceIdFromHeaders({ 'x-cloud-trace-context': `${id}/1`, traceparent: '00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-00f067aa0ba902b7-01' }) === id,
+  )
+
+  // Nothing guarantees the host framework lower-cased them.
+  assert('header names are case-insensitive', traceIdFromHeaders({ 'X-Cloud-Trace-Context': id }) === id)
+  assert('an array-valued header takes the first', traceIdFromHeaders({ 'x-cloud-trace-context': [id, 'other'] }) === id)
+
+  assert('a short id is not accepted', traceIdFromHeaders({ 'x-cloud-trace-context': 'abc123/1' }) === undefined)
+  assert('a non-hex id is not accepted', traceIdFromHeaders({ 'x-cloud-trace-context': 'z'.repeat(32) }) === undefined)
+  assert('a truncated traceparent is not accepted', traceIdFromHeaders({ traceparent: `00-${id}` }) === undefined)
+  assert('no headers at all', traceIdFromHeaders({}) === undefined)
+}
+
 function run() {
   testJsonPayloadIsSpreadNotNested()
   testLabelsArePromotedToEntryLabels()
@@ -379,6 +463,8 @@ function run() {
   testPlainNoticeStillRespectsTheFloor()
   testFeedbackSurvivesTheServerFloor()
   testWholeEntryShape()
+  testTraceIsAttachedOutsideCloudFunctions()
+  testTraceHeaderParsing()
   reportResults()
 }
 
