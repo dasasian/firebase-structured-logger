@@ -13,14 +13,46 @@
 
 # @dasasian/firebase-structured-logger
 
-One logging pipeline for a Firebase app, from the browser to Google Cloud Logging: frontend events go to a Cloud Function, production stack traces are **symbolicated** against your source maps, and everything is written as **structured, queryable entries**. Ships a client logger, a Cloud Functions logger, and an `fsl` CLI.
+Your web app crashed at `app-4f2a.js:1:98432`. This tells you it was `Checkout.tsx:42` — in your own Google Cloud project, next to your backend logs. Nothing leaves.
 
-## Why
+Ships a client logger, a Cloud Functions logger, and the `fsl` CLI.
 
-- **Symbolicated frontend errors** — minified production traces resolve back to `File.tsx:line:col` using source maps you upload at deploy time. No more chasing `app-4f2a.js:1:98432`.
-- **Structured entries** — severity, labels, user / session / screen context, breadcrumbs, and file attachments, all queryable in Cloud Logging.
-- **One API across surfaces** — the same `logger.info/warning/error/debug` shape on the client and in Cloud Functions.
-- **Local dev loop** — the Functions emulator writes JSONL you can `tail` or query without deploying — and query from Claude with the companion [**firebase-mcp-server**](https://github.com/dasasian/firebase-mcp-server).
+## One query, both halves
+
+Frontend and backend write to the same stream in the same shape, so one filter reads the whole story in order:
+
+```
+labels.userId="<uid>"
+```
+
+```
+10:42:03.114  INFO   screen=checkout      click "Apply code"
+10:42:03.118  INFO   screen=checkout      applying discount SAVE20
+10:42:03.402  INFO   fn=applyDiscount     started
+10:42:03.611  ERROR  fn=applyDiscount     coupon lookup failed: timeout
+10:42:03.798  ERROR  screen=checkout      TypeError at Checkout.tsx:42:9
+```
+
+Two of those lines came from a browser and three from a server. You never had to think about that, and you never had to correlate two systems by timestamp to see it.
+
+**Every label in that query and those lines was attached automatically.** You write the message; the rest rides along. See [What you get for free](#what-you-get-for-free).
+
+## How it works
+
+```
+   Browser                     Your Cloud Functions            Cloud Logging
+   ┌────────────────┐          ┌──────────────────────┐        ┌───────────────┐
+   │ no credentials │─────────▶│ logFrontendEvent()   │───────▶│ your project  │
+   │ no source maps │          │ credentials + maps   │        │ one stream    │
+   └────────────────┘          ├──────────────────────┤        │ one query     │
+                               │ your own functions   │───────▶│               │
+                               │ withLogging()        │        └───────────────┘
+                               └──────────────────────┘
+```
+
+**Why there is a function in the middle.** A browser cannot write to Cloud Logging — it has no credentials, and you would never ship credentials to a browser. So the frontend needs a door, and `logFrontendEvent` is it. Because every frontend error passes through that door anyway, it is also the only place that can hold your source maps: the browser must not have them (`fsl` strips them from `dist/` so they are never published), and Cloud Logging cannot apply them. **Symbolication happens there because there is nowhere else it can happen.**
+
+Both boxes in the middle are your own Cloud Functions, in the deploy you already run. Nothing new to stand up.
 
 ## Install
 
@@ -34,7 +66,19 @@ cd functions && npm install @dasasian/firebase-structured-logger
 
 Ships ESM with three entry points — `/client`, `/functions`, `/tools` — plus the `fsl` CLI. `firebase`, `firebase-admin`, and `firebase-functions` are optional peer dependencies (bring your own versions).
 
-## Quick start
+## Setup
+
+Most projects do both halves. They share one step — `initLogger` inside `functions/` — and
+are otherwise independent.
+
+**Prerequisites**
+
+- A `functions/` directory (`firebase init functions`, TypeScript) referenced by `firebase.json`.
+- For browser errors: **Firebase Storage enabled** (source maps are uploaded there) —
+  Firebase console → **Storage → Get started** — and a frontend build that emits source maps.
+  The `fsl` source-map tooling assumes **Vite**.
+
+### Catching errors from your browser
 
 **1. Initialize the client** — at your app entry (e.g. `src/main.tsx`), before any logging:
 
@@ -52,7 +96,10 @@ export const logger = initLogger({
 setupGlobalErrorHandler() // capture uncaught errors + unhandled rejections
 ```
 
-**2. Add the Cloud Function** — in `functions/src/index.ts`:
+`logFunction` is just `(payload) => Promise<unknown>`. `httpsCallable()` happens to fit it —
+anything else that fits will work too.
+
+**2. Add the log function** — in `functions/src/index.ts`:
 
 ```ts
 import { initLogger, createClientLogFunction } from '@dasasian/firebase-structured-logger/functions'
@@ -64,51 +111,7 @@ export const logFrontendEvent = createClientLogFunction({
 })
 ```
 
-**3. Log** — anywhere in the frontend:
-
-```ts
-logger.info('checkout started', { orderId })
-logger.error(err, { screen: 'camera' }, context, { photo: blob }) // attachments optional
-```
-
-Debug logs are suppressed in production automatically. That's the happy path — the rest of this doc covers source-map symbolication, user context, the CLI, and the local emulator loop.
-
----
-
-## How it works
-
-```
-Browser  ──logFrontendEvent()──▶  Cloud Function  ──symbolicate──▶  Cloud Logging
- (client)      httpsCallable          (functions)     (source maps)   (structured)
-```
-
-- The **client** batches structured events and calls your `logFrontendEvent` Cloud Function.
-- The **function** symbolicates any stack trace against source maps in Cloud Storage, then writes a structured entry (in production) or a local JSONL file (in the emulator).
-- You query the result in **Cloud Logging**, or locally from Claude via **[firebase-mcp-server](https://github.com/dasasian/firebase-mcp-server)** (`@dasasian/firebase-mcp-server`).
-
-## Full setup
-
-### Prerequisites
-
-- A `functions/` directory (`firebase init functions`, TypeScript) referenced by `firebase.json`.
-- **Firebase Storage enabled** (source maps are uploaded there): Firebase console → **Storage → Get started**.
-- A frontend build that emits source maps. The `fsl` source-map tooling assumes **Vite**.
-
-### 1. `.gitignore`
-
-```
-functions/logs/*.jsonl
-```
-
-The `logs/` directory holds local JSONL from the emulator — track the directory, not the files:
-
-```bash
-mkdir -p functions/logs && touch functions/logs/.gitkeep
-```
-
-### 2. Wire the deploy script
-
-Upload source maps (and strip them from the hosting bundle) as part of deploy. Merge into your root `package.json` scripts — keep any existing flags like `--project`:
+**3. Wire the deploy script** — upload source maps and strip them from the hosting bundle as part of deploy. Merge into your root `package.json` scripts, keeping any existing flags like `--project`:
 
 ```json
 "deploy": "export VITE_RELEASE_ID=$(git rev-parse --short HEAD) && npm run build && npx fsl upload-sourcemaps --functions=./functions --embed-sourcemaps && firebase deploy"
@@ -118,23 +121,68 @@ Upload source maps (and strip them from the hosting bundle) as part of deploy. M
 
 > **`VITE_RELEASE_ID`** ties a build to its source maps — the client tags every entry with it, and `upload-sourcemaps` stores maps under the matching path. Use the same value in both places (the deploy script above sets it once from the git SHA). Locally it defaults to `'dev'`, and no maps are uploaded — symbolication isn't needed in development.
 
-### 3. Typed labels + user context
+**4. Verify it works** — prove the round trip before you trust it:
 
 ```ts
-interface MyAppLabels {
-  organizationId?: string
-  itemId?: string
-  // whatever domain entities are relevant
-}
+import { triggerTestLog } from '@dasasian/firebase-structured-logger/client'
 
-export const logger = initLogger<MyAppLabels>({ /* … */ })
-
-logger.setUser(uid, { /* app labels */ }) // on sign in
-logger.clearUser()                        // on sign out
-logger.setScreen('checkout')              // on navigation
+triggerTestLog() // wire to a dev-only button; sends one error, one warning, one info
 ```
 
-### 4. Run the emulator (local capture)
+Look for `labels.errorType="fsl-verify"` — in Cloud Logging once deployed, or in `dev.jsonl`
+if you are running the emulator (see [Local development](#local-development)). Three entries,
+and the error's stack should name a source file rather than a minified bundle. If they are
+not there, nothing else in this README will work either.
+
+Then log, anywhere in the frontend:
+
+```ts
+logger.info('checkout started', { orderId })
+logger.error(err, { screen: 'camera' }, context, { photo: blob }) // attachments optional
+```
+
+Debug logs are suppressed in production automatically.
+
+### Logging from your Cloud Functions
+
+A complete use of this package on its own — no client, no bundles, no source maps.
+
+**1. Initialize the logger** — in `functions/src/index.ts`, at module load:
+
+```ts
+import { initLogger } from '@dasasian/firebase-structured-logger/functions'
+
+initLogger({ appId: 'my-app' })
+```
+
+Already done if you set up the browser half — it is the same call.
+
+**2. Wrap your handlers** — `withLogging` binds the request's labels for the life of the handler:
+
+```ts
+import { withLogging, logInfo, logError } from '@dasasian/firebase-structured-logger/functions'
+
+export const checkout = onCall(
+  withLogging({ functionName: 'checkout' }, async (request) => {
+    logInfo('started')          // carries functionName and the caller's userId already
+    ...
+    logError(err, { orderId })  // labels merge with the request's
+  }),
+)
+```
+
+`userId` comes from the verified `request.auth.uid`, so you never pass it. The scope unwinds
+when the handler settles — one request's labels can never appear on another's logs, even on a
+warm instance.
+
+**3. Verify it works** — call the function, then look for `labels.functionName="checkout"`.
+The entry should carry `userId` without your having written it.
+
+## Local development
+
+The Functions emulator writes the same entries to a local JSONL file instead of Cloud
+Logging, so the whole loop — client, log function, symbolication path, labels — works
+before you deploy anything.
 
 Add a `serve` script to `functions/package.json`:
 
@@ -142,25 +190,134 @@ Add a `serve` script to `functions/package.json`:
 "serve": "npm run build && firebase emulators:start --only functions"
 ```
 
-The emulator writes entries to `DEV_LOG_DIR` (e.g. `functions/logs/dev.jsonl`), so you can inspect logs without deploying — and point **[firebase-mcp-server](https://github.com/dasasian/firebase-mcp-server)** at that same file to query your dev logs from Claude.
-
-## Client API
+Then tell the logger where to write, in your functions entry point:
 
 ```ts
-logger.error(error, labels?, context?, attachments?)   // attachments: Record<string, Blob | File | string>
-logger.info(message, labels?, context?, attachments?)
-logger.warning(message, labels?, context?, attachments?)
-logger.debug(message, labels?, context?, attachments?) // suppressed in production
-
-logger.setUser(uid, extraLabels?)
-logger.clearUser()
-logger.setScreen(screen)
-logger.addBreadcrumb(type, name, data?)
+initLogger({ appId: 'my-app', logLocalDir: 'logs' })
 ```
 
-**Attachments** (images, snapshots, captured data) upload to GCS at `logAttachments/{logId}/{name}`; the same `logId` is on the entry's `labels.logId`. Add a lifecycle rule to auto-delete `logAttachments/` after N days.
+`logLocalDir` is yours to choose — it is resolved against the emulator's working directory,
+which is `functions/`. `functions/logs` is the convention used throughout this README, not a
+requirement; anywhere writable works, including a path outside the project.
 
-### Breadcrumbs
+Point **[firebase-mcp-server](https://github.com/dasasian/firebase-mcp-server)** at that file
+to query your dev logs from Claude exactly as you would query Cloud Logging.
+
+### Keep the logs out of git
+
+```
+functions/logs/*.jsonl
+```
+
+Track the directory, not the files:
+
+```bash
+mkdir -p functions/logs && touch functions/logs/.gitkeep
+```
+
+### Rotation
+
+Entries go to `{logLocalDir}/dev.jsonl`. Each emulator start rotates the current file to
+`dev-{timestamp}.jsonl`, and rotation also happens when the record limit is hit mid-session.
+
+| Config | Default | Description |
+|---|---|---|
+| `logLocalDir` | — | Directory for local log files |
+| `logMaxRecordsPerFile` | 2000 | Records per file before rotation |
+| `logMaxRotatedFiles` | 5 | Rotated files to keep |
+
+## What you get for free
+
+You write one label. Eleven fields land.
+
+```ts
+logger.error(err, { orderId })
+```
+
+| Field | Added by | Where it comes from |
+|---|---|---|
+| `appId`, `releaseId` | client | your `initLogger` config |
+| `screen` | client | tracked as the user moves |
+| `userId` | client | `setUser`, held for the session |
+| `platform` | client | user agent — `ios` / `android` / `macos` / `web` |
+| `browser` | client | user agent |
+| `errorType` | client | the Error's own `name` |
+| last 50 breadcrumbs | client | the trail of what the user did |
+| `logId` | function | a ULID, unique per entry — locates attachments in GCS |
+| `hasAttachments` | function | `"true"` when files were uploaded alongside |
+| resolved file and line | function | your source maps — `Checkout.tsx:42`, not `app-4f2a.js:1:98432` |
+| trace context | function | request correlation in Cloud Logging |
+
+Backend logs get the same treatment: `withLogging` attaches `functionName`, `userId` from
+the verified `request.auth.uid`, and whatever else you bind.
+
+That is the "structured" in the name. Not that the entry is JSON — that it arrives already
+carrying who, where, which release, and what led up to it.
+
+**The rule behind it:**
+
+> You never pass context to a log call. You declare it once, and it rides along.
+
+On the client that scope is the **session**. On the backend it is the **request**. Same idea,
+two clocks — and it is why `labels.userId="…"` returns both halves: the client attaches the
+uid from `setUser`, the backend from `request.auth.uid`, same label name, no coordination.
+
+Declaring context does not replace passing it. There are three scopes, and they merge:
+
+```ts
+initLogger({ appId: 'my-app' })       // every log, for the life of the app
+logger.setUser(uid, { orgId })        // every log, until clearUser()
+logger.error(err, { orderId })        // this log only
+```
+
+Innermost wins — a label passed at the call site overrides the same label from `setUser`.
+The backend works the same way: `withLogging` binds the request's labels, and each
+`logInfo(message, labels)` can add or override for that one line.
+
+## Adding your own context
+
+Define your labels once, in a file both the app and `functions/` import:
+
+```ts
+// src/shared/labels.ts
+export interface MyAppLabels {
+  organizationId?: string
+  itemId?: string
+  // whatever domain entities are relevant
+}
+```
+
+Then use the same type on both sides.
+
+**Client** — scoped to the session:
+
+```ts
+export const logger = initLogger<MyAppLabels>({ /* … */ })
+
+logger.setUser(uid, { organizationId })   // on sign in — rides every log until cleared
+logger.clearUser()                        // on sign out
+logger.setScreen('checkout')              // on navigation
+```
+
+**Backend** — scoped to the request:
+
+```ts
+import { withLogging, logInfo } from '@dasasian/firebase-structured-logger/functions'
+
+export const checkout = onCall(
+  withLogging<MyAppLabels>(
+    (request) => ({ functionName: 'checkout', labels: { organizationId: request.data.orgId } }),
+    async (request) => {
+      logInfo('started')   // carries functionName, userId and organizationId already
+    },
+  ),
+)
+```
+
+The function form runs per call, so labels can be derived from the request. The static form
+from [setup](#logging-from-your-cloud-functions) is the same thing without that.
+
+## Breadcrumbs
 
 ```ts
 import { bc } from '@dasasian/firebase-structured-logger/client'
@@ -191,7 +348,7 @@ current screen, so `labels.screen` stays correct without a second call.
 > Record the step, not the data. Breadcrumb `data` is written to your logs verbatim — keep
 > PII, tokens and card numbers out of it, the same as you would for any label.
 
-### User feedback
+## User feedback
 
 ```ts
 import { sendFeedback } from '@dasasian/firebase-structured-logger/client'
@@ -208,7 +365,9 @@ didn't apply"* is a complaint; the same sentence plus `nav→Checkout · apply_d
 total_recalculated · tap_place_order` is a reproduction.
 
 It carries everything a log carries — breadcrumbs, `screen`, `userId`, `releaseId`,
-`platform`, `browser`, and any labels seeded via `setUser`.
+`platform`, `browser`, and any labels seeded via `setUser`. A screenshot passed as an
+attachment rides the same Cloud Storage path as any other, so it is not bounded by the
+entry size limit — see [Attachments](#attachments).
 
 Headless: the package renders nothing, so the UI is yours. It returns nothing either —
 a reference number is meaningless to a user with no portal to check it against. Say thank
@@ -222,77 +381,157 @@ alert ignores it with no configuration.
 Feedback is exempt from the severity floor and the rate limiter — those are volume controls
 for events the system emits, and someone hitting send twice is not a duplicate to throttle.
 
-## Functions API
+## Attachments
 
 ```ts
-import { initLogger, withLogging, logError, logInfo } from '@dasasian/firebase-structured-logger/functions'
-
-initLogger({ appId: 'my-app' }) // at module load
-
-export const myFunction = onCall(
-  withLogging({ functionName: 'myFunction' }, async (request) => {
-    logInfo('started') // carries userId + functionName automatically
-  }),
-)
+logger.error(err, { orderId }, context, { photo: blob, state: JSON.stringify(cart) })
 ```
 
-`withLogging` binds the request's labels for the duration of the handler and unwinds
-afterwards, so one request's `userId` can never appear on another's logs. Labels that
-depend on the request are computed per call:
+Any log method takes a final `attachments` argument — `Record<string, Blob | File | string>`
+on the client, `Record<string, string | Buffer>` on the backend.
+
+**Attachments are how you send more than a log entry can hold.** A Cloud Logging entry is
+capped at **256 KB**, and a big payload does not get truncated — the write fails. Attachments
+never enter the entry: they are uploaded to Cloud Storage and stripped before the entry is
+written, so a 5 MB screenshot costs the log line two labels. Use them for anything that would
+otherwise blow the cap — screenshots, request bodies, a serialised store, a captured frame.
+
+They land at:
+
+```
+gs://<bucket>/logAttachments/{logId}/{name}
+```
+
+`logId` is a ULID on the entry itself, so the log line tells you where its files are:
+
+```
+labels.hasAttachments="true"     # entries that have files
+labels.logId="01J..."            # the entry whose files you are looking for
+```
+
+The bucket is the one passed to `createClientLogFunction({ bucketName })` — the same bucket
+the source maps live in, falling back to the project's default bucket. The `logAttachments/`
+prefix is fixed, and attachments cannot currently be pointed at a different bucket from maps.
+
+Nothing expires them. Add a lifecycle rule on `logAttachments/` to delete after N days, or
+they accumulate for the life of the project.
+
+## Volume controls
+
+Three separate gates decide whether a log is written. All have defaults, and the defaults
+drop things — so this is worth reading before you conclude something is broken.
+
+| Gate | Default | Where |
+|---|---|---|
+| Session limit | **50 logs**, then the client stops sending | client, per browser session |
+| Duplicate limit | **3 copies** of the same error, then it stops | client, per browser session |
+| Client severity floor | `WARNING` in production, `DEBUG` in dev | client, `minLogLevel` |
+| Server severity floor | `WARNING` in production, `DEBUG` in the emulator | function, `minSeverity` |
+| Function concurrency | `maxInstances: 1` on `createClientLogFunction` | function |
 
 ```ts
-withLogging(
-  (request) => ({ functionName: 'myFunction', labels: { orgId: request.data.orgId } }),
-  async (request) => { /* … */ },
-)
+initLogger({
+  appId: 'my-app',
+  releaseId,
+  logFunction,
+  minLogLevel: 'INFO',
+  rateLimitOptions: { sessionLimit: 200, duplicateLimit: 5 },
+})
 ```
 
-> **Migrating from `initRequestLogger`?** It was removed in 0.6.0 — wrap the handler in
-> `withLogging` instead of calling it as the first line. It bound the scope with
-> `enterWith()`, which is never unwound, so the labels outlived the request and a later
-> handler that did *not* call it (a scheduled function, a Firestore trigger, or anything
-> relying on `getLogger()`'s anonymous fallback) inherited whichever user last touched the
-> warm instance. Codebases where every handler called it were unaffected; the hazard was
-> the ones that didn't. `withLogging` uses `run()`, which restores the previous scope when
-> the handler settles.
+Two errors count as duplicates when the **message and the screen both match**, so the same
+error on two different screens is not collapsed into one. The budget lives in
+`sessionStorage` and resets with the session.
 
-Backend log methods also accept an optional `attachments` (`Record<string, string | Buffer>`).
+`maxInstances: 1` is a deliberate cost guard on what is usually the busiest function in the
+system. Raise it (`createClientLogFunction({ bucketName, maxInstances: 5 })`) if you are
+dropping client logs under load — and watch your Cloud Logging bill when you do.
 
-## CLI (`fsl`)
+Feedback is exempt from every one of these. See [User feedback](#user-feedback).
 
-```bash
-# Upload source maps to Cloud Storage and strip local .map files (run in deploy)
-npx fsl upload-sourcemaps [--bucket=<name>] [--functions=<path>] [--embed-sourcemaps] [--release=<id>]
+## Querying
 
-# Install the Claude Code skills into the current project (or --global, --force)
-npx fsl install-skills
+One filter, both halves, in time order:
+
+```
+labels.userId="<uid>"
 ```
 
-> To try an unreleased change in a real deployment, publish a prerelease and install it:
-> `npm publish --tag beta`, then `npm i @dasasian/firebase-structured-logger@beta`. For local work against a checkout, `npm link` avoids publishing entirely.
+Narrow it when you need to:
 
-## Skills
+| Filter | Returns |
+|---|---|
+| `labels.platform:*` | client entries only |
+| `labels.functionName:*` | server entries only |
+| `labels.releaseId="<sha>"` | one build |
+| `labels.screen="checkout"` | one screen |
+| `labels.feedback="true"` | user-reported issues |
+| `labels.hasAttachments="true"` | entries with files in GCS |
 
-```bash
-npx fsl install-skills
-```
+Locally, the emulator's JSONL answers the same questions. Point
+**[firebase-mcp-server](https://github.com/dasasian/firebase-mcp-server)** at either and ask
+Claude instead — `npx fsl install-skills` installs the two skills below.
 
 | Skill | Description |
 |-------|-------------|
 | `/logs` | Validate logging in a file — error paths, labels, PII, unwrapped handlers, breadcrumbs |
 | `/query-logs` | Query Cloud Logging or local JSONL via [firebase-mcp-server](https://github.com/dasasian/firebase-mcp-server) |
 
-## Local log rotation
+> A stack trace is self-reported by the browser, and so is `userId` on client entries — the
+> uid comes from the client's own labels, not from a verified token. Backend entries are
+> different: `withLogging` reads `request.auth.uid`, which Firebase has verified. Fine for
+> debugging either way; don't build an audit trail on the client half.
 
-Logs write to `{logLocalDir}/dev.jsonl`; each emulator start rotates the current file to `dev-{timestamp}.jsonl`, and rotation also happens when the record limit is hit mid-session.
+## Reference
 
-| Config | Default | Description |
-|---|---|---|
-| `logLocalDir` | — | Directory for local log files |
-| `logMaxRecordsPerFile` | 2000 | Records per file before rotation |
-| `logMaxRotatedFiles` | 5 | Rotated files to keep |
+### Client
 
-## Source maps
+```ts
+logger.error(error, labels?, context?, attachments?)   // attachments: Record<string, Blob | File | string>
+logger.info(message, labels?, context?, attachments?)
+logger.warning(message, labels?, context?, attachments?)
+logger.debug(message, labels?, context?, attachments?) // suppressed in production
+
+logger.setUser(uid, extraLabels?)
+logger.clearUser()
+logger.setScreen(screen)
+logger.addBreadcrumb(type, name, data?)
+```
+
+Also exported: `initLogger`, `getClientLogger`, `setupGlobalErrorHandler`, `handleReactError`,
+`sendFeedback`, `triggerTestLog`, `addBreadcrumb`, `bc`.
+
+`Logger` is exported as a **type only** — the client logger is a session singleton, so
+annotate with `Logger<MyAppLabels>` and construct with `initLogger()`. A second instance
+would silently share breadcrumbs, screen and the rate-limit budget while looking independent.
+
+
+### Functions
+
+```ts
+initLogger({ appId, logLocalDir?, minSeverity?, logMaxRecordsPerFile?, logMaxRotatedFiles? })
+
+withLogging(options | (request) => options, handler)
+getLogger()                       // the current request's writer, or an anonymous fallback
+logError / logWarn / logInfo / logDebug (message, labels?, context?, attachments?)
+
+createClientLogFunction({ bucketName, cors?, maxInstances? })   // ready to export
+createClientLogHandler({ bucketName })                          // the bare handler, wrap it yourself
+```
+
+Backend log methods also accept an optional `attachments` (`Record<string, string | Buffer>`).
+
+### CLI (`fsl`)
+
+```bash
+# Upload source maps to Cloud Storage and strip local .map files (run in deploy)
+npx fsl upload-sourcemaps --functions=./functions --embed-sourcemaps
+
+# Install the Claude Code skills into the current project (or --global, --force)
+npx fsl install-skills
+```
+
+### Source maps
 
 For symbolicated production traces, emit source maps in Vite and upload them at deploy:
 
@@ -308,6 +547,12 @@ build: {
 ```
 
 Maps are stored at `gs://<bucket>/sourcemaps/{releaseId}/{filename}.map` and loaded by the Cloud Function during symbolication.
+
+## What this is not
+
+An error tracker. There is no issue state here — nothing to resolve, ignore, assign, or mark as regressed, and no notion of "this is the same bug as that one." Errors arrive as structured, queryable log entries, not as a triage queue.
+
+If you want a list of your top twelve problems ranked by frequency with a resolve button, Sentry sells that and sells it well. What this gives you instead is every frontend and backend event in one stream you already own, in one query language, with nothing handed to a third party.
 
 ## License
 

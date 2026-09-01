@@ -30,7 +30,20 @@ App-specific labels are defined in each app's `AppLabels` type.
 
 ## Common Queries
 
-### All errors for a user
+### Everything one user did, in order
+```
+labels.userId="<uid>"
+```
+No severity filter. Frontend and backend entries share the `userId` label, so this
+returns both halves interleaved in time order — the clicks and screen changes that
+led up to a failure, the backend call that failed, and the error the browser saw.
+Filtering to `severity=ERROR` keeps the crash and throws away the story; reach for
+it only when you already know what you are looking for.
+
+Add `labels.platform:*` for client entries only, or `labels.functionName:*` for
+server entries only.
+
+### Only the errors for a user
 ```
 labels.userId="<uid>" severity=ERROR
 ```
