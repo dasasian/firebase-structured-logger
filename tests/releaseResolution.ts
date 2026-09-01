@@ -19,7 +19,7 @@
 import fs from 'fs'
 import path from 'path'
 import { initializeApp } from 'firebase-admin/app'
-import { getSourceMap, clearSourceMapCache } from '../src/functions/sourceMapCache.js'
+import { getSourceMap, clearSourceMapCache, resetSourceMapWarnings } from '../src/functions/sourceMapCache.js'
 import type { EncodedSourceMap } from '@jridgewell/trace-mapping'
 import { assert, reportResults } from './testHelpers.js'
 
@@ -106,6 +106,41 @@ async function testNoEmbeddedMapAtAll() {
   assert('resolved to null', map === null)
 }
 
+/**
+ * Silence is the expensive failure here (#35). A wrong bucket, a wrong prefix, a
+ * release never uploaded and a deploy script missing the `fsl` step all produce
+ * the same minified stack with no signal which. The warning has to name the
+ * exact object it looked for, because a prefix mismatch is only obvious once you
+ * can see the two strings.
+ */
+async function testNothingResolvedSaysWhereItLooked() {
+  console.log('\nTest: a total miss names both places it looked')
+  cleanup()
+  resetSourceMapWarnings()
+  warned.length = 0
+
+  await getSourceMap('r-missing', 'ghost.js', 'some-bucket', 'custom-prefix')
+
+  const miss = warned.join('\n')
+  assert('it says the stack stays minified', miss.includes('stays minified'), miss)
+  assert('it names the Storage object it tried', miss.includes('custom-prefix/r-missing/ghost.js.map'), miss)
+  assert('including the bucket', miss.includes('gs://some-bucket/'), miss)
+  assert('it names the embedded path it tried', miss.includes('ghost.js.map') && miss.includes('embedded:'), miss)
+  assert('and points at the two ends that must agree', miss.includes('--prefix'), miss)
+}
+
+/** Also on the per-error path, so it must not warn per error. */
+async function testTheMissWarningIsAlsoOncePerRelease() {
+  console.log('\nTest: the miss warning is emitted once, not per error')
+  cleanup()
+  resetSourceMapWarnings()
+  warned.length = 0
+
+  for (let i = 0; i < 5; i++) await getSourceMap('r-missing', 'ghost.js', 'b', 'p')
+  const lines = warned.filter((w) => w.includes('stays minified'))
+  assert('warned exactly once across 5 lookups', lines.length === 1, `got ${lines.length}`)
+}
+
 async function testWarningIsNotRepeatedPerError() {
   console.log('\nTest: the mismatch warning is emitted once, not per error')
   embed('a1b2c3')
@@ -134,6 +169,8 @@ async function run() {
     await testUnmarkedEmbedKeepsOldBehaviour()
     await testMismatchPrefersStorage()
     await testNoEmbeddedMapAtAll()
+    await testNothingResolvedSaysWhereItLooked()
+    await testTheMissWarningIsAlsoOncePerRelease()
     await testWarningIsNotRepeatedPerError()
   } finally {
     console.warn = realWarn

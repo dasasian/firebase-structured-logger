@@ -94,6 +94,44 @@ export function configureSourceMapBucket(bucketName: string): void {
 }
 
 /**
+ * Where attachments are written.
+ *
+ * Global on purpose, and global in the API so the shape does not lie. The
+ * upload happens in `writeLog`, which is reached from every log call — including
+ * `logError()` inside a handler that never went through `createClientLogHandler`
+ * — so there is no per-instance config for it to read. Accepting this as a field
+ * on the handler would let a second handler silently retarget the first's
+ * attachments, which is the module-scoped-state trap in CLAUDE.md.
+ *
+ * Unset fields keep today's behaviour: the bucket falls back to
+ * `configureSourceMapBucket`'s value and then to the project default, and the
+ * prefix to `logAttachments/`. Never calling this changes nothing.
+ */
+export function configureAttachments(options: { bucket?: string; prefix?: string }): void {
+  if (options.bucket !== undefined) attachmentBucket = options.bucket
+  if (options.prefix !== undefined) attachmentPrefix = options.prefix
+}
+
+let attachmentBucket: string | undefined
+let attachmentPrefix: string | undefined
+
+/** Bucket for attachments: explicit, then the source-map bucket, then the project default. */
+export function getAttachmentBucket(): Bucket {
+  return getBucket(attachmentBucket ?? defaultBucket)
+}
+
+/** Prefix for attachments, defaulting to the documented one. */
+export function getAttachmentPrefix(): string | undefined {
+  return attachmentPrefix
+}
+
+/** Reset attachment config. Tests only — production configures once at module load. */
+export function resetAttachmentConfig(): void {
+  attachmentBucket = undefined
+  attachmentPrefix = undefined
+}
+
+/**
  * Resolve the configured Storage bucket, falling back to the project default.
  *
  * The return type is spelled out rather than inferred: without it the emitted
@@ -151,15 +189,18 @@ async function loadStorageSourceMap(
   releaseId: string,
   fileName: string,
   bucketName?: string,
+  prefix?: string,
 ): Promise<EncodedSourceMap | null> {
   // The bucket is part of the key: the same release/file in two buckets is two
   // different maps, and caching them under one key would serve the wrong one.
-  const cacheKey = `${bucketName ?? defaultBucket ?? ''}/${releaseId}/${fileName}`
+  // The prefix is part of the key for the same reason the bucket is: the same
+  // release and file under two prefixes are two different objects.
+  const cacheKey = `${bucketName ?? defaultBucket ?? ''}/${prefix ?? ''}/${releaseId}/${fileName}`
   const hit = cacheGet(cacheKey)
   if (hit) return hit.map
 
   try {
-    const file = getBucket(bucketName).file(storageMapPath(releaseId, fileName))
+    const file = getBucket(bucketName).file(storageMapPath(releaseId, fileName, prefix))
     const [exists] = await file.exists()
 
     if (!exists) {
@@ -205,6 +246,7 @@ export async function getSourceMap(
   releaseId: string,
   fileName: string,
   bucketName?: string,
+  prefix?: string,
 ): Promise<EncodedSourceMap | null> {
   const embedded = loadEmbeddedSourceMap(fileName)
   const marker = readEmbeddedRelease()
@@ -213,14 +255,61 @@ export async function getSourceMap(
   // release. Older deploys have none, so keep the previous behaviour.
   if (embedded && (marker === null || marker === releaseId)) return embedded
 
-  const stored = await loadStorageSourceMap(releaseId, fileName, bucketName)
+  const stored = await loadStorageSourceMap(releaseId, fileName, bucketName, prefix)
   if (stored) return stored
 
   if (embedded) {
     warnReleaseFallback(releaseId, marker)
     return embedded
   }
+
+  warnNothingResolved(releaseId, fileName, bucketName, prefix)
   return null
+}
+
+// Warn once per (release, prefix). This sits on the per-error path.
+const warnedMisses = new Set<string>()
+
+/**
+ * Say so when a stack could not be symbolicated from anywhere.
+ *
+ * Silence here is the expensive failure. A wrong bucket, a wrong prefix, a
+ * release whose maps were never uploaded and an `fsl` step missing from the
+ * deploy script all produce the same thing — a minified stack, and no signal
+ * which of the four it was. With the prefix configurable (#35) there is one more
+ * way to land here, and the two ends are checked against each other by nothing.
+ *
+ * So name the exact places that were looked in. A prefix mismatch is obvious the
+ * moment you see the object name that was tried.
+ */
+function warnNothingResolved(
+  releaseId: string,
+  fileName: string,
+  bucketName: string | undefined,
+  prefix: string | undefined,
+): void {
+  const key = `${releaseId}|${prefix ?? ''}`
+  if (warnedMisses.has(key)) return
+  warnedMisses.add(key)
+
+  const bucket = bucketName ?? defaultBucket ?? '<project default>'
+  console.warn(
+    `[fsl] No source map for '${fileName}' at release '${releaseId}' — this stack stays minified.`,
+  )
+  console.warn(`[fsl]   embedded: ${embeddedMapPath(process.cwd(), fileName)} (not found)`)
+  console.warn(`[fsl]   storage:  gs://${bucket}/${storageMapPath(releaseId, fileName, prefix)} (not found)`)
+  console.warn(
+    '[fsl]   Check that the deploy runs `fsl upload-sourcemaps`, and that its --prefix',
+  )
+  console.warn(
+    '[fsl]   and --bucket match createClientLogHandler({ sourceMaps }). Nothing verifies that for you.',
+  )
+}
+
+/** Reset the warn-once sets. Tests only. */
+export function resetSourceMapWarnings(): void {
+  warnedMisses.clear()
+  warnedFallbacks.clear()
 }
 
 // Warn once per (release, marker) pair — this sits on the per-error path.

@@ -5,7 +5,7 @@ import { ulid } from "ulid";
 import type { LogSeverity, LogPayload } from "../shared/types";
 import { SEVERITY_ORDER, SEVERITIES, isLogSeverity, isFeedback } from "../shared/severity";
 import { toError, toErrorPayload } from "../shared/error";
-import { getBucket } from "./sourceMapCache";
+import { getAttachmentBucket, getAttachmentPrefix } from "./sourceMapCache";
 import { attachmentPath } from "../shared/paths.js";
 
 const IS_EMULATOR = process.env.FUNCTIONS_EMULATOR === "true";
@@ -81,10 +81,10 @@ async function uploadLogAttachments(
   logId: string,
   logAttachments: Record<string, string>,
 ): Promise<void> {
-  const bucket = getBucket();
+  const bucket = getAttachmentBucket();
   await Promise.all(
     Object.entries(logAttachments).map(async ([name, data]) => {
-      const file = bucket.file(attachmentPath(logId, name));
+      const file = bucket.file(attachmentPath(logId, name, getAttachmentPrefix()));
       await file.save(Buffer.from(data, "base64"));
     }),
   );

@@ -46,7 +46,7 @@ async function main() {
     case 'upload-sourcemaps': {
       const bucket = args.bucket ?? process.env.VITE_FIREBASE_STORAGE_BUCKET ?? process.env.FIREBASE_STORAGE_BUCKET
       if (!bucket) {
-        console.error('Usage: fsl upload-sourcemaps [--bucket=<name>] [--functions=<path>] [--embed-sourcemaps] [--release=<id>] [--dist=<path>]')
+        console.error('Usage: fsl upload-sourcemaps [--bucket=<name>] [--functions=<path>] [--embed-sourcemaps] [--release=<id>] [--dist=<path>] [--prefix=<path>]')
         console.error('Bucket can also be set via VITE_FIREBASE_STORAGE_BUCKET or FIREBASE_STORAGE_BUCKET env var (loaded from .env.local automatically).')
         process.exit(1)
       }
@@ -56,6 +56,7 @@ async function main() {
         distDir: args.dist,
         functionsDir: args.functions,
         embedSourcemaps: args['embed-sourcemaps'] === 'true',
+        prefix: args.prefix,
       })
       // Distinct code so a deploy chain can choose to continue:
       //   npx fsl upload-sourcemaps … || [ $? -eq 3 ]
@@ -73,11 +74,13 @@ async function main() {
 firebase-structured-logger (fsl)
 
 Commands:
-  fsl upload-sourcemaps [--bucket=<name>] [--functions=<path>] [--embed-sourcemaps] [--release=<id>] [--dist=<path>]
+  fsl upload-sourcemaps [--bucket=<name>] [--functions=<path>] [--embed-sourcemaps] [--release=<id>] [--dist=<path>] [--prefix=<path>]
       Upload .map files from dist/ to Cloud Storage and delete them locally.
       --bucket defaults to VITE_FIREBASE_STORAGE_BUCKET or FIREBASE_STORAGE_BUCKET (loaded from .env.local automatically).
       --functions path to Cloud Functions directory (e.g. ./functions or ./backend).
       --embed-sourcemaps copies maps to {functions}/sourcemaps/current/ for fast lookup of current release.
+      --prefix Cloud Storage prefix to upload under (default sourcemaps/). Must match
+               createClientLogHandler({ sourceMaps: { prefix } }) or maps are not found.
       Authenticates via FIREBASE_SERVICE_ACCOUNT_PATH if set, otherwise uses ADC.
       Release ID defaults to git rev-parse --short HEAD.
 

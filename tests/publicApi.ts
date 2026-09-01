@@ -40,6 +40,7 @@ const EXPECTED: Record<string, string[]> = {
     'logError',
     'logInfo',
     'logWarn',
+    'configureAttachments',
     'withLogging',
   ],
 }

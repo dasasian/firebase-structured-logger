@@ -109,7 +109,53 @@ function testThePublicConstantStillNamesTheContract() {
   assert('the /tools export equals the shared value', EMBEDDED_RELEASE_MARKER === RELEASE_MARKER, EMBEDDED_RELEASE_MARKER)
 }
 
+/**
+ * The failure #35 exists to prevent. `fsl upload-sourcemaps --prefix=X` and
+ * `createClientLogHandler({ sourceMaps: { prefix: X } })` are the two ends of one
+ * contract, and nothing checks them against each other at runtime — when they
+ * disagree the map is simply not found and the stack stays minified, which
+ * reads as "the upload never happened".
+ *
+ * They agree structurally now because both go through this one builder. This
+ * test is what keeps that true.
+ */
+function testACustomPrefixAgreesOnBothSides() {
+  console.log('\nTest: a non-default prefix resolves the same for writer and reader')
+
+  const written = storageMapPath('r7', bundleNameOf('app-9f.js.map'), 'fsl-maps')
+  const read = storageMapPath('r7', 'app-9f.js', 'fsl-maps')
+  assert('both ends name one object', written === read, `${written} vs ${read}`)
+  assert('under the given prefix', written === 'fsl-maps/r7/app-9f.js.map', written)
+  assert('and not the default one', !written.startsWith('sourcemaps/'))
+
+  assert(
+    'attachments take a prefix too',
+    attachmentPath('01J', 'shot.png', 'evidence') === 'evidence/01J/shot.png',
+    attachmentPath('01J', 'shot.png', 'evidence'),
+  )
+}
+
+/**
+ * A prefix is a directory, and people write directories with a trailing slash.
+ * Unnormalised, `'fsl/'` yields `fsl//r7/app.js.map` — a DIFFERENT Storage
+ * object from `fsl/r7/app.js.map`, because GCS keys are opaque strings and the
+ * double slash is not collapsed. The writer and reader would then disagree over
+ * nothing but a typo.
+ */
+function testPrefixesAreNormalised() {
+  console.log('\nTest: slashes around a prefix do not change the object')
+
+  const plain = storageMapPath('r7', 'app.js', 'fsl')
+  assert('a trailing slash is ignored', storageMapPath('r7', 'app.js', 'fsl/') === plain, storageMapPath('r7', 'app.js', 'fsl/'))
+  assert('a leading slash is ignored', storageMapPath('r7', 'app.js', '/fsl') === plain, storageMapPath('r7', 'app.js', '/fsl'))
+  assert('both at once', storageMapPath('r7', 'app.js', '/fsl/') === plain)
+  assert('nested prefixes survive', storageMapPath('r7', 'app.js', 'team/fsl/') === 'team/fsl/r7/app.js.map')
+  assert('attachments normalise the same way', attachmentPath('01J', 'a.png', '/e/') === attachmentPath('01J', 'a.png', 'e'))
+}
+
 testWriterAndReaderResolveTheSameObject()
+testACustomPrefixAgreesOnBothSides()
+testPrefixesAreNormalised()
 testOnlyTheTrailingSuffixIsStripped()
 testStorageNamesAreNotPlatformPaths()
 testTheMarkerSitsWithTheMapsItDescribes()

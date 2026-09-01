@@ -409,9 +409,24 @@ labels.hasAttachments="true"     # entries that have files
 labels.logId="01J..."            # the entry whose files you are looking for
 ```
 
-The bucket is the one passed to `createClientLogFunction({ bucketName })` — the same bucket
-the source maps live in, falling back to the project's default bucket. The `logAttachments/`
-prefix is fixed, and attachments cannot currently be pointed at a different bucket from maps.
+By default they share the bucket passed to `createClientLogFunction({ bucketName })` — the
+same one the source maps live in, falling back to the project's default bucket.
+
+Send them somewhere else with `configureAttachments`, in your functions entry point:
+
+```ts
+import { configureAttachments } from '@dasasian/firebase-structured-logger/functions'
+
+configureAttachments({ bucket: 'my-app-user-content', prefix: 'evidence' })
+```
+
+Call it once, at module load. It is global on purpose and global in the API: the upload
+happens on every log call, including ones inside your own handlers that never touch
+`createClientLogFunction`, so there is no per-handler setting for it to read. Fields you
+leave out keep today's behaviour, and never calling it changes nothing.
+
+Worth doing when user content needs its own region for residency, its own retention policy,
+or different IAM from your source maps — none of which can be arranged with a prefix.
 
 Nothing expires them. Add a lifecycle rule on `logAttachments/` to delete after N days, or
 they accumulate for the life of the project.
@@ -564,6 +579,22 @@ build: {
 ```
 
 Maps are stored at `gs://<bucket>/sourcemaps/{releaseId}/{filename}.map` and loaded by the Cloud Function during symbolication.
+
+To use a different bucket or prefix, tell **both ends** — they are two halves of one contract
+and nothing checks them against each other:
+
+```bash
+npx fsl upload-sourcemaps --bucket=my-maps --prefix=fsl-maps …
+```
+
+```ts
+createClientLogFunction({ sourceMaps: { bucket: 'my-maps', prefix: 'fsl-maps' } })
+```
+
+If they disagree the maps are simply not found and stacks stay minified — which looks
+identical to never having uploaded them. The function warns once per release when it
+resolves nothing, naming the exact object it looked for, so the mismatch is visible in your
+logs rather than inferred.
 
 ## What this is not
 

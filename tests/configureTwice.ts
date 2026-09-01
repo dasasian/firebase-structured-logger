@@ -23,7 +23,14 @@ if (process.env.FUNCTIONS_EMULATOR !== 'true') {
 
 import { initializeApp } from 'firebase-admin/app'
 import { configureRateLimiter, allow, resetRateLimiter } from '../src/client/rateLimiter.js'
-import { configureSourceMapBucket, getBucket } from '../src/functions/sourceMapCache.js'
+import {
+  configureAttachments,
+  configureSourceMapBucket,
+  getAttachmentBucket,
+  getAttachmentPrefix,
+  getBucket,
+  resetAttachmentConfig,
+} from '../src/functions/sourceMapCache.js'
 import { assert, reportResults } from './testHelpers.js'
 
 initializeApp({ projectId: 'demo-project' })
@@ -65,9 +72,46 @@ function testConfigureSourceMapBucketTwice() {
   )
 }
 
+/**
+ * Global in the API because it is global in fact. The attachment upload happens
+ * in writeLog, which is reached from every log call — including one inside a
+ * handler that never went through createClientLogHandler — so there is no
+ * per-instance config to read. A field on the handler would let a second
+ * handler silently retarget the first's attachments, which is the trap this
+ * file exists to catch.
+ */
+function testConfigureAttachmentsTwice() {
+  console.log('\nTest: configureAttachments — second call replaces, and unset fields fall back')
+  resetAttachmentConfig()
+  configureSourceMapBucket('maps-bucket')
+
+  // Never calling it must change nothing: today's behaviour is the source-map
+  // bucket, then the project default.
+  assert(
+    'unconfigured attachments follow the source-map bucket',
+    getAttachmentBucket().name === 'maps-bucket',
+    `got: ${getAttachmentBucket().name}`,
+  )
+  assert('unconfigured prefix is left to the path builder', getAttachmentPrefix() === undefined)
+
+  configureAttachments({ bucket: 'attach-one', prefix: 'one/' })
+  assert('the configured bucket wins over the source-map bucket', getAttachmentBucket().name === 'attach-one')
+  assert('the configured prefix is used', getAttachmentPrefix() === 'one/')
+
+  configureAttachments({ bucket: 'attach-two' })
+  assert('a second call replaces the bucket', getAttachmentBucket().name === 'attach-two')
+  // Partial calls merge rather than reset. Passing only a bucket should not
+  // silently move every attachment back to the default prefix.
+  assert('and leaves an unmentioned field alone', getAttachmentPrefix() === 'one/', `got: ${getAttachmentPrefix()}`)
+
+  resetAttachmentConfig()
+  assert('reset returns to the fallback bucket', getAttachmentBucket().name === 'maps-bucket')
+}
+
 function run() {
   testConfigureRateLimiterTwice()
   testConfigureSourceMapBucketTwice()
+  testConfigureAttachmentsTwice()
   reportResults()
 }
 

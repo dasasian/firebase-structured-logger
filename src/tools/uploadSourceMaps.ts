@@ -29,6 +29,19 @@ export interface UploadOptions {
   distDir?: string
   functionsDir?: string // path to Cloud Functions directory (e.g. './functions' or './backend')
   embedSourcemaps?: boolean  // copy maps to {functionsDir}/sourcemaps/current/ (default false)
+  /**
+   * Cloud Storage prefix to upload under. Defaults to `sourcemaps/`.
+   *
+   * The reader must be told the same value, via
+   * `createClientLogHandler({ sourceMaps: { prefix } })`. These are the two ends
+   * of one contract and nothing checks them against each other — when they
+   * disagree the maps are simply not found and stacks stay minified, which
+   * looks identical to never having uploaded them (#35).
+   *
+   * Does not affect the embedded copy: that directory ships inside the deploy
+   * artifact and nothing outside reads it, so it stays fixed.
+   */
+  prefix?: string
 }
 
 /**
@@ -139,7 +152,7 @@ export async function uploadSourceMaps(options: UploadOptions): Promise<{ upload
   try {
     for (const localPath of mapFiles) {
       const fileName = path.basename(localPath)
-      const destination = storageMapPath(releaseId, bundleNameOf(fileName))
+      const destination = storageMapPath(releaseId, bundleNameOf(fileName), options.prefix)
 
       const { json, before, after } = readStrippedMap(localPath)
       await bucket.file(destination).save(json, { contentType: 'application/json' })

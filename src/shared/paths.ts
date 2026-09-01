@@ -52,13 +52,34 @@ export const RELEASE_MARKER = '.release'
  * without the `.map`. The suffix belongs to the contract, not to either caller,
  * which is what kept the writer and reader agreeing by accident before.
  */
-export function storageMapPath(releaseId: string, bundleFileName: string): string {
-  return `${SOURCEMAP_PREFIX}/${releaseId}/${bundleFileName}.map`
+export function storageMapPath(
+  releaseId: string,
+  bundleFileName: string,
+  prefix: string = SOURCEMAP_PREFIX,
+): string {
+  return `${trimPrefix(prefix)}/${releaseId}/${bundleFileName}.map`
 }
 
 /** Cloud Storage object name for one attachment of one log entry. */
-export function attachmentPath(logId: string, name: string): string {
-  return `${ATTACHMENT_PREFIX}/${logId}/${name}`
+export function attachmentPath(
+  logId: string,
+  name: string,
+  prefix: string = ATTACHMENT_PREFIX,
+): string {
+  return `${trimPrefix(prefix)}/${logId}/${name}`
+}
+
+/**
+ * Normalise a caller-supplied prefix.
+ *
+ * A prefix is a directory, and people write directories with a trailing slash.
+ * Passing `'fsl/'` unnormalised yields `fsl//abc/app.js.map`, which is a
+ * *different* Storage object from `fsl/abc/app.js.map` — GCS keys are opaque
+ * strings, so the double slash is not collapsed and the reader would miss.
+ * Leading slashes are dropped for the same reason.
+ */
+function trimPrefix(prefix: string): string {
+  return prefix.replace(/^\/+/, '').replace(/\/+$/, '')
 }
 
 /** Local directory holding the embedded maps, under `baseDir`. */

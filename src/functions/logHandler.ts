@@ -13,6 +13,21 @@ export interface ClientLogHandlerConfig {
   bucketName?: string   // defaults to Firebase default storage bucket
   cors?: boolean | string | string[]
   maxInstances?: number
+  /**
+   * Where this handler looks for source maps in Cloud Storage.
+   *
+   * Genuinely per-handler: both values travel explicitly to `getSourceMap`, so
+   * two handlers configured differently cannot resolve to whichever was
+   * constructed last. `bucket` overrides `bucketName` for map lookups only.
+   *
+   * `prefix` must match `fsl upload-sourcemaps --prefix`. They are the two ends
+   * of one contract (#35) and nothing checks them against each other — when they
+   * disagree the maps are simply not found and stacks stay minified.
+   *
+   * Attachments are configured separately, with `configureAttachments()` — the
+   * upload happens outside any handler, so a field here would be a lie.
+   */
+  sourceMaps?: { bucket?: string; prefix?: string }
 }
 
 const VALID_SEVERITIES = new Set<string>(SEVERITIES)
@@ -33,6 +48,7 @@ async function symbolicateError(
   releaseId: string,
   error: ErrorPayload | undefined,
   bucketName?: string,
+  prefix?: string,
 ): Promise<ErrorPayload | undefined> {
   if (!error?.stack) return error
 
@@ -54,7 +70,7 @@ async function symbolicateError(
     const sourceMaps = new Map<string, Awaited<ReturnType<typeof getSourceMap>>>()
     await Promise.all(
       Array.from(bundleFiles).map(async (bundle) => {
-        const map = await getSourceMap(releaseId, bundle, bucketName)
+        const map = await getSourceMap(releaseId, bundle, bucketName, prefix)
         if (map) sourceMaps.set(bundle, map)
       }),
     )
@@ -102,7 +118,12 @@ export function createClientLogHandler(config: ClientLogHandlerConfig) {
       let processedError = jsonPayload?.error
       if (processedError?.stack && !isEmulator) {
         const releaseId = labels?.releaseId ?? 'unknown'
-        processedError = await symbolicateError(releaseId, processedError, config.bucketName)
+        processedError = await symbolicateError(
+          releaseId,
+          processedError,
+          config.sourceMaps?.bucket ?? config.bucketName,
+          config.sourceMaps?.prefix,
+        )
       }
 
       writeLog({
