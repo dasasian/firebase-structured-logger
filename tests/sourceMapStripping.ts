@@ -15,7 +15,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { stripSourcesContent, uploadSourceMaps } from '../src/tools/uploadSourceMaps.js'
+import { stripSourcesContent, uploadSourceMaps, EMBEDDED_RELEASE_MARKER } from '../src/tools/uploadSourceMaps.js'
 import { symbolicate } from '../src/functions/symbolicate.js'
 import type { EncodedSourceMap } from '@jridgewell/trace-mapping'
 import { assert, reportResults } from './testHelpers.js'
@@ -148,6 +148,18 @@ async function testEmbedStripsSourceAndReportsFailure() {
     assert('the embedded copy has no sourcesContent', !text.includes('sourcesContent'))
     assert('the original source is NOT in the deployed artifact', !text.includes(SECRET), 'source would ship inside the function')
     assert('the embedded map still symbolicates', JSON.parse(text).mappings === BASE.mappings)
+
+    // The reader keys its release check on this file. It was declared, exported and
+    // never written (#36), so readEmbeddedRelease() always returned null and every
+    // stack resolved against the current maps whatever release it came from. The
+    // reader's own tests wrote the marker themselves, so nothing caught it.
+    const marker = path.join(tmp, 'functions', 'sourcemaps', 'current', EMBEDDED_RELEASE_MARKER)
+    assert('the release marker was written', fs.existsSync(marker), 'the release check cannot run without it')
+    assert(
+      'the marker names the release being embedded',
+      fs.readFileSync(marker, 'utf-8').trim() === 'r1',
+      `got: ${fs.existsSync(marker) ? JSON.stringify(fs.readFileSync(marker, 'utf-8')) : 'no file'}`,
+    )
 
     // Deleted on purpose even though the upload failed: leaving them in dist/
     // would serve source maps to browsers, which is worse than the gap.

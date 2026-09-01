@@ -118,6 +118,13 @@ export async function uploadSourceMaps(options: UploadOptions): Promise<{ upload
       const saved = before > after ? ` (${kb(before)} → ${kb(after)})` : ''
       console.log(`  ✓ embedded ${path.basename(localPath)} → ${options.functionsDir}/sourcemaps/current/${saved}`)
     }
+
+    // Record which release these maps are for. Without it the runtime cannot tell
+    // a stack from the deployed release from a stack from an older one, and
+    // resolves both with whatever is embedded — see the marker's own doc above.
+    // Written after the loop, which has already cleared any stale marker.
+    fs.writeFileSync(path.join(embedDir, EMBEDDED_RELEASE_MARKER), releaseId)
+    console.log(`  ✓ marked ${options.functionsDir}/sourcemaps/current/ as release ${releaseId}`)
   }
 
   // Authenticate via service account key if available, otherwise fall back to ADC
