@@ -443,6 +443,23 @@ Two errors count as duplicates when the **message and the screen both match**, s
 error on two different screens is not collapsed into one. The budget lives in
 `sessionStorage` and resets with the session.
 
+### What a dropped log looks like
+
+The two rate limits say so in the browser console:
+
+```
+[fsl] Duplicate suppressed: TypeError: cannot read 'id'|checkout
+[fsl] Session log limit reached
+```
+
+**The severity floors are silent.** Both of them — the client's `minLogLevel` and the
+function's `minSeverity` — simply return, with nothing written and nothing logged about it.
+
+So if an entry never arrived and there is no `[fsl]` warning in the console, it was a floor,
+not a limit. In production both default to `WARNING`, which drops `DEBUG`, `INFO` and
+`NOTICE` on the way out of the browser *and* again on the way into Cloud Logging — an
+`INFO` you expected to see has two places it can vanish.
+
 `maxInstances: 1` is a deliberate cost guard on what is usually the busiest function in the
 system. Raise it (`createClientLogFunction({ bucketName, maxInstances: 5 })`) if you are
 dropping client logs under load — and watch your Cloud Logging bill when you do.
