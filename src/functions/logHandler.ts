@@ -10,7 +10,18 @@ import {
 } from './symbolicate'
 
 export interface ClientLogHandlerConfig {
-  bucketName?: string   // defaults to Firebase default storage bucket
+  /**
+   * Storage bucket for **both** source maps and attachments.
+   *
+   * Maps go to `sourcemaps/{releaseId}/`, attachments to `logAttachments/{logId}/`.
+   * Defaults to the project's default bucket.
+   *
+   * Attachments read it as a fallback, not directly — this sets the process-wide
+   * default that `writeLog` reaches for, since the upload happens outside any
+   * handler. Override either half independently with `sourceMaps` below or
+   * `configureAttachments()`.
+   */
+  bucketName?: string
   cors?: boolean | string | string[]
   maxInstances?: number
   /**

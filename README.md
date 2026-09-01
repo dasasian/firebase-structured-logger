@@ -107,9 +107,21 @@ import { initLogger, createClientLogFunction } from '@dasasian/firebase-structur
 initLogger({ appId: 'my-app' })
 
 export const logFrontendEvent = createClientLogFunction({
-  bucketName: 'my-app.firebasestorage.app', // Storage bucket holding source maps
+  bucketName: 'my-app.firebasestorage.app', // holds source maps AND attachments
 })
 ```
+
+One bucket serves both, under two default prefixes:
+
+```
+gs://my-app.firebasestorage.app/sourcemaps/{releaseId}/{bundle}.js.map
+gs://my-app.firebasestorage.app/logAttachments/{logId}/{name}
+```
+
+Both the bucket and the prefix can be changed per half — see [Source maps](#source-maps)
+for `sourceMaps: { bucket, prefix }`, and [Attachments](#attachments) for
+`configureAttachments({ bucket, prefix })`. Omit `bucketName` entirely and both fall back
+to your project's default bucket.
 
 **3. Wire the deploy script** — upload source maps and strip them from the hosting bundle as part of deploy. Merge into your root `package.json` scripts, keeping any existing flags like `--project`:
 
@@ -177,6 +189,89 @@ warm instance.
 
 **3. Verify it works** — call the function, then look for `labels.functionName="checkout"`.
 The entry should carry `userId` without your having written it.
+
+### If your backend is not Cloud Functions
+
+Cloud Run, or any Node server you already run. Two things differ from the browser
+path above; everything else — breadcrumbs, labels, symbolication, the free fields — is
+identical, and the entries land in the same stream in the same shape.
+
+**Receive the logs over HTTP** instead of exporting a callable:
+
+```ts
+import express from 'express'
+import { getAuth } from 'firebase-admin/auth'
+import { initLogger, createHttpLogHandler } from '@dasasian/firebase-structured-logger/functions'
+
+initLogger({ appId: 'my-app' })
+
+const app = express()
+app.use(express.json({ limit: '10mb' }))   // attachments ride in the body
+
+app.post('/log', createHttpLogHandler({
+  bucketName: 'my-app.firebasestorage.app', // holds source maps AND attachments
+  authorize: async (req) => {
+    const header = String(req.headers.authorization ?? '')
+    if (!header.startsWith('Bearer ')) return false
+    try { await getAuth().verifyIdToken(header.slice(7)); return true } catch { return false }
+  },
+}))
+```
+
+**Point the client at it.** `logFunction` is any async function, so a `fetch` works:
+
+```ts
+initLogger({
+  appId: 'my-app',
+  releaseId: import.meta.env.VITE_RELEASE_ID ?? 'dev',
+  logFunction: async (payload) => {
+    const res = await fetch('https://api.example.com/log', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${await auth.currentUser?.getIdToken()}`,
+      },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) throw new Error(`log rejected: ${res.status}`)
+  },
+})
+```
+
+#### `authorize` is required, and that is deliberate
+
+A callable gets Firebase's token check for free. An HTTP endpoint gets nothing, and an
+open one writes to your Cloud Logging bill on anyone's say-so. There is no honest
+default, so there isn't one.
+
+It is a **gate, not an identity check**. The handler never reads `request.auth` — the
+`userId` on a client entry is self-reported either way. Its job is keeping strangers out.
+
+If something in front of it already did that work — a VPC, an API gateway, IAM — say so
+at the call site:
+
+```ts
+createHttpLogHandler({ authorize: 'unauthenticated' })
+```
+
+A gate that throws counts as a rejection, not an opening.
+
+#### What you need to know
+
+- **Body parsing is yours.** Mount `express.json()` (or your framework's equivalent)
+  before the handler. Raise its limit if you send attachments.
+- **CORS** defaults to `*`, matching `cors: true` on the callable. Pass `allowOrigin` to
+  name your origin — a browser cannot send cookies to a wildcard.
+- **Trace correlation works**, and needs nothing from you. The handler reads
+  `X-Cloud-Trace-Context` or `traceparent` off the request, so a request's entries still
+  group in Cloud Logging.
+- **No Storage bucket?** You do not need one. `fsl upload-sourcemaps --embed-sourcemaps`
+  without `--bucket` embeds the current release's maps into your deploy and uploads
+  nothing. The catch: only the **deployed** release can be symbolicated, because older
+  ones live in a bucket there isn't one of. Errors from a previous release come back
+  minified.
+- **Response codes:** `204` written, `400` malformed payload, `401` gate refused, `405`
+  not a POST, `500` something else. The client treats a non-2xx as a throw.
 
 ## Local development
 
@@ -547,17 +642,33 @@ withLogging(options | (request) => options, handler)
 getLogger()                       // the current request's writer, or an anonymous fallback
 logError / logWarn / logInfo / logDebug (message, labels?, context?, attachments?)
 
-createClientLogFunction({ bucketName, cors?, maxInstances? })   // ready to export
-createClientLogHandler({ bucketName })                          // the bare handler, wrap it yourself
+configureAttachments({ bucket?, prefix? })    // once, at module load — see Attachments
+
+// Receiving client logs. All three take the same source-map config:
+//   { bucketName?, sourceMaps?: { bucket?, prefix? } }
+createClientLogFunction({ …, cors?, maxInstances? })   // a ready-to-export callable
+createHttpLogHandler({ …, authorize, allowOrigin? })   // an (req, res) handler for Express etc.
+createClientLogHandler({ … })                          // the bare handler, wrap it yourself
 ```
 
 Backend log methods also accept an optional `attachments` (`Record<string, string | Buffer>`).
+
+`createClientLogHandler` takes `{ data: LogPayload }` — the minimum it reads — and throws
+`ClientLogError` with a `code` of `'invalid-argument'` or `'internal'`. The two wrappers above
+translate that: the callable into an `HttpsError`, the HTTP handler into a status code. Use the
+bare handler only if you are wrapping it in something else yourself.
 
 ### CLI (`fsl`)
 
 ```bash
 # Upload source maps to Cloud Storage and strip local .map files (run in deploy)
 npx fsl upload-sourcemaps --functions=./functions --embed-sourcemaps
+
+# Same, to a bucket and prefix of your choosing — tell the reader the same values
+npx fsl upload-sourcemaps --functions=./functions --embed-sourcemaps --bucket=my-maps --prefix=fsl-maps
+
+# No bucket at all: embed the current release, upload nothing
+npx fsl upload-sourcemaps --functions=./backend --embed-sourcemaps
 
 # Install the Claude Code skills into the current project (or --global, --force)
 npx fsl install-skills
@@ -578,7 +689,7 @@ build: {
 }
 ```
 
-Maps are stored at `gs://<bucket>/sourcemaps/{releaseId}/{filename}.map` and loaded by the Cloud Function during symbolication.
+Maps are stored at `gs://<bucket>/sourcemaps/{releaseId}/{filename}.map` and loaded by whichever log handler you deployed — the callable or the HTTP one — during symbolication.
 
 To use a different bucket or prefix, tell **both ends** — they are two halves of one contract
 and nothing checks them against each other:
