@@ -45,9 +45,13 @@ async function main() {
   switch (command) {
     case 'upload-sourcemaps': {
       const bucket = args.bucket ?? process.env.VITE_FIREBASE_STORAGE_BUCKET ?? process.env.FIREBASE_STORAGE_BUCKET
-      if (!bucket) {
+      const embed = args['embed-sourcemaps'] === 'true'
+      // A bucket is only required when something is going to be uploaded.
+      // Embed-only is the whole flow for a backend that has no bucket — see #34.
+      if (!bucket && !embed) {
         console.error('Usage: fsl upload-sourcemaps [--bucket=<name>] [--functions=<path>] [--embed-sourcemaps] [--release=<id>] [--dist=<path>] [--prefix=<path>]')
         console.error('Bucket can also be set via VITE_FIREBASE_STORAGE_BUCKET or FIREBASE_STORAGE_BUCKET env var (loaded from .env.local automatically).')
+        console.error('Omit the bucket only with --embed-sourcemaps, to embed the current release without uploading.')
         process.exit(1)
       }
       const result = await uploadSourceMaps({
@@ -55,7 +59,7 @@ async function main() {
         release: args.release,
         distDir: args.dist,
         functionsDir: args.functions,
-        embedSourcemaps: args['embed-sourcemaps'] === 'true',
+        embedSourcemaps: embed,
         prefix: args.prefix,
       })
       // Distinct code so a deploy chain can choose to continue:
@@ -79,6 +83,8 @@ Commands:
       --bucket defaults to VITE_FIREBASE_STORAGE_BUCKET or FIREBASE_STORAGE_BUCKET (loaded from .env.local automatically).
       --functions path to Cloud Functions directory (e.g. ./functions or ./backend).
       --embed-sourcemaps copies maps to {functions}/sourcemaps/current/ for fast lookup of current release.
+               Given without --bucket, embeds only and uploads nothing — for a backend with no
+               bucket. Only the deployed release can then be symbolicated.
       --prefix Cloud Storage prefix to upload under (default sourcemaps/). Must match
                createClientLogHandler({ sourceMaps: { prefix } }) or maps are not found.
       Authenticates via FIREBASE_SERVICE_ACCOUNT_PATH if set, otherwise uses ADC.

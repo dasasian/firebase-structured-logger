@@ -173,11 +173,90 @@ async function testEmbedStripsSourceAndReportsFailure() {
   }
 }
 
+/**
+ * A backend with no Cloud Storage bucket — Cloud Run, say — still wants the
+ * embedded copy (#34). Before, the CLI exited 1 without a bucket and the library
+ * required one, so the only way through was to invent a bucket name and swallow
+ * the upload failure.
+ *
+ * The maps must still leave dist/. They are embedded, and leaving them behind
+ * serves source maps to browsers, which is worse than having no Storage copy.
+ */
+async function testEmbedOnlyWithNoBucket() {
+  console.log('\nTest: --embed-sourcemaps with no bucket embeds, deletes, and does not fail')
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fsl-nobucket-'))
+  const cwd = process.cwd()
+  try {
+    fs.mkdirSync(path.join(tmp, 'dist', 'assets'), { recursive: true })
+    fs.mkdirSync(path.join(tmp, 'functions'), { recursive: true })
+    fs.writeFileSync(
+      path.join(tmp, 'dist', 'assets', 'app-NOBUCKET.js.map'),
+      JSON.stringify({ ...BASE, sourcesContent: ['const A = 1'] }),
+    )
+
+    process.chdir(tmp)
+    const result = await uploadSourceMaps({
+      release: 'r-nobucket',
+      distDir: './dist',
+      functionsDir: './functions',
+      embedSourcemaps: true,
+    })
+
+    assert('an embed-only run is not a failure', result.uploaded === true)
+
+    const embedded = path.join(tmp, 'functions', 'sourcemaps', 'current', 'app-NOBUCKET.js.map')
+    assert('the map was embedded', fs.existsSync(embedded))
+    assert(
+      'the marker was still written',
+      fs.readFileSync(path.join(tmp, 'functions', 'sourcemaps', 'current', EMBEDDED_RELEASE_MARKER), 'utf-8').trim() === 'r-nobucket',
+    )
+    assert(
+      'and the map still left dist/ so it cannot reach hosting',
+      !fs.existsSync(path.join(tmp, 'dist', 'assets', 'app-NOBUCKET.js.map')),
+    )
+  } finally {
+    process.chdir(cwd)
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+}
+
+/**
+ * Without a bucket AND without embedding, the run would delete the maps and
+ * produce nothing. That is never what someone meant.
+ */
+async function testNoBucketAndNoEmbedIsRefused() {
+  console.log('\nTest: no bucket and no embed is refused rather than silently destructive')
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fsl-nothing-'))
+  const cwd = process.cwd()
+  try {
+    fs.mkdirSync(path.join(tmp, 'dist', 'assets'), { recursive: true })
+    const map = path.join(tmp, 'dist', 'assets', 'app-NOTHING.js.map')
+    fs.writeFileSync(map, JSON.stringify(BASE))
+
+    process.chdir(tmp)
+    let threw = false
+    try {
+      await uploadSourceMaps({ release: 'r0', distDir: './dist' })
+    } catch {
+      threw = true
+    }
+    assert('it refuses', threw)
+    assert('and the maps are untouched', fs.existsSync(map), 'a refused run must not delete anything')
+  } finally {
+    process.chdir(cwd)
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+}
+
 async function run() {
   testRemovesSourcesContent()
   testKeepsEverythingSymbolicationNeeds()
   testStrippedMapStillSymbolicates()
   testMapWithoutContentIsUntouched()
+  await testEmbedOnlyWithNoBucket()
+  await testNoBucketAndNoEmbedIsRefused()
   testUnparseableMapIsPassedThrough()
   testSizeReductionIsRealistic()
   await testEmbedStripsSourceAndReportsFailure()

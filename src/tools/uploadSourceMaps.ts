@@ -24,7 +24,17 @@ export const EXIT_UPLOAD_FAILED_BUT_EMBEDDED = 3
 export const EMBEDDED_RELEASE_MARKER = RELEASE_MARKER
 
 export interface UploadOptions {
-  bucket: string        // resolved by caller — falls back to env vars in CLI
+  /**
+   * Cloud Storage bucket to upload to. Resolved by the caller — the CLI falls
+   * back to env vars.
+   *
+   * Optional, but only alongside `embedSourcemaps`: a run that neither uploads
+   * nor embeds does nothing except delete maps, which is not a thing to let
+   * someone ask for by accident. Omitting it is how a backend with no bucket —
+   * Cloud Run, say — gets the embedded copy without inventing a bucket name to
+   * satisfy the tool (#34).
+   */
+  bucket?: string
   release?: string
   distDir?: string
   functionsDir?: string // path to Cloud Functions directory (e.g. './functions' or './backend')
@@ -109,12 +119,20 @@ export async function uploadSourceMaps(options: UploadOptions): Promise<{ upload
   const distDir = options.distDir ?? path.join(process.cwd(), 'dist')
   const mapFiles = findMapFiles(distDir)
 
+  if (!options.bucket && !options.embedSourcemaps) {
+    throw new Error(
+      '[fsl] Nothing to do: no --bucket to upload to and no --embed-sourcemaps. ' +
+        'Running would only delete the maps from dist/.',
+    )
+  }
+
   if (mapFiles.length === 0) {
     console.log('[fsl] No .map files found in', distDir)
     return { uploaded: true }
   }
 
-  console.log(`[fsl] Uploading ${mapFiles.length} source map(s) for release ${releaseId}...`)
+  const verb = options.bucket ? 'Uploading' : 'Embedding'
+  console.log(`[fsl] ${verb} ${mapFiles.length} source map(s) for release ${releaseId}...`)
 
   // Embed maps into functions directory before uploading (for fast lookup of current release)
   if (options.embedSourcemaps && options.functionsDir) {
@@ -139,6 +157,22 @@ export async function uploadSourceMaps(options: UploadOptions): Promise<{ upload
     // Written after the loop, which has already cleared any stale marker.
     fs.writeFileSync(path.join(embedDir, RELEASE_MARKER), releaseId)
     console.log(`  ✓ marked ${options.functionsDir}/sourcemaps/current/ as release ${releaseId}`)
+  }
+
+  // Embed-only: nothing to authenticate against, so do not construct a client.
+  // The maps still leave dist/ — they are embedded, and leaving them behind
+  // would serve source maps to browsers, which is the worse outcome.
+  if (!options.bucket) {
+    for (const localPath of mapFiles) {
+      if (fs.existsSync(localPath)) {
+        fs.unlinkSync(localPath)
+        console.log(`  ✗ deleted ${path.relative(process.cwd(), localPath)}`)
+      }
+    }
+    console.log('[fsl] Embedded only — no bucket given, nothing uploaded.')
+    console.log(`[fsl]   Stacks from ${releaseId} symbolicate while it is the deployed release.`)
+    console.log('[fsl]   Older releases cannot be symbolicated without a bucket to read from.')
+    return { uploaded: true }
   }
 
   // Authenticate via service account key if available, otherwise fall back to ADC
