@@ -132,9 +132,45 @@ async function callFunction(name: string, data: unknown): Promise<void> {
  * could not tell "labels were not promoted to entry labels" from "nothing was
  * logged at all". The label filter is asserted separately, as a result.
  */
-async function waitForEntries(want: number, timeoutMs = 240_000): Promise<any[]> {
+/**
+ * What a log entry looks like to this harness.
+ *
+ * Written out rather than left as `any` because `any` is what let
+ * `entry.metadata.errorGroups` through — a field the client library does not
+ * surface at all, which cost a full deploy-and-wait cycle and a wrong conclusion
+ * about whether Error Reporting had grouped anything (#38).
+ *
+ * `errorGroups` is declared here precisely because the client's own `LogEntry`
+ * type omits it. That omission is the reason entries are read over REST.
+ */
+interface SmokeEntryData {
+  message?: string
+  stack_trace?: string
+  serviceContext?: { service?: string; version?: string }
+  error?: { message?: string; name?: string; stack?: string; cause?: string }
+  breadcrumbs?: Array<{ type: string; name: string }>
+  context?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+interface SmokeEntryMeta {
+  severity?: string
+  labels?: Record<string, string | undefined>
+  trace?: string
+  timestamp?: string
+  errorGroups?: Array<{ id?: string }>
+  [key: string]: unknown
+}
+
+interface SmokeEntry {
+  data?: SmokeEntryData
+  metadata?: SmokeEntryMeta
+  errorGroups?: Array<{ id?: string }>
+}
+
+async function waitForEntries(want: number, timeoutMs = 240_000): Promise<SmokeEntry[]> {
   const started = Date.now()
-  let last: any[] = []
+  let last: SmokeEntry[] = []
   let delay = 3_000
   while (Date.now() - started < timeoutMs) {
     const [entries] = await logging.getEntries({
@@ -147,11 +183,17 @@ async function waitForEntries(want: number, timeoutMs = 240_000): Promise<any[]>
     // LogEntry.labels they are no longer inside `data`, so a payload-only match
     // silently misses every entry whose run id rode in a label — which is most
     // of them.
-    const mine = entries.filter(
-      (e) =>
-        JSON.stringify(e.data ?? {}).includes(RUN_ID) ||
-        JSON.stringify(e.metadata?.labels ?? {}).includes(RUN_ID),
-    )
+    // The client library's Entry carries everything read here EXCEPT
+    // `errorGroups`, which its LogEntry type omits entirely — see
+    // listEntriesRest. Narrowed rather than cast wholesale so that omission
+    // stays visible in the types.
+    const mine: SmokeEntry[] = entries
+      .filter(
+        (e) =>
+          JSON.stringify(e.data ?? {}).includes(RUN_ID) ||
+          JSON.stringify(e.metadata?.labels ?? {}).includes(RUN_ID),
+      )
+      .map((e) => ({ data: e.data as SmokeEntryData, metadata: e.metadata as SmokeEntryMeta }))
     process.stdout.write(`\r  … ${mine.length}/${want} entries after ${Math.round((Date.now() - started) / 1000)}s   `)
     if (mine.length >= want) {
       process.stdout.write('\n')
@@ -194,14 +236,14 @@ async function queryByLabel(field: string, value: string): Promise<number> {
  * `stack_trace` so Error Reporting can see it (#31), and loses the `stack` key
  * under `error` — one copy, not two. Anything below ERROR keeps it where it was.
  */
-function stackOf(data: any): string {
+function stackOf(data: SmokeEntryData | undefined): string {
   return String(data?.stack_trace ?? data?.error?.stack ?? '')
 }
 
-function errorGroupIds(entry: any): string[] {
+function errorGroupIds(entry: SmokeEntry | undefined): string[] {
   const groups = entry?.metadata?.errorGroups ?? entry?.errorGroups
   if (!Array.isArray(groups)) return []
-  return groups.map((g: any) => String(g?.id ?? '')).filter(Boolean)
+  return groups.map((g) => String(g?.id ?? '')).filter(Boolean)
 }
 
 /**
@@ -212,9 +254,9 @@ function errorGroupIds(entry: any): string[] {
  * counts every entry the run has produced so far, so its target is a moving
  * number that is easy to get wrong.
  */
-async function waitForErrorGroups(marker: string, timeoutMs = 300_000): Promise<any[]> {
+async function waitForErrorGroups(marker: string, timeoutMs = 300_000): Promise<SmokeEntry[]> {
   const started = Date.now()
-  let last: any[] = []
+  let last: SmokeEntry[] = []
   let delay = 4_000
   while (Date.now() - started < timeoutMs) {
     const entries = await listEntriesRest(`jsonPayload.message:"${marker}"`)
@@ -245,10 +287,10 @@ async function waitForErrorGroups(marker: string, timeoutMs = 300_000): Promise<
  * Shaped to match the client's `{ data, metadata }` so the assertions below do
  * not care which path an entry arrived by.
  */
-async function listEntriesRest(filter: string): Promise<any[]> {
+async function listEntriesRest(filter: string): Promise<SmokeEntry[]> {
   const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/logging.read'] })
   const client = await auth.getClient()
-  const res = await client.request<{ entries?: any[] }>({
+  const res = await client.request<{ entries?: Array<SmokeEntryMeta & { jsonPayload?: SmokeEntryData }> }>({
     url: 'https://logging.googleapis.com/v2/entries:list',
     method: 'POST',
     data: {
@@ -258,7 +300,7 @@ async function listEntriesRest(filter: string): Promise<any[]> {
       pageSize: 20,
     },
   })
-  return (res.data.entries ?? []).map((e) => ({ data: e.jsonPayload, metadata: e, ...e }))
+  return (res.data.entries ?? []).map((e) => ({ data: e.jsonPayload, metadata: e, errorGroups: e.errorGroups }))
 }
 
 // --- the run --------------------------------------------------------------
@@ -300,7 +342,7 @@ async function main(): Promise<void> {
     return
   }
 
-  const payloads = entries.map((e) => ({ data: e.data as any, meta: e.metadata as any }))
+  const payloads = entries.map((e) => ({ data: e.data, meta: e.metadata }))
   const client = payloads.find((p) => String(p.data?.message ?? '').includes('client error'))
   const backendInfo = payloads.find((p) => String(p.data?.message ?? '').includes('backend info'))
 
@@ -363,7 +405,7 @@ async function main(): Promise<void> {
   })
   const mismatchEntries = await waitForEntries(5)
   const mismatch = mismatchEntries
-    .map((e) => e.data as any)
+    .map((e) => e.data)
     .find((d) => String(d?.message ?? '').includes('mismatched release'))
   const mstack: string = stackOf(mismatch)
   assert('the mismatched-release entry arrived', !!mismatch)
@@ -405,7 +447,7 @@ async function main(): Promise<void> {
   console.log('  invoked fslSmokeFeedback twice (feedback + plain)')
 
   const afterFeedback = await waitForEntries(6)
-  const seen = afterFeedback.map((e) => ({ data: e.data as any, meta: e.metadata as any }))
+  const seen = afterFeedback.map((e) => ({ data: e.data, meta: e.metadata }))
   const feedback = seen.find((p) => String(p.data?.message ?? '').includes('the discount did not apply'))
   const plainNotice = seen.find((p) => String(p.data?.message ?? '').includes('plain notice'))
 
@@ -511,7 +553,7 @@ async function main(): Promise<void> {
     String(alpha?.data?.stack_trace ?? '').includes('catalogProducts.ts'),
     `stack_trace: ${String(alpha?.data?.stack_trace ?? '').slice(0, 120)}`)
   assert('and it is not duplicated under error',
-    alpha?.data?.error && !('stack' in alpha.data.error),
+    Boolean(alpha?.data?.error) && !('stack' in (alpha?.data?.error ?? {})),
     `error: ${JSON.stringify(alpha?.data?.error)}`)
 
   // Regression guards. An error group is something a person has to resolve.

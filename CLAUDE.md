@@ -9,7 +9,18 @@ no MCP registry step.
 
 ## Build / test
 
-`npm run build` (tsc) · `npm run typecheck` (tsc --noEmit) · `npm test`.
+`npm run build` (tsc) · `npm run typecheck` · `npm test`.
+
+`typecheck` runs **two** configs. `tsconfig.json` is the build — CommonJS, `rootDir ./src`,
+and it covers `src/` only. `tsconfig.check.json` covers `tests/` and `smoke/` as well, with
+ESM settings and `noEmit`, because `smoke/run.ts` uses `import.meta` and CommonJS rejects it
+(TS1470). Neither file was type-checked at all until #38, which is how
+`entry.metadata.errorGroups` — a field the Logging client does not surface — reached a live
+smoke run and reported, wrongly, that Cloud Error Reporting had grouped nothing.
+
+That only works while the harness stays typed. `smoke/run.ts` has no `any` in it on purpose:
+`any` is what let that bug through, so re-introducing one silently disarms the check for the
+file that most needs it.
 
 `tsc` does not remove output for sources you deleted, so `dist/` keeps stale files and
 `npm pack` will happily ship them — `packDeploy.js` was still in the 0.4.0 tarball after

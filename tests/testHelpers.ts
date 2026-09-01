@@ -34,7 +34,25 @@ function logFile(logDir: string): string {
 }
 
 /** Read the last JSONL entry the emulator-mode logger wrote to `logDir`. */
-export function readLastEntry(logDir: string): Record<string, unknown> | undefined {
+/**
+ * One entry as the emulator writes it to dev.jsonl.
+ *
+ * Typed rather than left as Record<string, unknown>: suites read `.message` and
+ * `.labels.userId` off this constantly, and an opaque record makes every one of
+ * those an untyped hop that the typecheck cannot follow (#38).
+ */
+export interface LoggedEntry {
+  timestamp?: string
+  severity?: string
+  message?: string
+  labels?: Record<string, string | undefined>
+  jsonPayload?: Record<string, unknown>
+  functionName?: string
+  requestId?: string
+  [key: string]: unknown
+}
+
+export function readLastEntry(logDir: string): LoggedEntry | undefined {
   const file = logFile(logDir)
   if (!fs.existsSync(file)) return undefined
   const lines = fs.readFileSync(file, 'utf-8').trim().split('\n').filter(Boolean)

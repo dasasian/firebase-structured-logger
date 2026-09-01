@@ -14,16 +14,20 @@
  * event classes, so those cases are now expressible.
  */
 
-import { JSDOM } from 'jsdom'
+import { JSDOM, type ConstructorOptions } from 'jsdom'
 
 const DEFAULT_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
 
+// `userAgent` is honoured by jsdom at runtime but missing from its published
+// ConstructorOptions type. The cast is the type being wrong, not the call —
+// client/logger reads navigator.userAgent at module load and every platform and
+// browser label in the suite depends on this value.
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {
   url: 'https://app.example.com/checkout',
   userAgent: DEFAULT_UA,
   pretendToBeVisual: true,
-})
+} as ConstructorOptions & { userAgent: string })
 
 const win = dom.window
 const globals = globalThis as Record<string, unknown>

@@ -7,6 +7,7 @@ import { sessionStorageStub } from './browserStubs.js'
 import { initLogger } from '../src/client/logger.js'
 import { configureRateLimiter, resetRateLimiter } from '../src/client/rateLimiter.js'
 import type { LogPayload } from '../src/shared/types.js'
+import type { Logger } from '../src/client/logger.js'
 import { assert, reportResults } from './testHelpers.js'
 
 function makeLogger(): { logger: Logger; lastPayload: () => LogPayload | undefined } {
