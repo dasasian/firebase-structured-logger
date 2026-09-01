@@ -1,6 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { Storage } from '@google-cloud/storage'
+import { RELEASE_MARKER, bundleNameOf, embeddedDir, storageMapPath } from '../shared/paths.js'
 
 /**
  * Exit code used when maps were embedded but the Storage upload failed.
@@ -20,7 +21,7 @@ export const EXIT_UPLOAD_FAILED_BUT_EMBEDDED = 3
  * by filename, so an old stack naming a bundle that still exists would be
  * resolved with the current map, giving confidently wrong line numbers.
  */
-export const EMBEDDED_RELEASE_MARKER = '.release'
+export const EMBEDDED_RELEASE_MARKER = RELEASE_MARKER
 
 export interface UploadOptions {
   bucket: string        // resolved by caller — falls back to env vars in CLI
@@ -104,7 +105,7 @@ export async function uploadSourceMaps(options: UploadOptions): Promise<{ upload
 
   // Embed maps into functions directory before uploading (for fast lookup of current release)
   if (options.embedSourcemaps && options.functionsDir) {
-    const embedDir = path.join(process.cwd(), options.functionsDir, 'sourcemaps', 'current')
+    const embedDir = embeddedDir(path.join(process.cwd(), options.functionsDir))
     fs.mkdirSync(embedDir, { recursive: true })
     for (const f of fs.readdirSync(embedDir)) {
       fs.unlinkSync(path.join(embedDir, f))
@@ -123,7 +124,7 @@ export async function uploadSourceMaps(options: UploadOptions): Promise<{ upload
     // a stack from the deployed release from a stack from an older one, and
     // resolves both with whatever is embedded — see the marker's own doc above.
     // Written after the loop, which has already cleared any stale marker.
-    fs.writeFileSync(path.join(embedDir, EMBEDDED_RELEASE_MARKER), releaseId)
+    fs.writeFileSync(path.join(embedDir, RELEASE_MARKER), releaseId)
     console.log(`  ✓ marked ${options.functionsDir}/sourcemaps/current/ as release ${releaseId}`)
   }
 
@@ -138,7 +139,7 @@ export async function uploadSourceMaps(options: UploadOptions): Promise<{ upload
   try {
     for (const localPath of mapFiles) {
       const fileName = path.basename(localPath)
-      const destination = `sourcemaps/${releaseId}/${fileName}`
+      const destination = storageMapPath(releaseId, bundleNameOf(fileName))
 
       const { json, before, after } = readStrippedMap(localPath)
       await bucket.file(destination).save(json, { contentType: 'application/json' })

@@ -1,6 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { getStorage } from 'firebase-admin/storage'
+import { embeddedMapPath, embeddedMarkerPath, storageMapPath } from '../shared/paths.js'
 import type { Bucket } from '@google-cloud/storage'
 import type { EncodedSourceMap } from '@jridgewell/trace-mapping'
 
@@ -121,7 +122,7 @@ function loadEmbeddedSourceMap(fileName: string): EncodedSourceMap | null {
 function readEmbeddedRelease(): string | null {
   if (embeddedRelease !== undefined) return embeddedRelease
   try {
-    const markerPath = path.join(process.cwd(), 'sourcemaps', 'current', '.release')
+    const markerPath = embeddedMarkerPath(process.cwd())
     embeddedRelease = fs.existsSync(markerPath)
       ? fs.readFileSync(markerPath, 'utf-8').trim() || null
       : null
@@ -133,8 +134,9 @@ function readEmbeddedRelease(): string | null {
 
 function readEmbeddedSourceMap(fileName: string): EncodedSourceMap | null {
   try {
-    // Looks for sourcemaps/current/{fileName}.map relative to the Cloud Function working directory
-    const mapPath = path.join(process.cwd(), 'sourcemaps', 'current', `${fileName}.map`)
+    // Resolved against the process working directory — the deployed backend's,
+    // whether that is Cloud Functions or anything else that ships the directory.
+    const mapPath = embeddedMapPath(process.cwd(), fileName)
     if (!fs.existsSync(mapPath)) return null
     return JSON.parse(fs.readFileSync(mapPath, 'utf-8')) as EncodedSourceMap
   } catch {
@@ -157,7 +159,7 @@ async function loadStorageSourceMap(
   if (hit) return hit.map
 
   try {
-    const file = getBucket(bucketName).file(`sourcemaps/${releaseId}/${fileName}.map`)
+    const file = getBucket(bucketName).file(storageMapPath(releaseId, fileName))
     const [exists] = await file.exists()
 
     if (!exists) {

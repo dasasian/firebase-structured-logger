@@ -6,6 +6,7 @@ import type { LogSeverity, LogPayload } from "../shared/types";
 import { SEVERITY_ORDER, SEVERITIES, isLogSeverity, isFeedback } from "../shared/severity";
 import { toError, toErrorPayload } from "../shared/error";
 import { getBucket } from "./sourceMapCache";
+import { attachmentPath } from "../shared/paths.js";
 
 const IS_EMULATOR = process.env.FUNCTIONS_EMULATOR === "true";
 export const LOG_FILENAME = "dev.jsonl";
@@ -83,7 +84,7 @@ async function uploadLogAttachments(
   const bucket = getBucket();
   await Promise.all(
     Object.entries(logAttachments).map(async ([name, data]) => {
-      const file = bucket.file(`logAttachments/${logId}/${name}`);
+      const file = bucket.file(attachmentPath(logId, name));
       await file.save(Buffer.from(data, "base64"));
     }),
   );
