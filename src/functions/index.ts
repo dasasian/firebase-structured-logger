@@ -5,8 +5,10 @@ export { initLogger } from './logger'
 export type { LogWriter } from './logger'
 export { withLogging, getLogger } from './requestLogger'
 export { configureAttachments } from './sourceMapCache'
-export { createClientLogHandler, createClientLogFunction } from './logHandler'
-export type { ClientLogHandlerConfig } from './logHandler'
+export { createClientLogHandler, createClientLogFunction, ClientLogError } from './logHandler'
+export { createHttpLogHandler } from './httpHandler'
+export type { ClientLogHandlerConfig, ClientLogRequest } from './logHandler'
+export type { HttpLogHandlerConfig, HttpLogRequest, HttpLogResponse } from './httpHandler'
 export type { LogSeverity, LogPayload, BaseLabels } from '../shared/types'
 
 export const logError = (...args: Parameters<LogWriter['error']>): void => getLogger().error(...args)

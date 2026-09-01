@@ -1,4 +1,4 @@
-import { onCall, HttpsError, type CallableRequest } from 'firebase-functions/v2/https'
+import { onCall, HttpsError } from 'firebase-functions/v2/https'
 import type { LogPayload, ErrorPayload } from '../shared/types'
 import { SEVERITIES } from '../shared/severity'
 import { writeLog, cleanLabels } from './logger'
@@ -31,6 +31,36 @@ export interface ClientLogHandlerConfig {
 }
 
 const VALID_SEVERITIES = new Set<string>(SEVERITIES)
+
+/**
+ * What the bare handler throws.
+ *
+ * It used to throw `HttpsError` directly, which made the handler
+ * Firebase-shaped in its failures as well as its input — a caller running it
+ * behind anything else got an error carrying a callable protocol's vocabulary.
+ * `createClientLogFunction` converts these back, so a callable client sees
+ * exactly what it saw before.
+ */
+export class ClientLogError extends Error {
+  constructor(
+    readonly code: 'invalid-argument' | 'internal',
+    message: string,
+  ) {
+    super(message)
+    this.name = 'ClientLogError'
+  }
+}
+
+/**
+ * The minimum the handler actually reads.
+ *
+ * `CallableRequest` was in the signature and only `.data` was ever touched —
+ * not `.auth`, not `.rawRequest`. Saying so is what lets an Express adapter, or
+ * anything else, call this without constructing a callable request (#34).
+ */
+export interface ClientLogRequest {
+  data: LogPayload
+}
 
 /**
  * Extract the bundle filename (e.g. "index-DnZ05f3M.js") from a frame URL.
@@ -101,15 +131,15 @@ async function symbolicateError(
 export function createClientLogHandler(config: ClientLogHandlerConfig) {
   if (config.bucketName) configureSourceMapBucket(config.bucketName)
 
-  return async (request: CallableRequest<LogPayload>): Promise<void> => {
+  return async (request: ClientLogRequest): Promise<void> => {
     const { message, severity, labels, jsonPayload } = request.data
 
     if (!message || !severity) {
-      throw new HttpsError('invalid-argument', 'Missing message or severity')
+      throw new ClientLogError('invalid-argument', 'Missing message or severity')
     }
 
     if (!VALID_SEVERITIES.has(severity)) {
-      throw new HttpsError('invalid-argument', `Invalid severity: ${severity}`)
+      throw new ClientLogError('invalid-argument', `Invalid severity: ${severity}`)
     }
 
     const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true'
@@ -135,7 +165,7 @@ export function createClientLogHandler(config: ClientLogHandlerConfig) {
       })
     } catch (err) {
       console.error('[fsl] Error processing client log:', err)
-      throw new HttpsError('internal', 'Failed to process log')
+      throw new ClientLogError('internal', 'Failed to process log')
     }
   }
 }
@@ -150,8 +180,18 @@ export function createClientLogHandler(config: ClientLogHandlerConfig) {
 export function createClientLogFunction(
   config: ClientLogHandlerConfig & { cors?: boolean | string | string[]; maxInstances?: number },
 ) {
+  const handler = createClientLogHandler(config)
   return onCall<LogPayload, void>(
     { cors: config.cors ?? true, maxInstances: config.maxInstances ?? 1 },
-    createClientLogHandler(config),
+    async (request) => {
+      try {
+        await handler(request)
+      } catch (err) {
+        // Convert back at the Firebase boundary, so a callable client sees the
+        // same error it always did.
+        if (err instanceof ClientLogError) throw new HttpsError(err.code, err.message)
+        throw err
+      }
+    },
   )
 }
