@@ -7,13 +7,56 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-09-01
+
+Errors group now. Not because this package learned to fingerprint them, but because Google
+Cloud already runs an error tracker in your project and it could not see ours.
+
 ### Added
 
-- **Cloud Error Reporting shape.** Production error entries now carry `stack_trace` at the top level and a `serviceContext` naming your `appId` and release. Error Reporting reads Cloud Logging and groups by exception type plus the five top-most frames — the fingerprint this package would otherwise have to build — and it already runs in every GCP project. It only works because the frames are symbolicated first: for an ordinary web app they read `app-4f2a.js:1:98432` and nothing groups. Emitted for `ERROR` and above only, and never for feedback: a warning is not something a person should have to resolve, and neither is a user's report.
+- **Cloud Error Reporting shape.** Production error entries carry `stack_trace` at the top level and a `serviceContext` naming your `appId` and release. Error Reporting reads Cloud Logging and groups by exception type plus the five top-most frames — with occurrence counts, an Open/Acknowledged/Resolved/Muted state, notifications, and an issue-tracker link — none of it ours to build or run, and none of it leaving your project.
+
+  It groups on those top frames, which is why it does nothing for almost every web app: they read `app-4f2a.js:1:98432` and change every release. **We resolve them before the entry is written**, so yours group. Verified live: two errors with different messages from one source location share a group id, attributed to the `appId` rather than to the function that wrote them, stable across releases. Warnings and feedback are deliberately excluded — an issue is something a person has to resolve, and neither of those is a bug.
+
+- **`createHttpLogHandler`** — receive client logs over plain HTTP, for a backend that is not Cloud Functions. Reads `method`, `headers` and a parsed `body` and writes through `statusCode`/`setHeader`/`end`, so Express, Fastify's compat layer and a raw server all satisfy it with no dependency added. The client was already portable: `logFunction` is any `(payload) => Promise<unknown>`, and `httpsCallable()` merely happens to fit.
+
+  `authorize` is **required and has no default**, because the honest default does not exist — a callable gets Firebase's token check for free, an HTTP endpoint gets nothing, and an open one writes to your Cloud Logging bill on anyone's say-so. Opening it deliberately is spelled `'unauthenticated'` at the call site. It is a gate, not an identity check: the handler never reads `request.auth`, and a gate that throws counts as a rejection.
+
+- **Trace ids outside Cloud Functions.** `firebase-functions` attaches `logging.googleapis.com/trace` from a store it populates inside its own request wrapper, so on Cloud Run nothing was attached and a request's entries did not correlate — silently. The HTTP handler now reads `X-Cloud-Trace-Context` or W3C `traceparent` itself. A malformed header yields nothing rather than a guess: Cloud Logging rejects an invalid trace resource name, which costs the whole entry.
+
+- **Configurable Storage buckets and prefixes.** `createClientLogFunction({ sourceMaps: { bucket, prefix } })` is genuinely per-handler; `configureAttachments({ bucket, prefix })` is a separate global call, because the attachment upload happens in `writeLog` — reached from every log call, including ones inside handlers that never touch `createClientLogFunction` — so a field on the handler would let a second one silently retarget the first's attachments.
+
+  Every default is the previous behaviour, so nothing changes for a deploy that does not opt in. Worth opting in where user content needs its own region for residency, its own retention policy, or different IAM from your source maps — none of which a prefix can arrange.
+
+- **`fsl upload-sourcemaps` runs without a bucket.** With `--embed-sourcemaps` alone it embeds the current release and uploads nothing, which is the whole flow for a backend that has no bucket. Only the deployed release can then be symbolicated. Given neither a bucket nor an embed it now refuses outright rather than running, since that would delete the maps and produce nothing.
+
+- **`fsl upload-sourcemaps --prefix`**, the writer half of the configurable Storage prefix.
 
 ### Changed
 
 **Breaking: a production error's stack moved from `jsonPayload.error.stack` to top-level `stack_trace`.** One copy, not two — the stack is the largest field in an entry capped at 256 KB. Anything reading `error.stack` off a production error entry reads `stack_trace` now. The rest of the `error` object — `message`, `name`, `cause` — is unchanged, and entries below `ERROR`, or marked as feedback, keep their stack where it was.
+
+**`createClientLogHandler` is no longer Firebase-shaped.** It takes `{ data: LogPayload }`, the minimum it reads, and throws `ClientLogError` rather than `HttpsError`. `createClientLogFunction` converts at the Firebase boundary, so a callable client sees exactly the error it saw before; only a caller wrapping the bare handler themselves is affected.
+
+**Every Storage path is defined once**, in `src/shared/paths.ts`. Each source-map path previously existed twice — a writer in `/tools`, a reader in `/functions` — as independent literals with nothing enforcing that they matched, and when they disagree symbolication does not fail, it returns minified frames. Two things stopped being coincidences: the `.map` suffix, which the writer and reader agreed on only because a basename happened to end in it, and separators, since a Storage object name built with `path.join` is a different object on Windows.
+
+**A misconfigured source-map lookup says so.** When nothing resolves — wrong bucket, wrong prefix, a release never uploaded, a missing `fsl` step — the function warns once per release naming both paths it tried. A prefix mismatch is only obvious once you can see the two strings.
+
+### Fixed
+
+- **`fsl` never wrote the `.release` marker, so the release check had never run.** The constant was declared, exported and used by nothing; the reader hardcoded its own copy. Every stack was symbolicated with the currently embedded maps whatever release it came from — precisely the failure the marker exists to prevent — and the fallback warning was unreachable code. Narrow in practice, since Vite content-hashes bundle filenames, but real for any build with stable names. The tests missed it because they wrote the marker themselves before exercising the reader.
+
+- **A prefix with a trailing slash addressed a different object.** `'fsl/'` yielded `fsl//r7/app.js.map`, which is not `fsl/r7/app.js.map` — Storage keys are opaque strings and the double slash is not collapsed, so a slash typed out of habit would have split writer from reader silently.
+
+### Documentation
+
+The README is reorganised around what you get rather than how the machine is built. `How it works` now precedes setup, so the Cloud Function is explained before you are asked to deploy one, and its diagram shows both doors into the stream. Setup is two paths, browser errors and Cloud Functions logging — backend setup previously did not exist as a path at all. New sections cover the eleven fields that arrive without being asked for, the five gates that silently drop a log, attachments as the way past the 256 KB entry limit, and querying. `What this is not` is rewritten, since it claimed there was no grouping.
+
+`skills/query-logs` had `severity=ERROR` on its flagship query, which keeps the crash and throws away the sequence that led to it. The sequential read is now the headline example.
+
+### Internal
+
+`tests/` and `smoke/` are typechecked for the first time, under a second config, and the smoke harness no longer uses `any`. Neither was checked before, which is how a read of `entry.metadata.errorGroups` — a field the Logging client does not surface — reached a live run and reported, wrongly, that Error Reporting had grouped nothing.
 
 ## [0.6.0] - 2026-08-23
 
@@ -139,7 +182,9 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Emulator mode** — under `FUNCTIONS_EMULATOR=true`, entries are written to a local `dev.jsonl` with rotation instead of Cloud Logging, so local development needs no live credentials.
 - **`fsl` CLI** — source map upload to Storage, deploy packing, and skill installation.
 
-[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.2.0...v0.3.0
