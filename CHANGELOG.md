@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Cloud Error Reporting shape.** Production error entries now carry `stack_trace` at the top level and a `serviceContext` naming your `appId` and release. Error Reporting reads Cloud Logging and groups by exception type plus the five top-most frames — the fingerprint this package would otherwise have to build — and it already runs in every GCP project. It only works because the frames are symbolicated first: for an ordinary web app they read `app-4f2a.js:1:98432` and nothing groups. Emitted for `ERROR` and above only, and never for feedback: a warning is not something a person should have to resolve, and neither is a user's report.
+
+### Changed
+
+**Breaking: a production error's stack moved from `jsonPayload.error.stack` to top-level `stack_trace`.** One copy, not two — the stack is the largest field in an entry capped at 256 KB. Anything reading `error.stack` off a production error entry reads `stack_trace` now. The rest of the `error` object — `message`, `name`, `cause` — is unchanged, and entries below `ERROR`, or marked as feedback, keep their stack where it was.
+
 ## [0.6.0] - 2026-08-23
 
 ### Added

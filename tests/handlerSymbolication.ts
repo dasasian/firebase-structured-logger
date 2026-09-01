@@ -111,8 +111,19 @@ async function runHandler(
   return line ? (JSON.parse(line) as Record<string, unknown>) : undefined
 }
 
+/**
+ * Where the symbolicated stack ends up.
+ *
+ * BREAKING in 0.7.0: a reportable error carries its stack at top-level
+ * `stack_trace`, so Cloud Error Reporting can see it (#31), and its `error`
+ * object no longer has a `stack` key — one copy, not two, in an entry capped at
+ * 256 KB. Anything below ERROR, and anything marked as feedback, keeps its stack
+ * under `error` as before, so both are checked here.
+ */
 const stackOf = (entry: Record<string, unknown> | undefined): string =>
-  ((entry?.error as { stack?: string } | undefined)?.stack ?? '')
+  (entry?.stack_trace as string | undefined) ??
+  (entry?.error as { stack?: string } | undefined)?.stack ??
+  ''
 
 // --- Happy path ---
 

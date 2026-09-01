@@ -25,6 +25,7 @@ if (process.env.FUNCTIONS_EMULATOR === 'true') {
 }
 
 import { writeLog, initLogger } from '../src/functions/logger.js'
+import { getLogger } from '../src/functions/requestLogger.js'
 import { assert, reportResults } from './testHelpers.js'
 import { runWithTrace, traceIdFromHeaders } from '../src/functions/traceContext.js'
 
@@ -446,6 +447,120 @@ function testTraceHeaderParsing() {
   assert('no headers at all', traceIdFromHeaders({}) === undefined)
 }
 
+/**
+ * Cloud Error Reporting reads Cloud Logging and groups by exception type plus
+ * the five top-most frames — the fingerprint we would otherwise build ourselves
+ * (#31). It looks for `stack_trace` at the top level of jsonPayload; ours lived
+ * one level down under `error`, so it was never seen.
+ *
+ * This is only worth anything because we symbolicate first. For an ordinary web
+ * app the top frames are `app-4f2a.js:1:98432` — different every release, so
+ * nothing groups and the product is useless on web.
+ */
+function testErrorReportingShape() {
+  console.log('\nTest: an ERROR carries the shape Error Reporting reads')
+  initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
+
+  const stack = 'TypeError: x is undefined\n    at Checkout.tsx:42:9'
+  const [entry] = captureEntries(() =>
+    writeLog({
+      message: 'x is undefined',
+      severity: 'ERROR',
+      labels: { appId: 'acme', releaseId: 'abc1234' } as never,
+      jsonPayload: { error: { message: 'x is undefined', name: 'TypeError', stack } },
+    }),
+  )
+
+  assert('stack_trace is at the top level, where it is read', entry?.stack_trace === stack, String(entry?.stack_trace))
+  const ctx = entry?.serviceContext as Record<string, string> | undefined
+  assert('serviceContext names the app', ctx?.service === 'acme', JSON.stringify(ctx))
+  assert('and the release', ctx?.version === 'abc1234', JSON.stringify(ctx))
+
+  // Moved, not duplicated — the stack is the largest field in an entry capped at
+  // 256 KB, and two copies buy nothing. BREAKING in 0.7.0: anything reading
+  // jsonPayload.error.stack for a production error reads stack_trace now.
+  const err = entry?.error as Record<string, string> | undefined
+  assert('the stack is gone from the error payload', !('stack' in (err ?? {})), JSON.stringify(err))
+  assert('but the rest of the error survives', err?.name === 'TypeError' && err?.message === 'x is undefined', JSON.stringify(err))
+}
+
+/**
+ * The regression guard. An Error Reporting group is something a person has to
+ * resolve, so anything that becomes one by accident is a chore we invented for
+ * our users.
+ */
+function testWhatMustNotBecomeAnErrorGroup() {
+  console.log('\nTest: warnings, feedback and stackless errors stay out of Error Reporting')
+  initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
+  const stack = 'Error: slow\n    at Checkout.tsx:7:1'
+
+  const [warning] = captureEntries(() =>
+    writeLog({
+      message: 'slow request',
+      severity: 'WARNING',
+      labels: { appId: 'acme' } as never,
+      jsonPayload: { error: { message: 'slow', name: 'Error', stack } },
+    }),
+  )
+  assert('a WARNING with a stack is not reportable', !('stack_trace' in (warning ?? {})), String(warning?.stack_trace))
+  // It has to go somewhere, and this is where it already was.
+  assert('and keeps its stack under error', (warning?.error as Record<string, string>)?.stack === stack)
+
+  // Feedback is a person telling you something, not a crash. It arrives at
+  // NOTICE and is exempt from the floors; it must not arrive as a bug report.
+  const [feedback] = captureEntries(() =>
+    writeLog({
+      message: 'the discount did not apply',
+      severity: 'ERROR',
+      labels: { appId: 'acme', feedback: 'true' } as never,
+      jsonPayload: { error: { message: 'x', name: 'Error', stack } },
+    }),
+  )
+  assert('feedback is never an error group, even at ERROR', !('stack_trace' in (feedback ?? {})), String(feedback?.stack_trace))
+  assert('and keeps its stack under error', (feedback?.error as Record<string, string>)?.stack === stack)
+
+  // Nothing to group on. Error Reporting would fall back to the message, which
+  // for us means one group per distinct string — noise, not issues.
+  const [stackless] = captureEntries(() =>
+    writeLog({ message: 'plain error', severity: 'ERROR', labels: { appId: 'acme' } as never }),
+  )
+  assert('an error with no stack is not reportable', !('stack_trace' in (stackless ?? {})))
+  assert('and carries no serviceContext either', !('serviceContext' in (stackless ?? {})))
+}
+
+/**
+ * The server half of #31, which resolves `serviceContext.service` differently
+ * from the client half and had never been exercised.
+ *
+ * A client error carries `appId` in the labels the browser sent. A backend one
+ * usually does not — `withLogging` only sets `appId` if a caller passes one — so
+ * it falls back to the `appId` given to `initLogger`. Same shape, different
+ * source, and nothing checked the fallback.
+ */
+function testBackendErrorsReportToo() {
+  console.log('\nTest: a backend error is reportable, with appId from initLogger')
+  initLogger({ appId: 'acme-backend', minSeverity: 'DEBUG' })
+
+  const err = new Error('order lookup failed')
+  err.stack = 'Error: order lookup failed\n    at checkout.ts:88:3'
+
+  // getLogger() outside a request returns the anonymous writer — the same
+  // closure withLogging binds, minus the request labels.
+  const [entry] = captureEntries(() => getLogger().error(err, { orderId: 'o-1' }))
+
+  assert('the stack is at stack_trace', entry?.stack_trace === err.stack, String(entry?.stack_trace))
+  const ctx = entry?.serviceContext as Record<string, string> | undefined
+  assert('service falls back to the initLogger appId', ctx?.service === 'acme-backend', JSON.stringify(ctx))
+  // No releaseId on the backend — there is no build to tie it to. Absent rather
+  // than empty, since an empty version would split groups on nothing.
+  assert('and omits version when there is no releaseId', !ctx || !('version' in ctx), JSON.stringify(ctx))
+
+  assert('errorType is still labelled', (entry?.['logging.googleapis.com/labels'] as any)?.errorType === 'Error')
+  assert('and the stack is not duplicated under error', !('stack' in ((entry?.error as object) ?? {})), JSON.stringify(entry?.error))
+
+  initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
+}
+
 function run() {
   testJsonPayloadIsSpreadNotNested()
   testLabelsArePromotedToEntryLabels()
@@ -463,6 +578,9 @@ function run() {
   testPlainNoticeStillRespectsTheFloor()
   testFeedbackSurvivesTheServerFloor()
   testWholeEntryShape()
+  testErrorReportingShape()
+  testWhatMustNotBecomeAnErrorGroup()
+  testBackendErrorsReportToo()
   testTraceIsAttachedOutsideCloudFunctions()
   testTraceHeaderParsing()
   reportResults()

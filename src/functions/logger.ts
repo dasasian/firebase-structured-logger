@@ -232,6 +232,50 @@ export function writeLog(
   // not one of them, so it lands in jsonPayload.labels and `labels.appId="..."`
   // filters match nothing. Verified live: the smoke run's entry labels contained only
   // Cloud Functions' own platform labels until this changed.
+  // Cloud Error Reporting reads Cloud Logging and groups by exception type plus
+  // the five top-most frames — the fingerprint we would otherwise build. It
+  // looks for `stack_trace` at the TOP level of jsonPayload; ours lives one
+  // level down under `error`, so it has never been seen (#31).
+  //
+  // Moved, not duplicated. The stack is the largest field in an entry capped at
+  // 256 KB, and two copies of it buys nothing — so a reportable error carries its
+  // stack at `stack_trace` and its `error` object loses the `stack` key.
+  //
+  // A non-reportable entry keeps the stack where it was. It has to go somewhere,
+  // and the alternative — emitting `stack_trace` for warnings too — would likely
+  // turn every warning into something a person has to resolve in the Error
+  // Reporting console. The smoke run measures whether that is true; until it
+  // does, the cautious shape is the one that ships.
+  //
+  // ERROR and above only. A WARNING carrying a stack is not an error someone
+  // should have to resolve, and neither is a NOTICE feedback report — turning
+  // either into an Error Reporting group would be a regression of a deliberate
+  // product decision.
+  const stack = payload.jsonPayload?.error?.stack;
+  const reportable =
+    stack && SEVERITY_ORDER[severity] <= SEVERITY_ORDER.ERROR && !isFeedback(payload.labels);
+  const service = labels.appId ?? globalConfig?.appId;
+  const isReported = Boolean(reportable && service);
+  const errorReporting = isReported
+    ? {
+        stack_trace: stack,
+        serviceContext: {
+          service: service!,
+          ...(labels.releaseId ? { version: labels.releaseId } : {}),
+        },
+      }
+    : {};
+
+  // Strip the now-redundant copy. Rebuilt rather than mutated: payload is the
+  // caller's object and writeLog has no business editing it.
+  const jsonPayload = isReported
+    ? (() => {
+        const { error, ...rest } = payload.jsonPayload!;
+        const { stack: _dropped, ...errorWithoutStack } = error!;
+        return { ...rest, error: errorWithoutStack };
+      })()
+    : payload.jsonPayload;
+
   // Set the trace ourselves when we have one. ffWrite attaches this from
   // firebase-functions' own store, which is only populated inside their request
   // wrapper — empty on Cloud Run and anything behind createHttpLogHandler. When
@@ -244,7 +288,8 @@ export function writeLog(
     message: payload.message,
     "logging.googleapis.com/labels": labels,
     ...(trace ? { "logging.googleapis.com/trace": trace } : {}),
-    ...payload.jsonPayload,
+    ...errorReporting,
+    ...jsonPayload,
   });
 }
 

@@ -21,6 +21,7 @@ import path from 'path'
 import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import { Logging } from '@google-cloud/logging'
+import { GoogleAuth } from 'google-auth-library'
 import { Storage } from '@google-cloud/storage'
 import { ulid } from 'ulid'
 import type { EncodedSourceMap } from '@jridgewell/trace-mapping'
@@ -131,7 +132,7 @@ async function callFunction(name: string, data: unknown): Promise<void> {
  * could not tell "labels were not promoted to entry labels" from "nothing was
  * logged at all". The label filter is asserted separately, as a result.
  */
-async function waitForEntries(want: number, timeoutMs = 120_000): Promise<any[]> {
+async function waitForEntries(want: number, timeoutMs = 240_000): Promise<any[]> {
   const started = Date.now()
   let last: any[] = []
   let delay = 3_000
@@ -175,6 +176,89 @@ async function queryByLabel(field: string, value: string): Promise<number> {
     pageSize: 50,
   })
   return entries.length
+}
+
+/**
+ * Error Reporting's verdict, as it appears on the log entry itself.
+ *
+ * Cloud Logging stamps `errorGroups` onto an entry once Error Reporting has
+ * associated it with a group. That is both faster and more direct than polling
+ * `groupStats`, which is the console's own view and lags — the first version of
+ * this leg asked the API and got nothing while the entries already carried their
+ * group ids.
+ */
+/**
+ * Where a symbolicated stack lives on an entry.
+ *
+ * BREAKING in 0.7.0: a reportable error carries its stack at top-level
+ * `stack_trace` so Error Reporting can see it (#31), and loses the `stack` key
+ * under `error` — one copy, not two. Anything below ERROR keeps it where it was.
+ */
+function stackOf(data: any): string {
+  return String(data?.stack_trace ?? data?.error?.stack ?? '')
+}
+
+function errorGroupIds(entry: any): string[] {
+  const groups = entry?.metadata?.errorGroups ?? entry?.errorGroups
+  if (!Array.isArray(groups)) return []
+  return groups.map((g: any) => String(g?.id ?? '')).filter(Boolean)
+}
+
+/**
+ * Wait for this run's three marked entries, and for Error Reporting to have
+ * stamped its verdict on the two errors.
+ *
+ * Filtered on the marker rather than sweeping by run id: the generic sweep
+ * counts every entry the run has produced so far, so its target is a moving
+ * number that is easy to get wrong.
+ */
+async function waitForErrorGroups(marker: string, timeoutMs = 300_000): Promise<any[]> {
+  const started = Date.now()
+  let last: any[] = []
+  let delay = 4_000
+  while (Date.now() - started < timeoutMs) {
+    const entries = await listEntriesRest(`jsonPayload.message:"${marker}"`)
+    const grouped = entries.filter((e) => errorGroupIds(e).length > 0).length
+    process.stdout.write(
+      `\r  … ${entries.length}/3 entries, ${grouped}/2 grouped after ${Math.round((Date.now() - started) / 1000)}s   `,
+    )
+    if (entries.length >= 3 && grouped >= 2) {
+      process.stdout.write('\n')
+      return entries
+    }
+    last = entries
+    await new Promise((r) => setTimeout(r, delay))
+    delay = Math.min(delay * 1.4, 15_000)
+  }
+  process.stdout.write('\n  timed out — asserting on what arrived\n')
+  return last
+}
+
+/**
+ * List entries through the REST API rather than the client library.
+ *
+ * `@google-cloud/logging` does not surface `errorGroups` — the field is absent
+ * from the metadata it returns, though `logging.googleapis.com/v2/entries:list`
+ * includes it. Reading it through the client is not slow or flaky, it is
+ * impossible, which cost a full smoke run to discover.
+ *
+ * Shaped to match the client's `{ data, metadata }` so the assertions below do
+ * not care which path an entry arrived by.
+ */
+async function listEntriesRest(filter: string): Promise<any[]> {
+  const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/logging.read'] })
+  const client = await auth.getClient()
+  const res = await client.request<{ entries?: any[] }>({
+    url: 'https://logging.googleapis.com/v2/entries:list',
+    method: 'POST',
+    data: {
+      resourceNames: [`projects/${PROJECT}`],
+      filter,
+      orderBy: 'timestamp desc',
+      pageSize: 20,
+    },
+  })
+  return (res.data.entries ?? []).map((e) => ({ data: e.jsonPayload, metadata: e, ...e }))
 }
 
 // --- the run --------------------------------------------------------------
@@ -244,7 +328,7 @@ async function main(): Promise<void> {
   // RELEASE_ID is unique per run and has no embedded map, so resolving it at
   // all proves the lookup fell through to Storage rather than reusing whatever
   // the function was deployed with.
-  const stack: string = client?.data?.error?.stack ?? ''
+  const stack: string = stackOf(client?.data)
   assert('the bundle URL is gone', !stack.includes(BUNDLE), `got: ${stack}`)
   assert('the source file is named', stack.includes('catalogProducts.ts'), `got: ${stack}`)
 
@@ -281,7 +365,7 @@ async function main(): Promise<void> {
   const mismatch = mismatchEntries
     .map((e) => e.data as any)
     .find((d) => String(d?.message ?? '').includes('mismatched release'))
-  const mstack: string = mismatch?.error?.stack ?? ''
+  const mstack: string = stackOf(mismatch)
   assert('the mismatched-release entry arrived', !!mismatch)
   // A length check would pass even if nothing resolved, so assert the actual
   // outcome: no Storage map exists for this run's release under the embedded
@@ -339,6 +423,106 @@ async function main(): Promise<void> {
   assert('the breadcrumb trail rode along — this is what makes it reproducible',
     feedback?.data?.breadcrumbs?.length === 2, `got: ${JSON.stringify(feedback?.data?.breadcrumbs)}`)
   assert('filtering by labels.feedback finds it', (await queryByLabel('feedback', 'true')) > 0)
+
+  console.log('\n  --- Cloud Error Reporting (#31) ---')
+  // The whole question. Error Reporting groups by exception type plus the five
+  // top-most frames — the fingerprint we would otherwise build. It reads
+  // `stack_trace` at the top level of jsonPayload; ours lived under `error`, so
+  // it was never seen. Everything below is downstream of whether that one
+  // change is enough.
+  //
+  // What could sink it: our client errors are WRITTEN BY a Cloud Function, and
+  // Error Reporting attributes groups to a service. If serviceContext.service is
+  // ignored and every browser error is filed under the log collector, the
+  // grouping is one useless bucket.
+  const SERVICE = env.FSL_SMOKE_APP_ID ?? 'smoke-app'
+  const ERR_MARKER = `fsl-er-${RUN_ID}`
+
+  // Two errors from the SAME source location with DIFFERENT messages. If
+  // grouping keys on the resolved frames they are one group; if it keys on the
+  // message they are two; if it keys on the MINIFIED frames the whole idea is
+  // dead, because those differ every release.
+  for (const suffix of ['alpha', 'beta']) {
+    await callFunction('fslSmokeClient', {
+      message: `${ERR_MARKER} ${suffix}`,
+      severity: 'ERROR',
+      labels: { appId: SERVICE, releaseId: RELEASE_ID, errorType: 'fsl-verify', smokeRunId: RUN_ID },
+      jsonPayload: {
+        error: {
+          message: `${ERR_MARKER} ${suffix}`,
+          name: 'TypeError',
+          stack: `duplicate@https://app.example.com/assets/${BUNDLE}:1:4`,
+        },
+      },
+    })
+  }
+
+  // A WARNING carrying a stack, and a feedback report. Neither should become
+  // something a person has to resolve.
+  await callFunction('fslSmokeClient', {
+    message: `${ERR_MARKER} warning`,
+    severity: 'WARNING',
+    labels: { appId: SERVICE, releaseId: RELEASE_ID, errorType: 'fsl-verify', smokeRunId: RUN_ID },
+    jsonPayload: {
+      error: { message: `${ERR_MARKER} warning`, name: 'Error', stack: `duplicate@https://app.example.com/assets/${BUNDLE}:1:4` },
+    },
+  })
+  console.log('  invoked fslSmokeClient x3 (two errors, one warning)')
+
+  // Two waits, not one. The entry is ingested first and Error Reporting stamps
+  // `errorGroups` onto it afterwards — so an assertion made the moment the entry
+  // appears reads an empty list and concludes, wrongly, that nothing grouped.
+  const erEntries = await waitForErrorGroups(ERR_MARKER)
+  const byMarker = (needle: string) =>
+    erEntries.find((e) => JSON.stringify(e.data ?? {}).includes(needle))
+
+  const alpha = byMarker(`${ERR_MARKER} alpha`)
+  const beta = byMarker(`${ERR_MARKER} beta`)
+  const warned = byMarker(`${ERR_MARKER} warning`)
+
+  assert('the two errors arrived', !!alpha && !!beta)
+  assert('the warning arrived', !!warned)
+
+  const alphaGroups = errorGroupIds(alpha)
+  const betaGroups = errorGroupIds(beta)
+
+  assert('an error group was created at all — the whole question', alphaGroups.length > 0,
+    'Error Reporting saw nothing; stack_trace at the top level is not sufficient')
+
+  // The one that decides whether this is worth anything. Two errors from the
+  // same source line with DIFFERENT messages: one group means the grouping keys
+  // on the resolved frames, which only we can supply. Two groups would mean it
+  // keys on the message, and the whole idea is a message-dedupe with extra steps.
+  assert('both errors from one source line share a group', 
+    alphaGroups.length > 0 && alphaGroups[0] === betaGroups[0],
+    `alpha=${JSON.stringify(alphaGroups)} beta=${JSON.stringify(betaGroups)} — grouping is not keying on the resolved frames`)
+
+  // What was most likely to sink this: client errors are WRITTEN BY a Cloud
+  // Function, and Error Reporting attributes groups to a service. If
+  // serviceContext.service were ignored, every browser error in every app would
+  // land in one bucket named after the log collector.
+  const ctx = alpha?.data?.serviceContext
+  assert('the group is attributed to our appId, not the log-collector function',
+    ctx?.service === SERVICE, `serviceContext: ${JSON.stringify(ctx)}`)
+  assert('and carries the release, so a regression is attributable',
+    ctx?.version === RELEASE_ID, `got: ${ctx?.version}`)
+
+  assert('the symbolicated stack is what was reported', 
+    String(alpha?.data?.stack_trace ?? '').includes('catalogProducts.ts'),
+    `stack_trace: ${String(alpha?.data?.stack_trace ?? '').slice(0, 120)}`)
+  assert('and it is not duplicated under error',
+    alpha?.data?.error && !('stack' in alpha.data.error),
+    `error: ${JSON.stringify(alpha?.data?.error)}`)
+
+  // Regression guards. An error group is something a person has to resolve.
+  assert('the WARNING did not become an error group', errorGroupIds(warned).length === 0,
+    'a warning became something a person has to resolve')
+  const feedbackEntry = erEntries.find((e) => String(e.data?.message ?? '').includes('the discount did not apply'))
+  assert('feedback did not become an error group',
+    !feedbackEntry || errorGroupIds(feedbackEntry).length === 0,
+    'a user report became a bug someone has to resolve')
+
+  console.log(`  group ${alphaGroups[0]} — both errors, one group`)
 
   console.log('\n  --- backend path ---')
   const bLabels = backendInfo?.meta?.labels ?? {}

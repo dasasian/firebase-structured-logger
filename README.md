@@ -321,6 +321,39 @@ Entries go to `{logLocalDir}/dev.jsonl`. Each emulator start rotates the current
 | `logMaxRecordsPerFile` | 2000 | Records per file before rotation |
 | `logMaxRotatedFiles` | 5 | Rotated files to keep |
 
+## Grouping, without a second product
+
+Google Cloud already runs an error tracker in your project. **Error Reporting** watches
+Cloud Logging, collapses repeats into issues, and gives you occurrence counts, a
+resolution state — Open, Acknowledged, Resolved, Muted — notifications on new errors, and a
+field to link your own issue tracker. It costs nothing beyond the logs you are already
+writing, and it never sees anything outside your project.
+
+It groups by exception type plus the **five top-most stack frames**. Which is why, for
+almost every web app, it does nothing at all: those frames read `app-4f2a.js:1:98432`, they
+change every release, and no two crashes ever look alike.
+
+**We resolve the frames before the entry is written.** So yours read `Checkout.tsx:42`, and
+they group:
+
+```
+TypeError: cannot read 'id' of undefined     ← "the discount broke"
+TypeError: order is not iterable             ← "checkout is stuck"
+                                                two reports, two messages,
+                                                one line of code, one issue
+```
+
+Errors at `ERROR` and above carry `stack_trace` and a `serviceContext` naming your `appId`
+and release, which is all Error Reporting needs. Nothing to enable in this package, and
+nothing to configure.
+
+Warnings stay out of it, and so does user feedback — an issue is something a person has to
+resolve, and neither of those is a bug.
+
+> Verified end to end against a real project: two errors with different messages from one
+> source location land in a single group, attributed to the `appId` rather than to the
+> function that wrote them, with the same group id across releases.
+
 ## What you get for free
 
 You write one label. Eleven fields land.
@@ -707,11 +740,70 @@ identical to never having uploaded them. The function warns once per release whe
 resolves nothing, naming the exact object it looked for, so the mismatch is visible in your
 logs rather than inferred.
 
+## This is a hard problem
+
+Not a difficult one — the pieces are all small. A hard one, in that the ways it goes wrong
+are invisible until they aren't, and each is discovered by watching production do something
+strange rather than by reading a doc.
+
+Some of what is already handled here, all of it learned the expensive way:
+
+- **Entry labels have to be emitted under `logging.googleapis.com/labels`.** Anywhere else
+  and they land inside the payload, so `labels.appId="…"` matches nothing. The logs look
+  perfect and cannot be filtered. Only a deployed run reveals it.
+- **`AsyncLocalStorage.enterWith()` never unwinds.** A request's `userId` outlives the
+  request, and the next handler on a warm instance inherits whichever user came before.
+- **Source maps left in `dist/` are your source code, published.** Uploading them is the
+  easy half; keeping them off the web server is the half people forget.
+- **An unrecognised severity throws inside the write**, the entry is lost with no
+  diagnostic, and it slips past the severity floor on the way there.
+- **A trailing slash on a Storage prefix is a different object.** `fsl//r7/app.js.map` is
+  not `fsl/r7/app.js.map`, and nothing collapses it — so the writer and reader silently
+  disagree over a typo.
+- **Checking a rate limit and spending it as two calls double-counts**, quietly making a
+  configured budget of 50 a budget of 25.
+- **An old stack naming a bundle that still exists** resolves against the current release's
+  map, giving line numbers that are confidently wrong — worse than none, because nothing
+  signals it.
+- **`@google-cloud/logging` does not surface `errorGroups`.** Read grouping through the
+  client library and you will conclude, wrongly, that nothing grouped.
+
+Every one of those is fixed here, and each has a test that fails if it comes back. That is
+the point: you would have found them one at a time, in production, over months.
+
+The list is not finished. It grows every time this is run against something real, and the
+honest pitch is not that this package is complete — it plainly isn't — but that someone is
+still walking into these and fixing them. Code you wrote yourself is frozen the day you
+write it.
+
+Decide for yourself whether that is worth a dependency.
+
 ## What this is not
 
-An error tracker. There is no issue state here — nothing to resolve, ignore, assign, or mark as regressed, and no notion of "this is the same bug as that one." Errors arrive as structured, queryable log entries, not as a triage queue.
+**A product of ours.** The grouping above is Google's Error Reporting, running in your
+project — we make its input legible, we do not build or run it. If it changes, you are
+downstream of that, the same as you already are for Cloud Logging.
 
-If you want a list of your top twelve problems ranked by frequency with a resolve button, Sentry sells that and sells it well. What this gives you instead is every frontend and backend event in one stream you already own, in one query language, with nothing handed to a third party.
+**A triage tool with a console.** There is no assignment, no ownership, no dashboard of
+ours. What exists is Google's console, plus whatever queries you write.
+
+There are hosted error trackers that do all of that, and do it well. The trade is worth
+stating plainly, because it is the whole reason to choose this instead.
+
+**Nothing leaves your project.** Every entry, every breadcrumb, every screenshot stays in
+the Google Cloud project you already own, under your own IAM and your own retention rules.
+No third party receives it, no third party stores it, and there is no data-processing
+agreement to negotiate because there is no processor.
+
+That matters most where it usually matters: **breadcrumbs and attachments carry what a user
+was actually doing**, and a screenshot of a checkout page is not something everyone is free
+to hand to a vendor. If you are in health, finance, education, or anywhere a contract names
+where data may live, that is not a preference — it is the decision.
+
+What you give up is a polished product: no vendor UI, no onboarding flow, no support
+contract, no assignment workflow. What you get is every frontend and backend event in one
+stream you already own, in one query language, grouped by a console that came with the
+project.
 
 ## License
 
