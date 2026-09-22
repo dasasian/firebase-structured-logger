@@ -218,6 +218,36 @@ app.post('/log', createHttpLogHandler({
 }))
 ```
 
+The handler reads Node's request and response shapes. A framework that wraps them, like
+Hono, needs a few lines of adapter:
+
+```ts
+import { Hono } from 'hono'
+import { createHttpLogHandler } from '@dasasian/firebase-structured-logger/functions'
+
+const logHandler = createHttpLogHandler({ authorize })
+
+app.on(['POST', 'OPTIONS'], '/log', async (c) => {
+  const headers: Record<string, string> = {}
+  let status = 200
+  let body: string | undefined
+  await logHandler(
+    {
+      method: c.req.method,
+      headers: Object.fromEntries(c.req.raw.headers),
+      body: await c.req.json().catch(() => null),
+    },
+    {
+      get statusCode() { return status },
+      set statusCode(v: number) { status = v },
+      setHeader: (name, value) => { headers[name] = value },
+      end: (b) => { body = b },
+    },
+  )
+  return new Response(body ?? null, { status, headers })
+})
+```
+
 **Point the client at it.** `logFunction` is any async function, so a `fetch` works:
 
 ```ts
@@ -262,6 +292,12 @@ A gate that throws counts as a rejection, not an opening.
   before the handler. Raise its limit if you send attachments.
 - **CORS** defaults to `*`, matching `cors: true` on the callable. Pass `allowOrigin` to
   name your origin — a browser cannot send cookies to a wildcard.
+- **No `firebase-functions`? Not needed.** The entry point loads without it. Entries go
+  to stdout as one JSON line each, which Cloud Run's log agent parses into the same Cloud
+  Logging fields a function's would. To route them through a logger you already run,
+  pass `initLogger({ appId, write: (entry) => … })`. The entry arrives complete and in
+  Cloud Logging's shape; write it verbatim, or `labels.userId="…"` stops matching the
+  client half.
 - **Trace correlation works**, and needs nothing from you. The handler reads
   `X-Cloud-Trace-Context` or `traceparent` off the request, so a request's entries still
   group in Cloud Logging.
@@ -586,6 +622,12 @@ Two errors count as duplicates when the **message and the screen both match**, s
 error on two different screens is not collapsed into one. The budget lives in
 `sessionStorage` and resets with the session.
 
+The client's production default comes from `process.env.NODE_ENV`, which Vite replaces at
+build time. A `define: { 'process.env': {} }` in `vite.config` — common, to quiet a library
+that expects Node — replaces the whole object instead, `NODE_ENV` reads as undefined, and
+the floor is silently `DEBUG` in production. If your config has that line, pass
+`minLogLevel` explicitly.
+
 ### What a dropped log looks like
 
 The two rate limits say so in the browser console:
@@ -669,7 +711,8 @@ would silently share breadcrumbs, screen and the rate-limit budget while looking
 ### Functions
 
 ```ts
-initLogger({ appId, logLocalDir?, minSeverity?, logMaxRecordsPerFile?, logMaxRotatedFiles? })
+initLogger({ appId, write?, minSeverity?, logLocalDir?, logMaxRecordsPerFile?, logMaxRotatedFiles? })
+                                  // write: (entry) => void — the production sink; see "If your backend is not Cloud Functions"
 
 withLogging(options | (request) => options, handler)
 getLogger()                       // the current request's writer, or an anonymous fallback

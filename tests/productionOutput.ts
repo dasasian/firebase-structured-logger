@@ -561,6 +561,47 @@ function testBackendErrorsReportToo() {
   initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
 }
 
+// --- The sink ---
+
+function testCustomWriteReceivesTheEntry() {
+  console.log('\nTest: initLogger({ write }) receives the complete entry, and stdout stays quiet')
+  const received: Record<string, unknown>[] = []
+  initLogger({ appId: 'acme', minSeverity: 'DEBUG', write: (entry) => received.push(entry) })
+
+  const stdoutEntries = captureEntries(() =>
+    writeLog({
+      message: 'via custom sink',
+      severity: 'ERROR',
+      labels: { appId: 'acme', userId: 'u1' } as never,
+      jsonPayload: { error: { message: 'boom', name: 'Error', stack: 'Error: boom\n  at x' } },
+    }),
+  )
+
+  assert('the custom writer was called once', received.length === 1, `got ${received.length}`)
+  assert('nothing reached stdout', stdoutEntries.length === 0, `got ${stdoutEntries.length}`)
+  const entry = received[0] ?? {}
+  const labels = entry['logging.googleapis.com/labels'] as Record<string, string> | undefined
+  assert('severity is on the entry', entry.severity === 'ERROR')
+  assert('message is top level', entry.message === 'via custom sink')
+  assert('labels are under the promoted key', labels?.userId === 'u1')
+  assert('the Error Reporting shape is intact', typeof entry.stack_trace === 'string')
+}
+
+function testOmittingWriteRestoresTheDefault() {
+  console.log('\nTest: initLogger — a second call without write goes back to the default sink')
+  const received: Record<string, unknown>[] = []
+  initLogger({ appId: 'acme', minSeverity: 'DEBUG', write: (entry) => received.push(entry) })
+  // REPLACE semantics, the same as every other field on this config: the second
+  // call is the whole config, not a patch on the first.
+  initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
+
+  const [entry] = captureEntries(() =>
+    writeLog({ message: 'back to default', severity: 'WARNING', labels: { appId: 'acme' } as never }),
+  )
+  assert('the custom writer is no longer called', received.length === 0)
+  assert('the entry reached stdout again', entry?.message === 'back to default')
+}
+
 function run() {
   testJsonPayloadIsSpreadNotNested()
   testLabelsArePromotedToEntryLabels()
@@ -583,6 +624,8 @@ function run() {
   testBackendErrorsReportToo()
   testTraceIsAttachedOutsideCloudFunctions()
   testTraceHeaderParsing()
+  testCustomWriteReceivesTheEntry()
+  testOmittingWriteRestoresTheDefault()
   reportResults()
 }
 

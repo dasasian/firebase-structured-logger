@@ -1,6 +1,5 @@
 import * as fs from "fs";
 import * as path from "path";
-import { write as ffWrite } from "firebase-functions/logger";
 import { ulid } from "ulid";
 import type { LogSeverity, LogPayload } from "../shared/types";
 import { SEVERITY_ORDER, SEVERITIES, isLogSeverity, isFeedback } from "../shared/severity";
@@ -18,10 +17,51 @@ interface FunctionsLoggerConfig {
   logMaxRecordsPerFile?: number; // default 2000
   logMaxRotatedFiles?: number; // default 5
   minSeverity?: LogSeverity; // default 'WARNING' in production, 'DEBUG' in emulator
+  /** Production sink. Default: firebase-functions' `write`, or stdout without it — see LogEntryWriter. */
+  write?: LogEntryWriter;
 }
+
+/**
+ * Where a production entry goes: one object, already in Cloud Logging's shape.
+ *
+ * The default is firebase-functions' own `write`, resolved on first use rather than at
+ * module load. On Cloud Run — or any Node server that is not Cloud Functions —
+ * `firebase-functions` is not installed, and a top-level import made this whole entry
+ * point unloadable there. `createHttpLogHandler` promised that backend a door (#34);
+ * this is what lets the door open.
+ *
+ * Without firebase-functions the entry goes to stdout as one line of JSON, which is
+ * what Cloud Run's log agent expects: `severity`, `message` and the
+ * `logging.googleapis.com/*` keys are promoted exactly as they are from a function.
+ *
+ * Pass `write` to send it through a logger you already run. The object is complete;
+ * write it verbatim, or `labels.userId="…"` stops matching the client half.
+ */
+export type LogEntryWriter = (entry: Record<string, unknown>) => void;
 
 let globalConfig: FunctionsLoggerConfig | null = null;
 let currentRecordCount = 0;
+
+let defaultWriter: LogEntryWriter | null = null;
+
+function resolveDefaultWriter(): LogEntryWriter {
+  if (defaultWriter) return defaultWriter;
+  try {
+    // Lazy on purpose — see LogEntryWriter.
+    const ff = require("firebase-functions/logger") as { write: LogEntryWriter };
+    defaultWriter = ff.write;
+  } catch {
+    console.info(
+      "[fsl] firebase-functions is not installed; writing entries to stdout as JSON",
+    );
+    defaultWriter = (entry) => console.log(JSON.stringify(entry));
+  }
+  return defaultWriter;
+}
+
+function entryWriter(): LogEntryWriter {
+  return globalConfig?.write ?? resolveDefaultWriter();
+}
 
 /**
  * Initialize the functions-side logger.
@@ -222,9 +262,10 @@ export function writeLog(
     return;
   }
 
-  // Production: use firebase-functions/logger write() directly, bypassing entryFromArgs.
-  // This avoids server-side stack injection and jsonPayload nesting, while preserving
-  // automatic trace context injection for request correlation in Cloud Logging.
+  // Production: hand the finished entry to the sink — by default firebase-functions'
+  // write(), bypassing entryFromArgs. This avoids server-side stack injection and
+  // jsonPayload nesting, while preserving automatic trace context injection for
+  // request correlation in Cloud Logging.
   //
   // Labels MUST be emitted under "logging.googleapis.com/labels". ffWrite does no
   // mapping — it JSON-stringifies the object straight to stdout — and Cloud Logging
@@ -283,7 +324,7 @@ export function writeLog(
   // Cloud Functions their value is authoritative.
   const trace = traceResourceName();
 
-  ffWrite({
+  entryWriter()({
     severity,
     message: payload.message,
     "logging.googleapis.com/labels": labels,

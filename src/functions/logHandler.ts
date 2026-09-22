@@ -1,4 +1,3 @@
-import { onCall, HttpsError } from 'firebase-functions/v2/https'
 import type { LogPayload, ErrorPayload } from '../shared/types'
 import { SEVERITIES } from '../shared/severity'
 import { writeLog, cleanLabels } from './logger'
@@ -192,6 +191,11 @@ export function createClientLogFunction(
   config: ClientLogHandlerConfig & { cors?: boolean | string | string[]; maxInstances?: number },
 ) {
   const handler = createClientLogHandler(config)
+  // Resolved here, not at module load. This is the one place in `/functions` that needs
+  // firebase-functions at runtime, and a top-level import made the whole entry point
+  // unloadable on a backend that wants createHttpLogHandler and nothing else (#34).
+  const { onCall, HttpsError } =
+    require('firebase-functions/v2/https') as typeof import('firebase-functions/v2/https')
   return onCall<LogPayload, void>(
     { cors: config.cors ?? true, maxInstances: config.maxInstances ?? 1 },
     async (request) => {

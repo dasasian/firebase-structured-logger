@@ -11,6 +11,10 @@
  * second-call semantics. Adding a new one without a case here is the gap that
  * let these ship.
  *
+ * The functions-side `initLogger({ write })` is the exception that lives elsewhere: its
+ * second-call semantics (REPLACE) are asserted in productionOutput.ts, because the sink
+ * is only consulted on the production branch and this suite runs under the emulator flag.
+ *
  * Run: FUNCTIONS_EMULATOR=true npx tsx tests/configureTwice.ts
  */
 

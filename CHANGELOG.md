@@ -7,6 +7,19 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`initLogger({ write })`** on `/functions` — the production sink is a function you can supply. The entry arrives complete, in Cloud Logging's shape, for a backend that already runs its own logger and wants one stream rather than two writers.
+
+### Fixed
+
+- **`/functions` could not be loaded without `firebase-functions` installed**, which made `createHttpLogHandler` (0.7.0) unusable on the backend it was written for. `logger.ts` imported `firebase-functions/logger` at module load and `logHandler.ts` imported `onCall` the same way, so a Cloud Run service with neither died on `require` before reaching the HTTP handler. Both are resolved on first use now. Without `firebase-functions` the default sink writes each entry to stdout as one JSON line, which Cloud Run ingests into the same fields. `firebase-functions` was already an optional peer; the code now agrees with the manifest. A new suite pins that no `/functions` source imports it at the top level.
+
+### Documentation
+
+- A Hono adapter next to the Express one. `createHttpLogHandler` takes Node's request and response shapes, and Hono wraps them.
+- Volume controls: a Vite `define: { 'process.env': {} }` makes the client's production floor `DEBUG`. Pass `minLogLevel`.
+
 ## [0.7.0] — 2026-09-01
 
 Errors group now. Not because this package learned to fingerprint them, but because Google
