@@ -13,6 +13,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The client's production floor was never applied in a browser.** `defaultMinLevel` guarded on `typeof process`, which is undefined in every browser even though bundlers fold `process.env.NODE_ENV` to a literal — so the folded branch was unreachable and every browser build defaulted to `DEBUG` in production. Seen in a real Vite bundle as `typeof process<"u"?"WARNING":"DEBUG"`. The guard is gone; a runtime with neither the fold nor `process` throws on the read and is caught.
 - **`/functions` could not be loaded without `firebase-functions` installed**, which made `createHttpLogHandler` (0.7.0) unusable on the backend it was written for. `logger.ts` imported `firebase-functions/logger` at module load and `logHandler.ts` imported `onCall` the same way, so a Cloud Run service with neither died on `require` before reaching the HTTP handler. Both are resolved on first use now. Without `firebase-functions` the default sink writes each entry to stdout as one JSON line, which Cloud Run ingests into the same fields. `firebase-functions` was already an optional peer; the code now agrees with the manifest. A new suite pins that no `/functions` source imports it at the top level.
 
 ### Documentation
