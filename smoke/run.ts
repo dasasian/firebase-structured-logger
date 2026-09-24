@@ -168,7 +168,17 @@ interface SmokeEntry {
   errorGroups?: Array<{ id?: string }>
 }
 
-async function waitForEntries(want: number, timeoutMs = 240_000): Promise<SmokeEntry[]> {
+/**
+ * Poll until `want` entries of this run have arrived — and, when given, until
+ * `ready` agrees. A count alone is not enough: other lines can carry the run id
+ * (a platform or [fsl] line), so the count can be met while an entry the
+ * assertions need is still in ingestion.
+ */
+async function waitForEntries(
+  want: number,
+  timeoutMs = 240_000,
+  ready: (entries: SmokeEntry[]) => boolean = () => true,
+): Promise<SmokeEntry[]> {
   const started = Date.now()
   let last: SmokeEntry[] = []
   let delay = 3_000
@@ -193,9 +203,15 @@ async function waitForEntries(want: number, timeoutMs = 240_000): Promise<SmokeE
           JSON.stringify(e.data ?? {}).includes(RUN_ID) ||
           JSON.stringify(e.metadata?.labels ?? {}).includes(RUN_ID),
       )
-      .map((e) => ({ data: e.data as SmokeEntryData, metadata: e.metadata as SmokeEntryMeta }))
+      // An entry whose only payload field is `message` is stored by Cloud Logging as
+      // textPayload, so `data` arrives as a bare string — the backend's logWarn with no
+      // context does. Normalised here so every lookup can read `data.message`.
+      .map((e) => ({
+        data: (typeof e.data === 'string' ? { message: e.data } : e.data) as SmokeEntryData,
+        metadata: e.metadata as SmokeEntryMeta,
+      }))
     process.stdout.write(`\r  … ${mine.length}/${want} entries after ${Math.round((Date.now() - started) / 1000)}s   `)
-    if (mine.length >= want) {
+    if (mine.length >= want && ready(mine)) {
       process.stdout.write('\n')
       return mine
     }
@@ -334,8 +350,11 @@ async function main(): Promise<void> {
   await callFunction('fslSmokeBackend', { runId: RUN_ID })
   console.log('  invoked fslSmokeBackend\n')
 
-  // 4. Wait for ingestion. 1 client entry + 3 backend entries.
-  const entries = await waitForEntries(4)
+  // 4. Wait for ingestion. 1 client entry + 3 backend entries — by name, not count.
+  const messageOf = (e: SmokeEntry) => String(e.data?.message ?? '')
+  const entries = await waitForEntries(4, undefined, (mine) =>
+    mine.some((e) => messageOf(e).includes('client error')) &&
+    mine.filter((e) => messageOf(e).includes('[fsl-verify] backend ')).length >= 3)
   if (entries.length === 0) {
     console.error('\n  No entries arrived within the timeout. Nothing further can be asserted.')
     failed++
@@ -570,6 +589,23 @@ async function main(): Promise<void> {
   const bLabels = backendInfo?.meta?.labels ?? {}
   assert('functionName is set by withLogging', bLabels.functionName === 'fslSmokeBackend', `got: ${bLabels.functionName}`)
   assert('the run id rode through AsyncLocalStorage', bLabels.smokeRunId === RUN_ID, `got: ${bLabels.smokeRunId}`)
+
+  // The trace id is why /functions still uses firebase-functions' write() where it is
+  // installed (#39): only it can see the trace of the current invocation. Lose it and
+  // "show entries for this trace" in Logs Explorer stops grouping one call's logs —
+  // silently, since every entry still arrives.
+  console.log('\n  --- trace ---')
+  const traceOf = (p: { meta?: SmokeEntryMeta } | undefined) => p?.meta?.trace ?? ''
+  const backendTraces = payloads
+    .filter((p) => String(p.data?.message ?? '').includes('[fsl-verify] backend '))
+    .map(traceOf)
+  const ours = `projects/${PROJECT}/traces/`
+  assert('the client entry carries a trace', traceOf(client).startsWith(ours), `got: ${traceOf(client)}`)
+  assert('all three backend entries arrived', backendTraces.length === 3, `got: ${backendTraces.length}`)
+  assert('every backend entry carries a trace', backendTraces.every((t) => t.startsWith(ours)),
+    `got: ${backendTraces.join(', ')}`)
+  assert('one invocation shares one trace', new Set(backendTraces).size === 1, `got: ${backendTraces.join(', ')}`)
+  assert('two invocations do not', traceOf(client) !== backendTraces[0])
 }
 
 async function cleanup(): Promise<void> {
