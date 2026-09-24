@@ -7,6 +7,14 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The client's production floor was never applied in a browser.** `defaultMinLevel` guarded on `typeof process`, which is undefined in every browser even though bundlers fold `process.env.NODE_ENV` to a literal — so the folded branch was unreachable and every browser build defaulted to `DEBUG` in production. Seen in a real Vite bundle as `typeof process<"u"?"WARNING":"DEBUG"`. The guard is gone; a runtime with neither the fold nor `process` throws on the read and is caught.
+
+### Documentation
+
+- Volume controls: a Vite `define: { 'process.env': {} }` makes the client's production floor `DEBUG`. Pass `minLogLevel`.
+
 ## [0.7.0] — 2026-09-01
 
 Errors group now. Not because this package learned to fingerprint them, but because Google

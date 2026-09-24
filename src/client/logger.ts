@@ -39,8 +39,21 @@ export interface InitLoggerConfig<
   rateLimitOptions?: RateLimitConfig
 }
 
+/**
+ * No `typeof process` guard, on purpose. Every bundler folds `process.env.NODE_ENV` to a
+ * string literal at build time, so the comparison is safe in a browser — but `process`
+ * itself does not exist there, and guarding on it meant the folded branch was never
+ * reached: every browser build defaulted to DEBUG in production, and the README's
+ * "WARNING in production" was true only under Node. Seen in a real Vite bundle as
+ * `typeof process<"u"?"WARNING":"DEBUG"`. A runtime with neither the fold nor
+ * `process` throws on the read, and that is the case the catch is for.
+ */
 function defaultMinLevel(): LogSeverity {
-  if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production') return 'WARNING'
+  try {
+    if (process.env.NODE_ENV === 'production') return 'WARNING'
+  } catch {
+    // Not Node and not folded: development.
+  }
   return 'DEBUG'
 }
 

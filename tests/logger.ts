@@ -121,6 +121,38 @@ async function testEverySeverityCostsOneUnitOfBudget() {
   }
 }
 
+/**
+ * The default floor, read from NODE_ENV. Only the Node half is testable here — the
+ * browser half is a bundler fold, and the bug was the `typeof process` guard in front of
+ * it (see defaultMinLevel). What this pins: with NODE_ENV=production and no minLogLevel,
+ * INFO is dropped and WARNING is sent; with it unset, INFO is sent.
+ */
+async function testDefaultFloorFollowsNodeEnv() {
+  console.log('\nTest: the default floor is WARNING under NODE_ENV=production, DEBUG otherwise')
+  const previous = process.env.NODE_ENV
+  try {
+    process.env.NODE_ENV = 'production'
+    resetRateLimiter()
+    let prod = makeLogger()
+    prod.logger.info('routine')
+    await new Promise((r) => setTimeout(r, 0))
+    assert('production: INFO is dropped by default', prod.lastPayload() === undefined)
+    prod.logger.warning('worth hearing')
+    await new Promise((r) => setTimeout(r, 0))
+    assert('production: WARNING is sent by default', prod.lastPayload()?.severity === 'WARNING')
+
+    delete process.env.NODE_ENV
+    resetRateLimiter()
+    const dev = makeLogger()
+    dev.logger.info('routine')
+    await new Promise((r) => setTimeout(r, 0))
+    assert('development: INFO is sent by default', dev.lastPayload()?.severity === 'INFO')
+  } finally {
+    if (previous === undefined) delete process.env.NODE_ENV
+    else process.env.NODE_ENV = previous
+  }
+}
+
 // --- Runner ---
 
 async function run() {
@@ -130,6 +162,7 @@ async function run() {
   await testNonErrorInput()
   await testInfoHasNoError()
   await testEverySeverityCostsOneUnitOfBudget()
+  await testDefaultFloorFollowsNodeEnv()
 
   reportResults()
 }
