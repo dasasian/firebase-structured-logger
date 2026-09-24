@@ -232,19 +232,19 @@ function testPerHandlerBucketIsolation() {
   // The module default is now whatever was set last...
   assert(
     'module default is the last-configured bucket',
-    getBucket().name === 'app-b-sourcemaps',
-    `got: ${getBucket().name}`,
+    getBucket()?.name === 'app-b-sourcemaps',
+    `got: ${getBucket()?.name}`,
   )
 
   // ...but an explicit bucket overrides it, which is what the lookup path uses.
   assert(
     'an explicit bucket wins over the module default',
-    getBucket('app-a-sourcemaps').name === 'app-a-sourcemaps',
-    `got: ${getBucket('app-a-sourcemaps').name}`,
+    getBucket('app-a-sourcemaps')?.name === 'app-a-sourcemaps',
+    `got: ${getBucket('app-a-sourcemaps')?.name}`,
   )
   assert(
     'two explicit buckets resolve differently',
-    getBucket('app-a-sourcemaps').name !== getBucket('app-b-sourcemaps').name,
+    getBucket('app-a-sourcemaps')?.name !== getBucket('app-b-sourcemaps')?.name,
   )
 }
 

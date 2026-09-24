@@ -63,6 +63,20 @@ be started. It uses `app-HANDLER1.js` and friends because `symbolication` writes
 same directory under the same cwd, and a shared fixture name would let one suite's map
 silently satisfy the other's lookup.
 
+`storageChain` also runs with the flag unset. `firebase-admin` is an optional peer, so
+Storage resolves down a chain (firebase-admin → a named bucket via `@google-cloud/storage`
+→ none); the suite stages "not installed" with a `Module._load` hook, because the package
+is always present in this repo. `STORAGE_EMULATOR_HOST` points at a closed local port in
+it and in `productionOutput`, so no attachment upload can reach real Storage with this
+machine's credentials.
+
+**`npm run smoke:install`** is the check nothing in `npm test` can do: it builds, packs,
+installs the tarball into an empty temp directory with no optional peers, and sends one
+ERROR through `createHttpLogHandler` from CommonJS and ESM. It needs the npm registry and
+nothing else. Run it before a release — it is how the `firebase-admin` import in
+`sourceMapCache.ts` was found, after a require hook that blocked only `firebase-functions`
+had passed.
+
 Two support modules, not suites themselves:
 
 - `tests/testHelpers.ts` — `assert`, `reportResults`, `readLastEntry(dir)`, `clearLog(dir)`,
