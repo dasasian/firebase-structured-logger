@@ -17,8 +17,8 @@ Your web app crashed at `app-4f2a.js:1:98432`. This tells you it was `Checkout.t
 
 Ships a browser logger, a server logger, and the `fsl` CLI. Built for Firebase, but
 Firebase is optional: the browser half has no Firebase dependency, and the server half
-runs on Cloud Functions, Cloud Run, or any Node server. What it needs is a Google Cloud
-project — that is where the logs live.
+runs on Cloud Functions, Cloud Run, or any Node server on Google Cloud, where stdout goes
+to Cloud Logging. What it needs is a Google Cloud project — that is where the logs live.
 
 ## One query, both halves
 
@@ -66,7 +66,7 @@ npm install @dasasian/firebase-structured-logger
 # Cloud Functions
 cd functions && npm install @dasasian/firebase-structured-logger
 
-# Cloud Run, or any Node server
+# Cloud Run, or any Node server on Google Cloud
 npm install @dasasian/firebase-structured-logger
 ```
 
@@ -198,7 +198,7 @@ The entry should carry `userId` without your having written it.
 
 ### If your backend is not Cloud Functions
 
-Cloud Run, or any Node server you already run. Two things differ from the browser
+Cloud Run, or any Node server you already run on Google Cloud. Two things differ from the browser
 path above; everything else — breadcrumbs, labels, symbolication, the free fields — is
 identical, and the entries land in the same stream in the same shape.
 
@@ -279,6 +279,9 @@ initLogger({
 
 Nothing here needs a Firebase project — only a Google Cloud one. What changes:
 
+- **The server has to run on Google Cloud** — Cloud Run, GKE, App Engine, or Compute
+  Engine with the Ops Agent. Entries are written to stdout, and only there does stdout
+  reach Cloud Logging. On AWS, Vercel or your own box they print and go nowhere.
 - **The browser** needs no `firebase` package. `logFunction` is the `fetch` above; send
   whatever credential your app already uses.
 - **`authorize`** checks your own session instead of a Firebase ID token — for example

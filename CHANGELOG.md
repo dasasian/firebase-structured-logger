@@ -7,6 +7,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Documentation
+
+- **The server half has to run on Google Cloud.** 0.8.0's README said "any Node server". Entries go to stdout, which reaches Cloud Logging only on Cloud Functions, Cloud Run, GKE, App Engine, or Compute Engine with the Ops Agent — elsewhere they print and go nowhere.
+
 ## [0.8.0] — 2026-09-24
 
 Firebase is optional now, and that is tested rather than claimed. 0.7.0 added
