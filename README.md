@@ -586,6 +586,13 @@ Two errors count as duplicates when the **message and the screen both match**, s
 error on two different screens is not collapsed into one. The budget lives in
 `sessionStorage` and resets with the session.
 
+The client's production default comes from `process.env.NODE_ENV`, which Vite replaces at
+build time. A `define: { 'process.env': {} }` in `vite.config` — common, to quiet a library
+that expects Node — replaces the whole object instead, `NODE_ENV` reads as undefined, and
+the floor is silently `DEBUG` in production. If your config has that line, pass
+`minLogLevel` explicitly. Stating it is the safe habit either way: it is the one default
+here whose failure mode is a bill rather than a missing log.
+
 ### What a dropped log looks like
 
 The two rate limits say so in the browser console:
