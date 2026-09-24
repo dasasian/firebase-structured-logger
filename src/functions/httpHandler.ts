@@ -16,7 +16,7 @@
 
 import { ClientLogError, createClientLogHandler, type ClientLogHandlerConfig } from './logHandler'
 import type { LogPayload } from '../shared/types'
-import { runWithTrace, traceIdFromHeaders } from './traceContext'
+import { resolveTraceProject, runWithTrace, traceIdFromHeaders } from './traceContext'
 
 /** The parts of a request this handler reads. */
 export interface HttpLogRequest {
@@ -157,6 +157,9 @@ export function createHttpLogHandler(
       // only attaches one inside its own wrapper, so out here we read the
       // headers ourselves — otherwise the logs arrive uncorrelated and nothing
       // says why.
+      // Once per process, and a no-op off Cloud Run: the trace needs the project
+      // id, which Cloud Run does not put in the environment.
+      await resolveTraceProject()
       await runWithTrace(traceIdFromHeaders(req.headers), () =>
         handler({ data: req.body as LogPayload }),
       )

@@ -35,12 +35,33 @@ free tier.
 ## Running
 
 ```
-npm run smoke:deploy    # builds against the PUBLISHED package, then deploys
-npm run smoke           # invokes, waits for ingestion, asserts, cleans up
+npm run smoke:deploy       # builds against the PUBLISHED package, then deploys
+npm run smoke:deploy:run   # packs the WORKING TREE, deploys the Cloud Run service
+npm run smoke              # invokes, waits for ingestion, asserts, cleans up
+npm run smoke:install      # no cloud: installs the tarball with no optional peers
 ```
 
-Both pass `--project` explicitly. Nothing here relies on `.firebaserc` or on
-whatever project the Firebase CLI last considered active.
+All of them pass `--project` explicitly. Nothing here relies on `.firebaserc` or on
+whatever project the Firebase CLI or gcloud last considered active.
+
+## The Cloud Run leg
+
+`smoke/cloudrun/` is a plain `http` server on Cloud Run with **no `firebase-functions`
+and no `firebase-admin`** — the backend `createHttpLogHandler` is for (#39). It proves
+the fallback paths end to end: JSON lines instead of `write()`, Storage through
+`@google-cloud/storage` with a named bucket, and a trace id whose project comes from
+the metadata server, because Cloud Run puts none in the environment.
+
+The trace check asserts what the console does: `trace="projects/<p>/traces/<id>"` must
+find both our entry and Cloud Run's own request log. That is how the bare-id idea was
+ruled out — Cloud Logging stores the bare id as written, so it never meets the
+request log.
+
+The service is private (`--no-allow-unauthenticated`); the run calls it with
+`gcloud auth print-identity-token`. The first deploy creates an Artifact Registry
+repository and runs Cloud Build, both inside the free tier at this size. A deploy
+can fail once with "Resource readiness deadline exceeded" and no container logs —
+that is on Google's side; deploying again worked.
 
 ## What the deployed fixture covers
 

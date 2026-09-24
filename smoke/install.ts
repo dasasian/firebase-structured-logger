@@ -33,7 +33,6 @@ function npm(args: string[], cwd: string): string {
 // The probe runs inside the install. It writes the handler's status on stdout and
 // leaves the log entry on stderr (ERROR goes there), so the two never mix.
 const PROBE_BODY = `
-process.env.GOOGLE_CLOUD_PROJECT = 'install-smoke'
 fsl.initLogger({ appId: 'install-smoke', minSeverity: 'DEBUG' })
 
 let createClientLogFunctionError = null
@@ -118,8 +117,7 @@ function run() {
       assert('labels are under the promoted key', entry['logging.googleapis.com/labels']?.userId === 'u1')
       assert(
         'the trace comes from the request header',
-        entry['logging.googleapis.com/trace'] ===
-          'projects/install-smoke/traces/0123456789abcdef0123456789abcdef',
+        entry['logging.googleapis.com/trace'] === '0123456789abcdef0123456789abcdef',
       )
       assert('stack_trace is present', typeof entry.stack_trace === 'string')
       assert(

@@ -7,7 +7,7 @@ import { SEVERITY_ORDER, SEVERITIES, isLogSeverity, isFeedback } from "../shared
 import { toError, toErrorPayload } from "../shared/error";
 import { getAttachmentBucket, getAttachmentPrefix } from "./sourceMapCache";
 import { attachmentPath } from "../shared/paths.js";
-import { traceResourceName } from "./traceContext";
+import { traceField } from "./traceContext";
 import type { Bucket } from "@google-cloud/storage";
 
 type EntryWriter = typeof FirebaseWrite;
@@ -348,7 +348,7 @@ export function writeLog(
   // wrapper — empty on Cloud Run and anything behind createHttpLogHandler. When
   // theirs IS populated it overwrites this, which is the right precedence: inside
   // Cloud Functions their value is authoritative.
-  const trace = traceResourceName();
+  const trace = traceField();
 
   writeEntry({
     severity,
