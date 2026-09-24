@@ -1,9 +1,60 @@
 import * as fs from 'fs'
 import * as path from 'path'
-import { getStorage } from 'firebase-admin/storage'
-import { embeddedMapPath, embeddedMarkerPath, storageMapPath } from '../shared/paths.js'
+import type * as FirebaseAdminStorage from 'firebase-admin/storage'
+import type * as CloudStorage from '@google-cloud/storage'
 import type { Bucket } from '@google-cloud/storage'
 import type { EncodedSourceMap } from '@jridgewell/trace-mapping'
+import { embeddedMapPath, embeddedMarkerPath, storageMapPath } from '../shared/paths.js'
+
+/**
+ * OPTIONAL PEER — firebase-admin is loaded lazily, on purpose.
+ *
+ * Storage is needed for two things only: maps of releases older than the deployed one,
+ * and attachments. A top-level import made the whole `/functions` entry point fail on
+ * `require` on a backend without firebase-admin, even one that never touches Storage
+ * (#39). So Storage is resolved on first use, down a chain:
+ *
+ *   1. firebase-admin installed       -> its Storage, and its default bucket (today's path)
+ *   2. not installed, a bucket named  -> @google-cloud/storage with that bucket
+ *   3. neither                        -> no Storage; warned once, see warnNoStorage
+ *
+ * Step 2 needs the name because only firebase-admin knows the app's default bucket.
+ * @google-cloud/storage is a regular dependency (the `fsl` CLI uses it); it is loaded
+ * lazily too, because it is heavy and a Cloud Functions instance never needs it.
+ *
+ * `require` rather than `await import`: `getBucket` is synchronous, and in this
+ * CommonJS build a dynamic import compiles to `require` anyway.
+ */
+function loadFirebaseAdminStorage(): typeof FirebaseAdminStorage | null {
+  try {
+    return require('firebase-admin/storage') as typeof FirebaseAdminStorage
+  } catch {
+    return null
+  }
+}
+
+function loadCloudStorage(): typeof CloudStorage {
+  return require('@google-cloud/storage') as typeof CloudStorage
+}
+
+/** Which step of the chain Storage resolves to. */
+export type StorageSource = 'firebase-admin' | 'google-cloud-storage' | 'none'
+
+// undefined = not yet resolved. Resolved once: a package is either installed or not
+// for the life of the process, and this sits on the per-error path.
+let adminStorage: typeof FirebaseAdminStorage | null | undefined
+let cloudStorage: CloudStorage.Storage | undefined
+
+function resolveAdminStorage(): typeof FirebaseAdminStorage | null {
+  if (adminStorage === undefined) adminStorage = loadFirebaseAdminStorage()
+  return adminStorage
+}
+
+/** Which step of the chain a lookup for `bucketName` would take. */
+export function storageSource(bucketName = defaultBucket): StorageSource {
+  if (resolveAdminStorage()) return 'firebase-admin'
+  return bucketName ? 'google-cloud-storage' : 'none'
+}
 
 /**
  * Storage-map cache, bounded by approximate bytes with LRU eviction.
@@ -115,8 +166,11 @@ export function configureAttachments(options: { bucket?: string; prefix?: string
 let attachmentBucket: string | undefined
 let attachmentPrefix: string | undefined
 
-/** Bucket for attachments: explicit, then the source-map bucket, then the project default. */
-export function getAttachmentBucket(): Bucket {
+/**
+ * Bucket for attachments: explicit, then the source-map bucket, then the project
+ * default. Null when there is no Storage at all — see loadFirebaseAdminStorage.
+ */
+export function getAttachmentBucket(): Bucket | null {
   return getBucket(attachmentBucket ?? defaultBucket)
 }
 
@@ -132,14 +186,46 @@ export function resetAttachmentConfig(): void {
 }
 
 /**
- * Resolve the configured Storage bucket, falling back to the project default.
+ * Resolve the configured Storage bucket, falling back to the project default — or
+ * null when the chain ends with no Storage (see loadFirebaseAdminStorage).
  *
  * The return type is spelled out rather than inferred: without it the emitted
  * `.d.ts` would need to name `Bucket` from a path inside `node_modules`, which
  * TypeScript 7 rejects as non-portable (TS2883).
  */
-export function getBucket(bucketName = defaultBucket): Bucket {
-  return bucketName ? getStorage().bucket(bucketName) : getStorage().bucket()
+export function getBucket(bucketName = defaultBucket): Bucket | null {
+  const admin = resolveAdminStorage()
+  if (admin) return bucketName ? admin.getStorage().bucket(bucketName) : admin.getStorage().bucket()
+  if (bucketName) {
+    cloudStorage ??= new (loadCloudStorage().Storage)()
+    return cloudStorage.bucket(bucketName)
+  }
+  warnNoStorage()
+  return null
+}
+
+let warnedNoStorage = false
+
+/**
+ * Say once that there is no Storage, and what that costs. Nothing fails without it —
+ * which is exactly why it has to be said: errors from older releases simply stay
+ * minified and attachments simply vanish.
+ */
+function warnNoStorage(): void {
+  if (warnedNoStorage) return
+  warnedNoStorage = true
+  console.warn('[fsl] No Storage: firebase-admin is not installed and no bucket is named.')
+  console.warn("[fsl]   Only the source maps embedded in this deploy resolve; errors from older")
+  console.warn('[fsl]   releases stay minified, and attachments are dropped (the log entry is kept).')
+  console.warn('[fsl]   Fix: name a bucket (createHttpLogHandler({ bucketName }) or')
+  console.warn('[fsl]   configureAttachments({ bucket })), or install firebase-admin.')
+}
+
+/** Forget which Storage the chain resolved to, and the warning. Tests only. */
+export function resetStorageResolution(): void {
+  adminStorage = undefined
+  cloudStorage = undefined
+  warnedNoStorage = false
 }
 
 /**
@@ -200,7 +286,13 @@ async function loadStorageSourceMap(
   if (hit) return hit.map
 
   try {
-    const file = getBucket(bucketName).file(storageMapPath(releaseId, fileName, prefix))
+    // Inside the try: firebase-admin throws here, synchronously, when there is no
+    // initialised app or no default bucket — a miss, not a crash.
+    const bucket = getBucket(bucketName)
+    // No Storage at all: not a miss to cache — warnNoStorage has already said why.
+    if (!bucket) return null
+
+    const file = bucket.file(storageMapPath(releaseId, fileName, prefix))
     const [exists] = await file.exists()
 
     if (!exists) {
@@ -293,11 +385,15 @@ function warnNothingResolved(
   warnedMisses.add(key)
 
   const bucket = bucketName ?? defaultBucket ?? '<project default>'
+  const storage =
+    storageSource(bucketName) === 'none'
+      ? 'not available (no firebase-admin, no bucket named)'
+      : `gs://${bucket}/${storageMapPath(releaseId, fileName, prefix)} (not found)`
   console.warn(
     `[fsl] No source map for '${fileName}' at release '${releaseId}' — this stack stays minified.`,
   )
   console.warn(`[fsl]   embedded: ${embeddedMapPath(process.cwd(), fileName)} (not found)`)
-  console.warn(`[fsl]   storage:  gs://${bucket}/${storageMapPath(releaseId, fileName, prefix)} (not found)`)
+  console.warn(`[fsl]   storage:  ${storage}`)
   console.warn(
     '[fsl]   Check that the deploy runs `fsl upload-sourcemaps`, and that its --prefix',
   )

@@ -299,11 +299,16 @@ A gate that throws counts as a rejection, not an opening.
 - **Trace correlation works**, and needs nothing from you. The handler reads
   `X-Cloud-Trace-Context` or `traceparent` off the request, so a request's entries still
   group in Cloud Logging.
+- **No `firebase-admin`? Also optional.** Storage is only needed for older releases'
+  source maps and for attachments. With `firebase-admin` installed, its Storage and
+  default bucket are used. Without it, name the bucket — `bucketName` on the handler, or
+  `configureAttachments({ bucket })` — and the service's own credentials are used.
 - **No Storage bucket?** You do not need one. `fsl upload-sourcemaps --embed-sourcemaps`
   without `--bucket` embeds the current release's maps into your deploy and uploads
   nothing. The catch: only the **deployed** release can be symbolicated, because older
   ones live in a bucket there isn't one of. Errors from a previous release come back
-  minified.
+  minified, and attachments are dropped — the entry is still written. With neither
+  `firebase-admin` nor a bucket name, the log says so once at the first lookup.
 - **Response codes:** `204` written, `400` malformed payload, `401` gate refused, `405`
   not a POST, `500` something else. The client treats a non-2xx as a throw.
 

@@ -8,6 +8,7 @@ import { toError, toErrorPayload } from "../shared/error";
 import { getAttachmentBucket, getAttachmentPrefix } from "./sourceMapCache";
 import { attachmentPath } from "../shared/paths.js";
 import { traceResourceName } from "./traceContext";
+import type { Bucket } from "@google-cloud/storage";
 
 type EntryWriter = typeof FirebaseWrite;
 
@@ -134,10 +135,10 @@ function rotateLogFile(logDir: string, maxRotatedFiles: number): void {
 }
 
 async function uploadLogAttachments(
+  bucket: Bucket,
   logId: string,
   logAttachments: Record<string, string>,
 ): Promise<void> {
-  const bucket = getAttachmentBucket();
   await Promise.all(
     Object.entries(logAttachments).map(async ([name, data]) => {
       const file = bucket.file(attachmentPath(logId, name, getAttachmentPrefix()));
@@ -227,16 +228,26 @@ export function writeLog(
   }
 
   const logId = ulid();
-  const hasAttachments =
-    payload.attachments && Object.keys(payload.attachments).length > 0;
+  // Resolved before the labels, so `hasAttachments` is only claimed when there is
+  // somewhere to put them. With no Storage the attachments are dropped (warned once
+  // by getAttachmentBucket) and the entry is still written.
+  let attachmentBucket: Bucket | null = null;
+  if (payload.attachments && Object.keys(payload.attachments).length > 0) {
+    try {
+      attachmentBucket = getAttachmentBucket();
+    } catch (err) {
+      console.warn("[fsl] Log attachment upload failed:", err);
+    }
+  }
+  const hasAttachments = attachmentBucket !== null;
   const labels = {
     ...payload.labels,
     logId,
     ...(hasAttachments ? { hasAttachments: "true" } : {}),
   };
 
-  if (hasAttachments) {
-    uploadLogAttachments(logId, payload.attachments!).catch((err) => {
+  if (attachmentBucket) {
+    uploadLogAttachments(attachmentBucket, logId, payload.attachments!).catch((err) => {
       console.warn("[fsl] Log attachment upload failed:", err);
     });
   }

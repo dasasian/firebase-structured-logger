@@ -58,17 +58,17 @@ function testConfigureRateLimiterTwice() {
 function testConfigureSourceMapBucketTwice() {
   console.log('\nTest: configureSourceMapBucket — second call replaces the default')
   configureSourceMapBucket('bucket-one')
-  assert('first bucket becomes the default', getBucket().name === 'bucket-one', `got: ${getBucket().name}`)
+  assert('first bucket becomes the default', getBucket()?.name === 'bucket-one', `got: ${getBucket()?.name}`)
 
   configureSourceMapBucket('bucket-two')
-  assert('second call replaces it', getBucket().name === 'bucket-two', `got: ${getBucket().name}`)
+  assert('second call replaces it', getBucket()?.name === 'bucket-two', `got: ${getBucket()?.name}`)
 
   // The critical property: this default must NOT govern source-map lookups.
   // Handlers pass their bucket explicitly, so two handlers cannot collide.
   assert(
     'an explicit bucket still overrides the default',
-    getBucket('bucket-one').name === 'bucket-one',
-    `got: ${getBucket('bucket-one').name}`,
+    getBucket('bucket-one')?.name === 'bucket-one',
+    `got: ${getBucket('bucket-one')?.name}`,
   )
 }
 
@@ -89,23 +89,23 @@ function testConfigureAttachmentsTwice() {
   // bucket, then the project default.
   assert(
     'unconfigured attachments follow the source-map bucket',
-    getAttachmentBucket().name === 'maps-bucket',
-    `got: ${getAttachmentBucket().name}`,
+    getAttachmentBucket()?.name === 'maps-bucket',
+    `got: ${getAttachmentBucket()?.name}`,
   )
   assert('unconfigured prefix is left to the path builder', getAttachmentPrefix() === undefined)
 
   configureAttachments({ bucket: 'attach-one', prefix: 'one/' })
-  assert('the configured bucket wins over the source-map bucket', getAttachmentBucket().name === 'attach-one')
+  assert('the configured bucket wins over the source-map bucket', getAttachmentBucket()?.name === 'attach-one')
   assert('the configured prefix is used', getAttachmentPrefix() === 'one/')
 
   configureAttachments({ bucket: 'attach-two' })
-  assert('a second call replaces the bucket', getAttachmentBucket().name === 'attach-two')
+  assert('a second call replaces the bucket', getAttachmentBucket()?.name === 'attach-two')
   // Partial calls merge rather than reset. Passing only a bucket should not
   // silently move every attachment back to the default prefix.
   assert('and leaves an unmentioned field alone', getAttachmentPrefix() === 'one/', `got: ${getAttachmentPrefix()}`)
 
   resetAttachmentConfig()
-  assert('reset returns to the fallback bucket', getAttachmentBucket().name === 'maps-bucket')
+  assert('reset returns to the fallback bucket', getAttachmentBucket()?.name === 'maps-bucket')
 }
 
 function run() {

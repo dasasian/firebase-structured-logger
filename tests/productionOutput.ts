@@ -28,6 +28,14 @@ import { writeLog, initLogger, writeJsonLine } from '../src/functions/logger.js'
 import { getLogger } from '../src/functions/requestLogger.js'
 import { assert, reportResults } from './testHelpers.js'
 import { runWithTrace, traceIdFromHeaders } from '../src/functions/traceContext.js'
+import { configureAttachments, resetAttachmentConfig } from '../src/functions/sourceMapCache.js'
+import { initializeApp } from 'firebase-admin/app'
+
+// Attachments need a resolvable bucket before `hasAttachments` is claimed. The
+// emulator host points at a closed local port, so the upload that follows fails
+// fast and never reaches real Storage — whatever credentials this machine holds.
+process.env.STORAGE_EMULATOR_HOST = 'http://127.0.0.1:9'
+initializeApp({ projectId: 'demo-production-output' })
 
 initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
 
@@ -145,6 +153,7 @@ function testNoServerInjectedStack() {
 
 function testAttachmentsAreStrippedButFlagged() {
   console.log('\nTest: attachments are flagged in labels, never inlined into the entry')
+  configureAttachments({ bucket: 'demo-attachments' })
   const [entry] = captureEntries(() =>
     writeLog({
       message: 'with attachment',
@@ -157,6 +166,7 @@ function testAttachmentsAreStrippedButFlagged() {
   const labels = entry['logging.googleapis.com/labels'] as Record<string, string>
   assert('hasAttachments label is set', labels.hasAttachments === 'true', `got: ${labels.hasAttachments}`)
   assert('the base64 payload is NOT in the log entry', !('attachments' in entry), `keys: ${Object.keys(entry).join(', ')}`)
+  resetAttachmentConfig()
 }
 
 function testHasAttachmentsAbsentWhenNoneGiven() {
