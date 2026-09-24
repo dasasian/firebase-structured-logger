@@ -27,7 +27,12 @@ if (process.env.FUNCTIONS_EMULATOR === 'true') {
 import { writeLog, initLogger, writeJsonLine } from '../src/functions/logger.js'
 import { getLogger } from '../src/functions/requestLogger.js'
 import { assert, reportResults } from './testHelpers.js'
-import { runWithTrace, traceIdFromHeaders } from '../src/functions/traceContext.js'
+import {
+  runWithTrace,
+  traceIdFromHeaders,
+  resolveTraceProject,
+  resetTraceProject,
+} from '../src/functions/traceContext.js'
 import { configureAttachments, resetAttachmentConfig } from '../src/functions/sourceMapCache.js'
 import { initializeApp } from 'firebase-admin/app'
 
@@ -385,18 +390,21 @@ function testTraceIsAttachedOutsideCloudFunctions() {
   console.log('\nTest: a trace id from request headers reaches the entry')
   initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
   const previous = process.env.GOOGLE_CLOUD_PROJECT
-  process.env.GOOGLE_CLOUD_PROJECT = 'demo-project'
+  const previousGcloud = process.env.GCLOUD_PROJECT
 
   try {
     const traceId = '105445aa7843bc8bf206b12000100000'
+    // No project known: the bare id, which is still a valid LogEntry.trace.
+    delete process.env.GOOGLE_CLOUD_PROJECT
+    delete process.env.GCLOUD_PROJECT
     const [entry] = captureEntries(() =>
       runWithTrace(traceId, () =>
         writeLog({ message: 'traced', severity: 'ERROR', labels: { appId: 'acme' } as never }),
       ),
     )
     assert(
-      'the trace is a full resource name, not a bare id',
-      entry?.['logging.googleapis.com/trace'] === `projects/demo-project/traces/${traceId}`,
+      'with no project known, the trace is the bare id',
+      entry?.['logging.googleapis.com/trace'] === traceId,
       String(entry?.['logging.googleapis.com/trace']),
     )
 
@@ -407,22 +415,86 @@ function testTraceIsAttachedOutsideCloudFunctions() {
     )
     assert('and is absent entirely when there is no trace', !('logging.googleapis.com/trace' in (untraced ?? {})))
 
-    // No project means no valid resource name can be built.
-    delete process.env.GOOGLE_CLOUD_PROJECT
-    delete process.env.GCLOUD_PROJECT
-    const [noProject] = captureEntries(() =>
+    // With one, the full resource name — the form the console's trace filter matches.
+    process.env.GOOGLE_CLOUD_PROJECT = 'demo-project'
+    const [withProject] = captureEntries(() =>
       runWithTrace(traceId, () =>
-        writeLog({ message: 'no project', severity: 'ERROR', labels: { appId: 'acme' } as never }),
+        writeLog({ message: 'with project', severity: 'ERROR', labels: { appId: 'acme' } as never }),
       ),
     )
     assert(
-      'omitted rather than written wrong when the project is unknown',
-      !('logging.googleapis.com/trace' in (noProject ?? {})),
-      String(noProject?.['logging.googleapis.com/trace']),
+      'with a project, the full resource name',
+      withProject?.['logging.googleapis.com/trace'] === `projects/demo-project/traces/${traceId}`,
+      String(withProject?.['logging.googleapis.com/trace']),
     )
   } finally {
     if (previous === undefined) delete process.env.GOOGLE_CLOUD_PROJECT
     else process.env.GOOGLE_CLOUD_PROJECT = previous
+    if (previousGcloud === undefined) delete process.env.GCLOUD_PROJECT
+    else process.env.GCLOUD_PROJECT = previousGcloud
+  }
+}
+
+/**
+ * Cloud Run sets no project variable (#39), and a bare trace id never meets Cloud
+ * Run's own request log under the console's trace filter — the smoke run proved it.
+ * So on Cloud Run the project comes from the metadata server, once. `fetch` is
+ * stubbed: the point is when it is asked, and what is written from the answer.
+ */
+async function testTraceProjectFromMetadataServer() {
+  console.log('\nTest: on Cloud Run, the trace project comes from the metadata server, once')
+  const saved = {
+    fetch: globalThis.fetch,
+    k: process.env.K_SERVICE,
+    g: process.env.GOOGLE_CLOUD_PROJECT,
+    gc: process.env.GCLOUD_PROJECT,
+  }
+  delete process.env.GOOGLE_CLOUD_PROJECT
+  delete process.env.GCLOUD_PROJECT
+  const traceId = '205445aa7843bc8bf206b12000100000'
+  const traced = () =>
+    captureEntries(() =>
+      runWithTrace(traceId, () =>
+        writeLog({ message: 'metadata', severity: 'ERROR', labels: { appId: 'acme' } as never }),
+      ),
+    )[0]?.['logging.googleapis.com/trace']
+
+  let asked = 0
+  let answer: () => Promise<Response> = async () => new Response('demo-run-project')
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    asked++
+    const headers = new Headers(init?.headers)
+    assert('it asks the metadata server', String(input).includes('metadata.google.internal'))
+    assert('with the Metadata-Flavor header', headers.get('Metadata-Flavor') === 'Google')
+    return answer()
+  }) as typeof fetch
+
+  try {
+    delete process.env.K_SERVICE
+    resetTraceProject()
+    await resolveTraceProject()
+    assert('off Cloud Run it does not ask at all', asked === 0, `asked ${asked}`)
+    assert('and the trace is the bare id', traced() === traceId, String(traced()))
+
+    process.env.K_SERVICE = 'some-service'
+    resetTraceProject()
+    await Promise.all([resolveTraceProject(), resolveTraceProject()])
+    await resolveTraceProject()
+    assert('on Cloud Run it asks once, however many requests start', asked === 1, `asked ${asked}`)
+    assert('and the trace is the full resource name',
+      traced() === `projects/demo-run-project/traces/${traceId}`, String(traced()))
+
+    answer = async () => { throw new Error('unreachable') }
+    resetTraceProject()
+    await resolveTraceProject()
+    assert('a failed lookup leaves the bare id, not nothing', traced() === traceId, String(traced()))
+  } finally {
+    globalThis.fetch = saved.fetch
+    for (const [key, value] of [['K_SERVICE', saved.k], ['GOOGLE_CLOUD_PROJECT', saved.g], ['GCLOUD_PROJECT', saved.gc]] as const) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    resetTraceProject()
   }
 }
 
@@ -620,7 +692,7 @@ function testJsonLineSurvivesACircularEntry() {
   assert('the cycle is marked', entry.context.self === '[Circular]')
 }
 
-function run() {
+async function run() {
   testJsonPayloadIsSpreadNotNested()
   testLabelsArePromotedToEntryLabels()
   testSeverityIsTheLiteralCloudLoggingString()
@@ -642,6 +714,7 @@ function run() {
   testBackendErrorsReportToo()
   testTraceIsAttachedOutsideCloudFunctions()
   testTraceHeaderParsing()
+  await testTraceProjectFromMetadataServer()
   testJsonLineRoutesLikeFirebaseFunctions()
   testJsonLineSurvivesACircularEntry()
   reportResults()

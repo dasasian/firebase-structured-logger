@@ -77,20 +77,70 @@ export function currentTraceId(): string | undefined {
 }
 
 /**
- * The project a trace resource name belongs to.
+ * The project a trace resource name belongs to, from the environment.
  *
- * Cloud Functions sets `GCLOUD_PROJECT`; Cloud Run sets `GOOGLE_CLOUD_PROJECT`.
- * With neither there is no valid resource name to build, so the field is left
- * off rather than written wrong.
+ * Cloud Functions sets `GCLOUD_PROJECT`. Cloud Run sets NEITHER variable — 0.7.0
+ * assumed it set `GOOGLE_CLOUD_PROJECT`, so on the backend createHttpLogHandler
+ * exists for, the trace was silently never written (#39). See resolveTraceProject.
  */
-export function traceProject(): string | undefined {
+function envProject(): string | undefined {
   return process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || undefined
 }
 
-/** The full `logging.googleapis.com/trace` value, or undefined if unavailable. */
-export function traceResourceName(): string | undefined {
+const METADATA_PROJECT_URL = 'http://metadata.google.internal/computeMetadata/v1/project/project-id'
+
+// undefined = not looked up; null = looked up and not found.
+let metadataProject: string | null | undefined
+let metadataLookup: Promise<void> | undefined
+
+/**
+ * Find the project on a Google runtime that does not put it in the environment.
+ *
+ * Why the resource name at all: Cloud Logging's LogEntry reference prefers the bare
+ * trace id, but stores whichever form it is given, and the console's "show entries
+ * for this trace" filters on the full `projects/<id>/traces/<trace>` — the form Cloud
+ * Run writes its own request log in. A bare id never meets that request log; the
+ * smoke run proved it. So the project has to be found.
+ *
+ * Asked of the metadata server, the way Google's own Cloud Run sample and its pino
+ * config do: once, cached, and only on Cloud Run (`K_SERVICE` is set) — anywhere
+ * else the lookup would only wait for a timeout. Async, so it is awaited where the
+ * request starts (createHttpLogHandler), not on the synchronous log path.
+ */
+export function resolveTraceProject(): Promise<void> {
+  if (envProject() || metadataProject !== undefined) return Promise.resolve()
+  if (!process.env.K_SERVICE) {
+    metadataProject = null
+    return Promise.resolve()
+  }
+  metadataLookup ??= fetch(METADATA_PROJECT_URL, {
+    headers: { 'Metadata-Flavor': 'Google' },
+    signal: AbortSignal.timeout(1_000),
+  })
+    .then(async (res) => {
+      metadataProject = res.ok ? (await res.text()).trim() || null : null
+    })
+    .catch(() => {
+      metadataProject = null
+    })
+  return metadataLookup
+}
+
+/** Forget the looked-up project. Tests only. */
+export function resetTraceProject(): void {
+  metadataProject = undefined
+  metadataLookup = undefined
+}
+
+/**
+ * The `logging.googleapis.com/trace` value: the full resource name when the project
+ * is known, and the bare id when it is not. The bare id is a valid LogEntry.trace —
+ * the entry still carries its trace — it only fails to meet the request log in the
+ * console, so it beats writing nothing.
+ */
+export function traceField(): string | undefined {
   const traceId = currentTraceId()
-  const project = traceProject()
-  if (!traceId || !project) return undefined
-  return `projects/${project}/traces/${traceId}`
+  if (!traceId) return undefined
+  const project = envProject() ?? metadataProject ?? undefined
+  return project ? `projects/${project}/traces/${traceId}` : traceId
 }

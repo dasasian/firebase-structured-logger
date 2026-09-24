@@ -1,0 +1,14 @@
+{
+  "name": "smoke-cloudrun",
+  "private": true,
+  "main": "server.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@dasasian/firebase-structured-logger": "file:fsl-local.tgz"
+  }
+}

@@ -68,6 +68,7 @@
     "test": "tsx tests/logger.ts && tsx tests/browserBundle.ts && tsx tests/breadcrumbs.ts && tsx tests/rateLimiter.ts && tsx tests/errorHandler.ts && tsx tests/attachments.ts && tsx tests/feedback.ts && tsx tests/paths.ts && tsx tests/loadsWithoutFirebaseFunctions.ts && tsx tests/sourceMapStripping.ts && FUNCTIONS_EMULATOR=true tsx tests/errorPayload.ts && FUNCTIONS_EMULATOR=true tsx tests/requestLogger.ts && FUNCTIONS_EMULATOR=true tsx tests/handler.ts && FUNCTIONS_EMULATOR=true tsx tests/httpHandler.ts && FUNCTIONS_EMULATOR=true tsx tests/symbolication.ts && FUNCTIONS_EMULATOR=true tsx tests/publicApi.ts && FUNCTIONS_EMULATOR=true tsx tests/configureTwice.ts && tsx tests/productionOutput.ts && tsx tests/storageChain.ts && tsx tests/handlerSymbolication.ts && tsx tests/releaseResolution.ts && tsx tests/sourceMapCacheBounds.ts",
     "prepublishOnly": "npm run clean && npm run build",
     "smoke:deploy": "cd smoke/functions && npm install && npm run build && cd .. && firebase deploy --only functions --project $(grep '^FSL_SMOKE_PROJECT=' .env.local | cut -d= -f2)",
+    "smoke:deploy:run": "bash smoke/cloudrun/deploy.sh",
     "smoke": "tsx smoke/run.ts",
     "smoke:install": "tsx smoke/install.ts"
   },

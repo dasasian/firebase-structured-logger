@@ -606,6 +606,117 @@ async function main(): Promise<void> {
     `got: ${backendTraces.join(', ')}`)
   assert('one invocation shares one trace', new Set(backendTraces).size === 1, `got: ${backendTraces.join(', ')}`)
   assert('two invocations do not', traceOf(client) !== backendTraces[0])
+
+  await cloudRunLeg()
+}
+
+// --- Cloud Run: the backend without firebase-functions or firebase-admin (#39) ---
+
+const CLOUD_RUN_SERVICE = 'fsl-cloudrun-smoke'
+
+/**
+ * The URL of the Cloud Run smoke service, or null if it is not deployed.
+ * gcloud rather than a client library: the identity token below comes from the
+ * same CLI login, and nothing else in the harness needs the Run Admin API.
+ */
+function cloudRunUrl(): string | null {
+  try {
+    const url = execSync(
+      `gcloud run services describe ${CLOUD_RUN_SERVICE} --project ${PROJECT} --region ${REGION} --format="value(status.url)"`,
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] },
+    ).trim()
+    return url || null
+  } catch {
+    return null
+  }
+}
+
+async function cloudRunLeg(): Promise<void> {
+  console.log('\n  --- Cloud Run: no firebase-functions, no firebase-admin ---')
+  const url = cloudRunUrl()
+  assert('the Cloud Run smoke service is deployed', url !== null, 'run `npm run smoke:deploy:run` first')
+  if (!url) return
+
+  // The service is private; Cloud Run's IAM check is the gate. The token comes from
+  // the gcloud login, not ADC.
+  const token = execSync('gcloud auth print-identity-token', { encoding: 'utf-8' }).trim()
+  const traceId = RUN_ID.toLowerCase().padEnd(32, '0').replace(/[^0-9a-f]/g, '0')
+  const marker = `[fsl-verify] cloud run ${RUN_ID}`
+  const res = await fetch(`${url}/log`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'X-Cloud-Trace-Context': `${traceId}/1;o=1`,
+    },
+    body: JSON.stringify({
+      message: marker,
+      severity: 'ERROR',
+      labels: {
+        appId: env.FSL_SMOKE_APP_ID ?? 'smoke-app',
+        releaseId: RELEASE_ID,
+        errorType: 'fsl-cloud-run',
+        smokeRunId: RUN_ID,
+      },
+      jsonPayload: {
+        // The same bundle and release as the client leg, so this resolves from the
+        // map uploaded at the top of the run — through @google-cloud/storage this
+        // time, step 2 of the Storage chain.
+        error: { message: marker, name: 'Error', stack: `duplicate@https://app.example.com/assets/${BUNDLE}:1:4` },
+      },
+      attachments: { note: Buffer.from(`cloud run ${RUN_ID}`).toString('base64') },
+    }),
+  })
+  assert('the service answers 204', res.status === 204, `got ${res.status}: ${(await res.text()).slice(0, 200)}`)
+  if (res.status !== 204) return
+
+  // Polled on the marker until Error Reporting has stamped a group, which also
+  // waits out ingestion.
+  let entry: SmokeEntry | undefined
+  const started = Date.now()
+  let delay = 4_000
+  while (Date.now() - started < 300_000) {
+    entry = (await listEntriesRest(`jsonPayload.message:"${marker}"`))[0]
+    process.stdout.write(`\r  … ${entry ? 'arrived' : 'waiting'}, ${errorGroupIds(entry).length ? 'grouped' : 'not grouped'} after ${Math.round((Date.now() - started) / 1000)}s   `)
+    if (entry && errorGroupIds(entry).length > 0) break
+    await new Promise((r) => setTimeout(r, delay))
+    delay = Math.min(delay * 1.4, 15_000)
+  }
+  process.stdout.write('\n')
+
+  const meta = entry?.metadata
+  const labels = meta?.labels ?? {}
+  const resource = meta?.resource as { type?: string } | undefined
+  assert('the entry arrived', entry !== undefined)
+  assert('it came from Cloud Run, not a function', resource?.type === 'cloud_run_revision', `got: ${resource?.type}`)
+  assert('ERROR went to stderr', String(meta?.logName ?? '').endsWith('run.googleapis.com%2Fstderr'), `got: ${meta?.logName}`)
+  assert('labels are entry labels', labels.smokeRunId === RUN_ID && labels.errorType === 'fsl-cloud-run',
+    `got: ${JSON.stringify(labels)}`)
+  // Cloud Run sets no project variable, so this also proves the metadata-server
+  // lookup in resolveTraceProject ran (#39).
+  assert('the trace is the header id, as a full resource name',
+    meta?.trace === `projects/${PROJECT}/traces/${traceId}`, `got: ${meta?.trace}`)
+
+  // The claim that matters: "show entries for this trace" in Logs Explorer filters on
+  // the full resource name, and Cloud Run's own request log is written in that form.
+  // A bare id never meets it — an earlier run of this check is how that was found.
+  const traced = await listEntriesRest(`trace="projects/${PROJECT}/traces/${traceId}"`)
+  assert("the console's trace filter finds our entry",
+    traced.some((e) => String(e.data?.message ?? '') === marker), `found ${traced.length} entries`)
+  assert("and Cloud Run's request log for the same call",
+    traced.some((e) => String(e.metadata?.logName ?? '').endsWith('run.googleapis.com%2Frequests')),
+    `logs: ${traced.map((e) => String(e.metadata?.logName ?? '').split('/').pop()).join(', ')}`)
+  assert('the stack resolved from Storage without firebase-admin',
+    stackOf(entry?.data).includes('catalogProducts.ts'), `got: ${stackOf(entry?.data).slice(0, 160)}`)
+  assert('serviceContext names the app and release',
+    entry?.data?.serviceContext?.version === RELEASE_ID, `got: ${JSON.stringify(entry?.data?.serviceContext)}`)
+  assert('Error Reporting grouped it', errorGroupIds(entry).length > 0)
+  assert('hasAttachments is flagged', labels.hasAttachments === 'true', `got: ${labels.hasAttachments}`)
+  if (labels.logId) {
+    const [exists] = await storage.bucket(BUCKET).file(`logAttachments/${labels.logId}/note`).exists()
+    assert('the attachment was written without firebase-admin', exists,
+      `looked for logAttachments/${labels.logId}/note`)
+  }
 }
 
 async function cleanup(): Promise<void> {
