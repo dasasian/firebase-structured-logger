@@ -24,7 +24,7 @@ if (process.env.FUNCTIONS_EMULATOR === 'true') {
   process.exit(1)
 }
 
-import { writeLog, initLogger } from '../src/functions/logger.js'
+import { writeLog, initLogger, writeJsonLine } from '../src/functions/logger.js'
 import { getLogger } from '../src/functions/requestLogger.js'
 import { assert, reportResults } from './testHelpers.js'
 import { runWithTrace, traceIdFromHeaders } from '../src/functions/traceContext.js'
@@ -561,6 +561,55 @@ function testBackendErrorsReportToo() {
   initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
 }
 
+// --- The fallback writer, for a backend without firebase-functions ---
+
+function captureStreams(fn: () => void): { out: string; err: string } {
+  let out = ''
+  let err = ''
+  const realOut = process.stdout.write.bind(process.stdout)
+  const realErr = process.stderr.write.bind(process.stderr)
+  process.stdout.write = ((chunk: unknown) => ((out += String(chunk)), true)) as typeof process.stdout.write
+  process.stderr.write = ((chunk: unknown) => ((err += String(chunk)), true)) as typeof process.stderr.write
+  try {
+    fn()
+  } finally {
+    process.stdout.write = realOut
+    process.stderr.write = realErr
+  }
+  return { out, err }
+}
+
+function testJsonLineRoutesLikeFirebaseFunctions() {
+  console.log('\nTest: writeJsonLine — WARNING and above to stderr, the rest to stdout, one line each')
+  const info = captureStreams(() => writeJsonLine({ severity: 'INFO', message: 'routine' }))
+  const warning = captureStreams(() => writeJsonLine({ severity: 'WARNING', message: 'odd' }))
+  const error = captureStreams(() => writeJsonLine({ severity: 'ERROR', message: 'boom' }))
+
+  assert('INFO goes to stdout', info.out !== '' && info.err === '')
+  assert('WARNING goes to stderr', warning.err !== '' && warning.out === '')
+  assert('ERROR goes to stderr', error.err !== '' && error.out === '')
+  assert('the entry is one line of JSON', /^\{.*\}\n$/.test(error.err), error.err)
+  assert('the fields survive', JSON.parse(error.err).message === 'boom')
+}
+
+function testJsonLineSurvivesACircularEntry() {
+  console.log('\nTest: writeJsonLine — a self-referencing object is written, not thrown')
+  const context: Record<string, unknown> = { id: 'c1' }
+  context.self = context
+  let threw = false
+  const { out } = captureStreams(() => {
+    try {
+      writeJsonLine({ severity: 'INFO', message: 'loop', context })
+    } catch {
+      threw = true
+    }
+  })
+  assert('it does not throw', !threw)
+  const entry = JSON.parse(out) as { context: { id: string; self: unknown } }
+  assert('the rest of the object is kept', entry.context.id === 'c1')
+  assert('the cycle is marked', entry.context.self === '[Circular]')
+}
+
 function run() {
   testJsonPayloadIsSpreadNotNested()
   testLabelsArePromotedToEntryLabels()
@@ -583,6 +632,8 @@ function run() {
   testBackendErrorsReportToo()
   testTraceIsAttachedOutsideCloudFunctions()
   testTraceHeaderParsing()
+  testJsonLineRoutesLikeFirebaseFunctions()
+  testJsonLineSurvivesACircularEntry()
   reportResults()
 }
 

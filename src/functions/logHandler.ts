@@ -1,4 +1,4 @@
-import { onCall, HttpsError } from 'firebase-functions/v2/https'
+import type * as FirebaseHttps from 'firebase-functions/v2/https'
 import type { LogPayload, ErrorPayload } from '../shared/types'
 import { SEVERITIES } from '../shared/severity'
 import { writeLog, cleanLabels } from './logger'
@@ -8,6 +8,19 @@ import {
   symbolicateStackTrace,
   formatStackTrace,
 } from './symbolicate'
+
+/**
+ * OPTIONAL PEER — firebase-functions is loaded lazily, on purpose.
+ *
+ * Only createClientLogFunction needs it, and that only runs on Cloud Functions, where
+ * it is always installed. A top-level import made the whole `/functions` entry point
+ * fail on `require` on a backend that wants createHttpLogHandler and nothing else
+ * (#39). `require` rather than `await import`: createClientLogFunction must return
+ * the function synchronously, because `firebase deploy` reads the export at load.
+ */
+function loadFirebaseHttps(): typeof FirebaseHttps {
+  return require('firebase-functions/v2/https') as typeof FirebaseHttps
+}
 
 export interface ClientLogHandlerConfig {
   /**
@@ -192,6 +205,7 @@ export function createClientLogFunction(
   config: ClientLogHandlerConfig & { cors?: boolean | string | string[]; maxInstances?: number },
 ) {
   const handler = createClientLogHandler(config)
+  const { onCall, HttpsError } = loadFirebaseHttps()
   return onCall<LogPayload, void>(
     { cors: config.cors ?? true, maxInstances: config.maxInstances ?? 1 },
     async (request) => {
