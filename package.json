@@ -76,7 +76,7 @@
     "smoke:install": "tsx smoke/install.ts"
   },
   "dependencies": {
-    "@google-cloud/storage": "^7.0.0",
+    "@google-cloud/storage": "^8.2.0",
     "@jridgewell/trace-mapping": "^0.3.31",
     "ulid": "^3.0.2"
   },
@@ -97,15 +97,15 @@
     }
   },
   "devDependencies": {
-    "@google-cloud/logging": "^11.4.0",
+    "@google-cloud/logging": "^12.1.0",
     "@types/jsdom": "^30.0.0",
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.6.2",
     "esbuild": "^0.28.2",
-    "firebase": "^12.0.0",
-    "firebase-admin": "^14.2.0",
-    "firebase-functions": "^7.0.0",
-    "jsdom": "^27.0.1",
-    "tsx": "^4.19.0",
+    "firebase": "^12.19.0",
+    "firebase-admin": "^14.4.0",
+    "firebase-functions": "^7.4.0",
+    "jsdom": "^30.1.0",
+    "tsx": "^4.23.15",
     "typescript": "~5.9.3"
   },
   "engines": {
