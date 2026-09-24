@@ -1,0 +1,14 @@
+{
+  "//": "Typecheck-only config for tests/ and smoke/, which the build config does not cover.",
+  "//why": "tsconfig.json is the BUILD config: CommonJS, rootDir ./src, include src only. smoke/run.ts uses import.meta, which CommonJS rejects (TS1470), so these files need ESM settings and cannot simply be added to the build config's include. Nothing here emits — it exists so a type error in a test or the smoke harness is a failure rather than a discovery. See #38.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["node"]
+  },
+  "include": ["src/**/*", "tests/**/*", "smoke/**/*"],
+  "exclude": ["node_modules", "dist", "smoke/functions", "smoke/node_modules"]
+}

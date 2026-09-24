@@ -18,6 +18,10 @@ ESM settings and `noEmit`, because `smoke/run.ts` uses `import.meta` and CommonJ
 `entry.metadata.errorGroups` — a field the Logging client does not surface — reached a live
 smoke run and reported, wrongly, that Cloud Error Reporting had grouped nothing.
 
+`.gitignore` ignores `*.json` (Firebase credentials) and lists the exceptions. A new JSON
+config needs its own `!` line, or `git add -A` skips it silently and it only exists on
+your machine — `tsconfig.check.json` did exactly that, and CI failed with TS5058.
+
 That only works while the harness stays typed. `smoke/run.ts` has no `any` in it on purpose:
 `any` is what let that bug through, so re-introducing one silently disarms the check for the
 file that most needs it.
@@ -118,9 +122,12 @@ Full process + gotchas: `../PUBLISHING.md`. The short version:
    two link refs at the bottom of the file.
 2. Bump `version` in `package.json`.
 3. Commit `chore: release X.Y.Z` and push.
-4. `npm publish` — needs your OTP. Traps: a `404 on PUT` = lapsed token (`npm login`);
+4. **Wait for CI on `main` to go green** (`gh run list --branch main --limit 1`). 0.7.0
+   shipped on a red `main`: `tsconfig.check.json` was never committed, local typecheck
+   passed because the file existed here, and nobody looked at the run.
+5. `npm publish` — needs your OTP. Traps: a `404 on PUT` = lapsed token (`npm login`);
    `npm view` can 404 for ~2 min after a *successful* publish (confirm with
    `npm access list packages`, don't re-publish).
-5. `git tag vX.Y.Z && git push origin vX.Y.Z`; `gh release create vX.Y.Z` with the CHANGELOG notes.
-6. Update the `dasasian.com/firebase-structured-logger` page in `dasasian-web`. Only
+6. `git tag vX.Y.Z && git push origin vX.Y.Z`; `gh release create vX.Y.Z` with the CHANGELOG notes.
+7. Update the `dasasian.com/firebase-structured-logger` page in `dasasian-web`. Only
    `npm publish` and the release need your credentials; an agent drives the rest.

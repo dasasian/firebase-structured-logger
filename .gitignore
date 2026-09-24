@@ -20,6 +20,7 @@ dist/
 !package.json
 !package-lock.json
 !tsconfig.json
+!tsconfig.check.json
 !firebase.json
 
 # Smoke test — real project ids and bucket names live in env files only
