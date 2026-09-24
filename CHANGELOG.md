@@ -7,6 +7,15 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-09-24
+
+Firebase is optional now, and that is tested rather than claimed. 0.7.0 added
+`createHttpLogHandler` for backends that are not Cloud Functions, but on one — Cloud
+Run with no Firebase packages — `/functions` failed on `require`, and once loaded it
+dropped every trace id. Both are fixed, and the smoke run now includes exactly that
+service. Thanks to [Vivek Rao](https://github.com/vivekvrao), whose adoption found
+the first of it.
+
 ### Fixed
 
 - **`/functions` could not be loaded without `firebase-functions` installed**, which made `createHttpLogHandler` (0.7.0) unusable on the backend it was written for. `logger.ts` imported `firebase-functions/logger` at module load and `logHandler.ts` imported `onCall` the same way, so a Cloud Run service without it failed on `require` before reaching the HTTP handler. Both are optional peers now, loaded lazily. Where `firebase-functions` is installed nothing changes — its `write()` still attaches each trigger's trace id. Where it is not, entries are written as one JSON line each (WARNING and above to stderr, like `write()`), and the trace comes from the request headers. Reported and fixed by [Vivek Rao](https://github.com/vivekvrao) in #39.
@@ -16,6 +25,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Documentation
 
+- **Without Firebase.** The README says what is true now: the browser half has no Firebase dependency, and the server half runs on Cloud Functions, Cloud Run or any Node server. A new section covers what changes without Firebase — `authorize`, naming a bucket, and which tools are Cloud Functions only.
 - A Hono adapter next to the Express one. `createHttpLogHandler` takes Node's request and response shapes, and Hono wraps them.
 - Volume controls: a Vite `define: { 'process.env': {} }` makes the client's production floor `DEBUG`. Pass `minLogLevel`.
 
@@ -194,7 +204,8 @@ The README is reorganised around what you get rather than how the machine is bui
 - **Emulator mode** — under `FUNCTIONS_EMULATOR=true`, entries are written to a local `dev.jsonl` with rotation instead of Cloud Logging, so local development needs no live credentials.
 - **`fsl` CLI** — source map upload to Storage, deploy packing, and skill installation.
 
-[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.4.0...v0.5.0
