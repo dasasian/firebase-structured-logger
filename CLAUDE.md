@@ -126,6 +126,28 @@ and correctly so: requests are concurrent, so each gets its own writer via
 `configureX`/`init`. **A new configure/init function needs a case in that
 file** — its absence is what let both bugs ship.
 
+## Optional peers — never at module load
+
+`firebase`, `firebase-functions` and `firebase-admin` are optional peers, and the package
+has to load without any of them: the browser half posts anywhere, and
+`createHttpLogHandler` runs on Cloud Run or any Node server that may not be Firebase at
+all. A top-level import of a peer breaks that for everyone who has not installed it, and
+nothing in `npm test` notices on its own, because this repo always has them installed.
+That shipped twice in one release cycle (#39): first `firebase-functions`, then
+`firebase-admin/storage`, which a check for the first did not cover.
+
+So a peer is loaded lazily, in a **named loader at the top of the file** with a comment
+saying why — `loadFirebaseWrite`, `loadFirebaseHttps`, `loadFirebaseAdminStorage` — and
+its types come from an `import type` line, which erases. `require` inside the loader, not
+`await import`: the call sites are synchronous, and this CommonJS build compiles a
+dynamic import to `require` anyway.
+
+Where a peer is missing, say what that costs, once — never fail silently. The Storage
+chain in `sourceMapCache.ts` is the worked example.
+
+`tests/loadsWithoutOptionalPeers.ts` checks every `src/` file for a top-level value
+import of any peer. `npm run smoke:install` does it for real against the packed tarball.
+
 ## Releasing
 
 A library → **npm only** (no registry, no `server.json`, no tag-triggered publish workflow).
