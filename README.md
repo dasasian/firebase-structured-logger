@@ -15,7 +15,10 @@
 
 Your web app crashed at `app-4f2a.js:1:98432`. This tells you it was `Checkout.tsx:42` — in your own Google Cloud project, next to your backend logs. Nothing leaves.
 
-Ships a client logger, a Cloud Functions logger, and the `fsl` CLI.
+Ships a browser logger, a server logger, and the `fsl` CLI. Built for Firebase, but
+Firebase is optional: the browser half has no Firebase dependency, and the server half
+runs on Cloud Functions, Cloud Run, or any Node server. What it needs is a Google Cloud
+project — that is where the logs live.
 
 ## One query, both halves
 
@@ -62,9 +65,12 @@ npm install @dasasian/firebase-structured-logger
 
 # Cloud Functions
 cd functions && npm install @dasasian/firebase-structured-logger
+
+# Cloud Run, or any Node server
+npm install @dasasian/firebase-structured-logger
 ```
 
-Ships ESM with three entry points — `/client`, `/functions`, `/tools` — plus the `fsl` CLI. `firebase`, `firebase-admin`, and `firebase-functions` are optional peer dependencies (bring your own versions).
+Ships ESM with three entry points — `/client`, `/functions`, `/tools` — plus the `fsl` CLI. `firebase`, `firebase-admin`, and `firebase-functions` are optional peer dependencies (bring your own versions). None of them is needed to load the package; each only switches on the part that uses it — see [Without Firebase](#without-firebase).
 
 ## Setup
 
@@ -269,6 +275,22 @@ initLogger({
 })
 ```
 
+#### Without Firebase
+
+Nothing here needs a Firebase project — only a Google Cloud one. What changes:
+
+- **The browser** needs no `firebase` package. `logFunction` is the `fetch` above; send
+  whatever credential your app already uses.
+- **`authorize`** checks your own session instead of a Firebase ID token — for example
+  `authorize: (req) => sessions.isValid(req.headers.cookie)`.
+- **Storage** has no Firebase default bucket to fall back to. Name one with `bucketName`
+  (it holds source maps and attachments), and give the service's account access to it.
+  Or name none: embedded maps still resolve the current release, older releases stay
+  minified, and attachments are dropped — the log says so once.
+- **`fsl upload-sourcemaps --bucket`** works with any Cloud Storage bucket.
+- **`withLogging` and `createClientLogFunction`** are Cloud Functions tools. Outside
+  them, `logInfo` / `logError` and friends still write the same entries.
+
 #### `authorize` is required, and that is deliberate
 
 A callable gets Firebase's token check for free. An HTTP endpoint gets nothing, and an
@@ -296,9 +318,11 @@ A gate that throws counts as a rejection, not an opening.
 - **No `firebase-functions`? Not needed.** The entry point loads without it. Each entry is
   written as one line of JSON, which Cloud Run's log agent parses into the same Cloud
   Logging fields a function's would.
-- **Trace correlation works**, and needs nothing from you. The handler reads
-  `X-Cloud-Trace-Context` or `traceparent` off the request, so a request's entries still
-  group in Cloud Logging.
+- **Trace correlation works**, and needs nothing from you on Cloud Run. The handler reads
+  `X-Cloud-Trace-Context` or `traceparent` off the request, and asks the metadata server
+  for the project id once, so a request's entries group with Cloud Run's own request log
+  in Cloud Logging. Somewhere else — GKE, a VM — set `GOOGLE_CLOUD_PROJECT`; without it
+  the trace id is still written, but does not join the platform's request log.
 - **No `firebase-admin`? Also optional.** Storage is only needed for older releases'
   source maps and for attachments. With `firebase-admin` installed, its Storage and
   default bucket are used. Without it, name the bucket — `bucketName` on the handler, or
