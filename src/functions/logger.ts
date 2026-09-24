@@ -1,13 +1,68 @@
 import * as fs from "fs";
 import * as path from "path";
-import { write as ffWrite } from "firebase-functions/logger";
 import { ulid } from "ulid";
+import type { write as FirebaseWrite } from "firebase-functions/logger";
 import type { LogSeverity, LogPayload } from "../shared/types";
 import { SEVERITY_ORDER, SEVERITIES, isLogSeverity, isFeedback } from "../shared/severity";
 import { toError, toErrorPayload } from "../shared/error";
 import { getAttachmentBucket, getAttachmentPrefix } from "./sourceMapCache";
 import { attachmentPath } from "../shared/paths.js";
 import { traceResourceName } from "./traceContext";
+
+type EntryWriter = typeof FirebaseWrite;
+
+/**
+ * OPTIONAL PEER — firebase-functions is loaded lazily, on purpose.
+ *
+ * On Cloud Functions it is always installed, and its `write()` is the only way to
+ * attach the trace id of the current invocation: every v2 trigger (HTTP, callable,
+ * Firestore, Pub/Sub, scheduler…) reads it from the incoming request and keeps it in
+ * a store the package does not export. So where it exists, we use it.
+ *
+ * On Cloud Run, or any Node server behind `createHttpLogHandler`, it is not installed,
+ * and a top-level import made this whole entry point fail on `require` there (#39).
+ * Without it, `writeJsonLine` does the same job and traceContext supplies the trace.
+ *
+ * `require` rather than `await import`: `writeLog` is synchronous, and in this
+ * CommonJS build a dynamic import compiles to `require` anyway.
+ */
+function loadFirebaseWrite(): EntryWriter | null {
+  try {
+    return (require("firebase-functions/logger") as { write: EntryWriter }).write;
+  } catch {
+    return null;
+  }
+}
+
+let entryWriter: EntryWriter | undefined;
+
+function writeEntry(entry: Parameters<EntryWriter>[0]): void {
+  entryWriter ??= loadFirebaseWrite() ?? writeJsonLine;
+  entryWriter(entry);
+}
+
+/**
+ * What firebase-functions' `write()` does, minus the trace id: one JSON line, WARNING
+ * and above to stderr and the rest to stdout (its console mapping), and a
+ * self-referencing object written as "[Circular]" rather than throwing. Cloud Run's log
+ * agent promotes `severity`, `message` and the `logging.googleapis.com/*` keys exactly
+ * as Cloud Functions does.
+ *
+ * Writes to the streams, not `console`: firebase-functions' compat module patches
+ * `console`, and a patched `console.error` would wrap this line a second time.
+ */
+export function writeJsonLine(entry: Parameters<EntryWriter>[0]): void {
+  const seen = new WeakSet<object>();
+  const line = JSON.stringify(entry, (_key, value: unknown) => {
+    if (typeof value !== "object" || value === null) return value;
+    if (seen.has(value)) return "[Circular]";
+    seen.add(value);
+    return value;
+  });
+  const toStderr =
+    isLogSeverity(entry.severity) && SEVERITY_ORDER[entry.severity] <= SEVERITY_ORDER.WARNING;
+  (toStderr ? process.stderr : process.stdout).write(line + "\n");
+}
 
 const IS_EMULATOR = process.env.FUNCTIONS_EMULATOR === "true";
 export const LOG_FILENAME = "dev.jsonl";
@@ -143,7 +198,7 @@ export function writeLog(
 ): void {
   // An unrecognised severity is not merely mislabelled — it is fatal. Both
   // dispatches look the value up in a fixed table: CONSOLE_FN below, and
-  // firebase-functions' own CONSOLE_SEVERITY inside ffWrite. A miss resolves to
+  // firebase-functions' own CONSOLE_SEVERITY inside its write(). A miss resolves to
   // undefined and calling it throws, which Logger.send()'s catch then swallows,
   // so the entry disappears with no useful diagnostic — and only in production,
   // since the emulator takes the other branch.
@@ -222,11 +277,12 @@ export function writeLog(
     return;
   }
 
-  // Production: use firebase-functions/logger write() directly, bypassing entryFromArgs.
-  // This avoids server-side stack injection and jsonPayload nesting, while preserving
-  // automatic trace context injection for request correlation in Cloud Logging.
+  // Production: firebase-functions' write() where it is installed, writeJsonLine
+  // where it is not (see loadFirebaseWrite) — bypassing entryFromArgs. This avoids server-side stack injection and
+  // jsonPayload nesting, while preserving automatic trace context injection for
+  // request correlation in Cloud Logging.
   //
-  // Labels MUST be emitted under "logging.googleapis.com/labels". ffWrite does no
+  // Labels MUST be emitted under "logging.googleapis.com/labels". write() does no
   // mapping — it JSON-stringifies the object straight to stdout — and Cloud Logging
   // only promotes specifically-named fields to the LogEntry. A plain `labels` key is
   // not one of them, so it lands in jsonPayload.labels and `labels.appId="..."`
@@ -276,14 +332,14 @@ export function writeLog(
       })()
     : payload.jsonPayload;
 
-  // Set the trace ourselves when we have one. ffWrite attaches this from
+  // Set the trace ourselves when we have one. write() attaches this from
   // firebase-functions' own store, which is only populated inside their request
   // wrapper — empty on Cloud Run and anything behind createHttpLogHandler. When
   // theirs IS populated it overwrites this, which is the right precedence: inside
   // Cloud Functions their value is authoritative.
   const trace = traceResourceName();
 
-  ffWrite({
+  writeEntry({
     severity,
     message: payload.message,
     "logging.googleapis.com/labels": labels,

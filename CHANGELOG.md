@@ -9,10 +9,12 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`/functions` could not be loaded without `firebase-functions` installed**, which made `createHttpLogHandler` (0.7.0) unusable on the backend it was written for. `logger.ts` imported `firebase-functions/logger` at module load and `logHandler.ts` imported `onCall` the same way, so a Cloud Run service without it failed on `require` before reaching the HTTP handler. Both are optional peers now, loaded lazily. Where `firebase-functions` is installed nothing changes — its `write()` still attaches each trigger's trace id. Where it is not, entries are written as one JSON line each (WARNING and above to stderr, like `write()`), and the trace comes from the request headers. Reported and fixed by [Vivek Rao](https://github.com/vivekvrao) in #39.
 - **The client's production floor was never applied in a browser.** `defaultMinLevel` guarded on `typeof process`, which is undefined in every browser even though bundlers fold `process.env.NODE_ENV` to a literal — so the folded branch was unreachable and every browser build defaulted to `DEBUG` in production. Seen in a real Vite bundle as `typeof process<"u"?"WARNING":"DEBUG"`. The guard is gone; a runtime with neither the fold nor `process` throws on the read and is caught.
 
 ### Documentation
 
+- A Hono adapter next to the Express one. `createHttpLogHandler` takes Node's request and response shapes, and Hono wraps them.
 - Volume controls: a Vite `define: { 'process.env': {} }` makes the client's production floor `DEBUG`. Pass `minLogLevel`.
 
 ## [0.7.0] — 2026-09-01

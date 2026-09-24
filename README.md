@@ -218,6 +218,37 @@ app.post('/log', createHttpLogHandler({
 }))
 ```
 
+The handler reads Node's request and response shapes. A framework that wraps them, like
+Hono, needs a few lines of adapter:
+
+```ts
+import { Hono } from 'hono'
+import { createHttpLogHandler } from '@dasasian/firebase-structured-logger/functions'
+
+const app = new Hono()
+const logHandler = createHttpLogHandler({ authorize })
+
+app.on(['POST', 'OPTIONS'], '/log', async (c) => {
+  const headers: Record<string, string> = {}
+  let status = 200
+  let body: string | undefined
+  await logHandler(
+    {
+      method: c.req.method,
+      headers: Object.fromEntries(c.req.raw.headers),
+      body: await c.req.json().catch(() => null),
+    },
+    {
+      get statusCode() { return status },
+      set statusCode(v: number) { status = v },
+      setHeader: (name, value) => { headers[name] = value },
+      end: (b) => { body = b },
+    },
+  )
+  return new Response(body ?? null, { status, headers })
+})
+```
+
 **Point the client at it.** `logFunction` is any async function, so a `fetch` works:
 
 ```ts
@@ -262,6 +293,9 @@ A gate that throws counts as a rejection, not an opening.
   before the handler. Raise its limit if you send attachments.
 - **CORS** defaults to `*`, matching `cors: true` on the callable. Pass `allowOrigin` to
   name your origin — a browser cannot send cookies to a wildcard.
+- **No `firebase-functions`? Not needed.** The entry point loads without it. Each entry is
+  written as one line of JSON, which Cloud Run's log agent parses into the same Cloud
+  Logging fields a function's would.
 - **Trace correlation works**, and needs nothing from you. The handler reads
   `X-Cloud-Trace-Context` or `traceparent` off the request, so a request's entries still
   group in Cloud Logging.
