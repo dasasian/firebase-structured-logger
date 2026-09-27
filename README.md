@@ -645,13 +645,13 @@ the entry is still shortened; the original is lost, and the process warns once, 
 
 ## Volume controls
 
-Three separate gates decide whether a log is written. All have defaults, and the defaults
-drop things — so this is worth reading before you conclude something is broken.
+Several gates decide whether a log is written. All have defaults, and the defaults
+hold things back — so this is worth reading before you conclude something is broken.
 
 | Gate | Default | Where |
 |---|---|---|
-| Session limit | **50 logs**, then the client stops sending | client, per browser session |
-| Duplicate limit | **3 copies** of the same error, then it stops | client, per browser session |
+| Log budget | **50 logs**, refilling **1 per minute**; the last **20%** for errors only | client, per browser tab |
+| Duplicates | **3** full copies of the same error, then counted and sent as a summary | client, per browser tab |
 | Client severity floor | `WARNING` in production, `DEBUG` in dev | client, `minLogLevel` |
 | Server severity floor | `WARNING` in production, `DEBUG` in the emulator | function, `minSeverity` |
 | Function concurrency | `maxInstances: 1` on `createClientLogFunction` | function |
@@ -662,13 +662,57 @@ initLogger({
   releaseId,
   logFunction,
   minLogLevel: 'INFO',
-  rateLimitOptions: { sessionLimit: 200, duplicateLimit: 5 },
+  rateLimitOptions: {
+    sessionLimit: 50,        // the budget: how many logs can go at once
+    refillPerMinute: 1,      // how fast it comes back
+    errorReserve: 0.2,       // share of the budget only ERROR and above may spend
+    duplicateLimit: 3,       // full copies of one error before counting starts
+    summaryIntervalMinutes: 60,
+    summaryMaxAgeDays: 7,    // how long an unsent summary waits on the device
+    maxPendingSummaries: 50,
+  },
 })
 ```
 
-Two errors count as duplicates when the **message and the screen both match**, so the same
-error on two different screens is not collapsed into one. The budget lives in
-`sessionStorage` and resets with the session.
+### The budget refills
+
+Each browser tab starts with 50 logs. Every log spends one, and one comes back each minute,
+up to 50. A reload does not reset it — the tab keeps its budget in `sessionStorage`.
+
+So a burst at start-up is fine, and a user who works in the app all afternoon is never
+silenced for long. A bug that logs in a loop is still held to about 60 entries an hour per
+user: 1,000 users stuck in such a loop for a working month stays around the 50 GiB of
+Cloud Logging that each project gets free.
+
+The last 20% of the budget is reserved: warnings can spend it down to 10, and only
+`ERROR` and above can spend the rest. A noisy warning cannot use up the room a crash needs.
+
+### Repeats are counted, not dropped
+
+Two errors are the same when the **message and the screen both match**, so the same error
+on two different screens is kept apart. The first 3 are sent in full, with their stack and
+breadcrumbs. After that the browser only counts them, and sends one summary:
+
+```
+WARNING  Repeated 197 more times: cart sync failed
+         labels.repeatOf="<logId of the first>"  labels.repeatCount="197"
+         labels.firstSeen="…"  labels.lastSeen="…"
+```
+
+A summary is sent once an hour, and when the tab is hidden. It is keyed by the error, the
+`releaseId` and the `userId`, so two releases or two people on one computer are never
+counted together. It carries the labels from when the errors happened, and its entry is
+timestamped at `lastSeen`, not at the time it was sent.
+
+Unsent summaries are kept in `localStorage`, so closing the tab does not lose them: the
+next visit sends them, marked `labels.sentLate="true"`. At most 50 wait, and any older than
+7 days are deleted rather than sent — they are error messages, and may hold personal data.
+
+A summary is a `WARNING` with no stack, so Cloud Error Reporting sees the 3 full copies and
+not the summary. For the true count, add up `labels.repeatCount` in Cloud Logging.
+
+Summaries do not spend the log budget. There is at most one per error, per release, per user,
+per hour.
 
 The client's production default comes from `process.env.NODE_ENV`, which Vite replaces at
 build time. A `define: { 'process.env': {} }` in `vite.config` — common, to quiet a library
@@ -682,8 +726,9 @@ here whose failure mode is a bill rather than a missing log.
 The two rate limits say so in the browser console:
 
 ```
-[fsl] Duplicate suppressed: TypeError: cannot read 'id'|checkout
-[fsl] Session log limit reached
+[fsl] Duplicate counted for the next summary: TypeError: cannot read 'id'|checkout
+[fsl] Log budget empty — next log in about a minute
+[fsl] Log budget: only errors can use the reserve now
 ```
 
 **The severity floors are silent.** Both of them — the client's `minLogLevel` and the
@@ -853,6 +898,9 @@ Some of what is already handled here, all of it learned the expensive way:
   disagree over a typo.
 - **Checking a rate limit and spending it as two calls double-counts**, quietly making a
   configured budget of 50 a budget of 25.
+- **A fixed budget goes silent in a long session.** 50 logs per page load is spent by
+  mid-morning in an app someone keeps open all day, and the crash at lunch is never sent.
+  A budget that refills, with a share kept for errors, does not have that shape.
 - **An old stack naming a bundle that still exists** resolves against the current release's
   map, giving line numbers that are confidently wrong — worse than none, because nothing
   signals it.

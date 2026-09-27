@@ -125,6 +125,13 @@ What is legitimately module-scoped here, and why:
 | source-map and TraceMap caches | pure caches, keyed by content |
 | `AsyncLocalStorage` in `requestLogger` | per-request by design, not global |
 
+**Repeat summaries live in `localStorage`, and that is shared across tabs.** The budget
+and duplicate counts are per tab (`sessionStorage`), but a pending summary has to survive
+the tab closing, so it goes where every tab of the origin can see it. Each summary has its
+own id, is keyed by signature + `releaseId` + `userId`, and is removed by the tab that
+sends it; a rare double-send is visible by that id. Anything added there needs the same
+treatment: an id, an owner, a size cap and an expiry.
+
 **The client logger is a session singleton.** `Logger` is exported as a *type
 only* — annotate with `Logger<AppLabels>`, construct via `initLogger()`. A
 second instance would silently share breadcrumbs, screen, activity and the
