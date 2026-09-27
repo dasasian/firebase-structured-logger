@@ -43,12 +43,12 @@ function testConfigureRateLimiterTwice() {
   configureRateLimiter({ sessionLimit: 3 })          // only sessionLimit
 
   // Documented semantics: MERGE, last value wins per field.
-  for (let i = 0; i < 3; i++) allow()
-  assert('the newer sessionLimit is in force', !allow().allowed)
+  for (let i = 0; i < 3; i++) allow({ severity: 'INFO' })
+  assert('the newer sessionLimit is in force', !allow({ severity: 'INFO' }).allowed)
 
   resetRateLimiter()
-  for (let i = 0; i < 2; i++) allow()
-  assert('the untouched duplicateLimit survived the merge', allow().allowed)
+  for (let i = 0; i < 2; i++) allow({ severity: 'INFO' })
+  assert('the untouched duplicateLimit survived the merge', allow({ severity: 'INFO' }).allowed)
 
   // This is process-wide by design: one browser session, one budget. It is not
   // per-Logger, which is why Logger is not exported as a constructible class.

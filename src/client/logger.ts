@@ -13,7 +13,10 @@ import {
   allow,
   signatureFor,
   configureRateLimiter,
+  flushDueSummaries,
+  takePendingSummaries,
   type RateLimitConfig,
+  type SentSummary,
 } from './rateLimiter'
 
 export type { RateLimitConfig }
@@ -233,34 +236,54 @@ export class Logger<
     // exemption keys on the record being feedback, not on its severity, so a
     // NOTICE emitted for anything else still behaves normally.
     bypassVolumeControls = false,
+    // A repeat summary spends no budget and is never itself a duplicate — but
+    // it still respects the severity floor, unlike feedback above.
+    skipBudget = false,
+    timestamp?: string,
   ): Promise<void> {
     if (!bypassVolumeControls && SEVERITY_ORDER[severity] > this.minLevel) return
+
+    const allLabels: LogPayload['labels'] = {
+      appId: this.config.appId,
+      releaseId: this.config.releaseId,
+      screen: getCurrentScreen(),
+      userId: this.userId,
+      platform: PLATFORM,
+      browser: BROWSER,
+      ...this.userLabels,
+      ...labels,
+    }
 
     // One gate for every severity. Passing a signature opts this log into
     // duplicate suppression; the check and the budget spend are one operation,
     // so a log can neither be counted twice nor checked without being counted.
-    const decision = bypassVolumeControls ? ({ allowed: true } as const) : allow(signature)
+    // Once a signature passes `duplicateLimit`, further occurrences are
+    // "counted", not refused outright — the rate limiter keeps a running
+    // count toward the next repeat summary.
+    const decision =
+      bypassVolumeControls || skipBudget
+        ? ({ allowed: true } as const)
+        : allow({ severity, signature, message, labels: allLabels })
     if (!decision.allowed) {
       if (decision.reason === 'duplicate') {
-        console.warn(`[fsl] Duplicate suppressed: ${decision.signature}`)
+        console.warn(`[fsl] Duplicate counted for the next summary: ${decision.signature}`)
+      } else if (decision.reason === 'reserve') {
+        console.warn('[fsl] Log budget: only errors can use the reserve now')
       } else {
-        console.warn('[fsl] Session log limit reached')
+        console.warn('[fsl] Log budget empty — next log in about a minute')
       }
       return
     }
 
-    try {
-      const allLabels: LogPayload['labels'] = {
-        appId: this.config.appId,
-        releaseId: this.config.releaseId,
-        screen: getCurrentScreen(),
-        userId: this.userId,
-        platform: PLATFORM,
-        browser: BROWSER,
-        ...this.userLabels,
-        ...labels,
-      }
+    // Ties this full copy to the summary its repeats will eventually become.
+    // The client has no server logId to put in the summary's `repeatOf` — see
+    // README, "Repeats are counted, not dropped" — so this client-side id is
+    // the join key instead, carried by every full copy of the signature.
+    if ('repeatKey' in decision && decision.repeatKey) {
+      allLabels.repeatKey = decision.repeatKey
+    }
 
+    try {
       // Each attachment is converted in its own try. A Blob or File can fail to
       // read — a user picks a file from <input type="file">, moves or deletes it,
       // then submits, and the browser raises NotReadableError. Previously one
@@ -301,12 +324,50 @@ export class Logger<
           error,
         },
         ...(base64Attachments ? { attachments: base64Attachments } : {}),
+        ...(timestamp ? { timestamp } : {}),
       }
 
       await this.config.logFunction(payload)
     } catch (err) {
       console.error('[fsl] Failed to send log:', err instanceof Error ? err.message : err)
     }
+  }
+
+  /** Claim and send whatever repeat summaries are due, from this visit or an earlier one. */
+  sendPendingSummaries(): void {
+    for (const summary of takePendingSummaries()) {
+      void this.sendRepeatSummary(summary)
+    }
+  }
+
+  /**
+   * A repeat summary: a WARNING with no stack, timestamped at `lastSeen` (see
+   * README, "Repeats are counted, not dropped"). It still respects the
+   * severity floor — only the budget and the duplicate gate are skipped, via
+   * `send`'s `skipBudget`.
+   */
+  private async sendRepeatSummary(summary: SentSummary): Promise<void> {
+    const labels: Record<string, string | undefined> = {
+      ...summary.labels,
+      repeatOf: summary.repeatOf,
+      repeatCount: String(summary.repeatCount),
+      firstSeen: summary.firstSeen,
+      lastSeen: summary.lastSeen,
+      ...(summary.sentLate ? { sentLate: 'true' } : {}),
+    }
+
+    await this.send(
+      `Repeated ${summary.repeatCount} more times: ${summary.message}`,
+      'WARNING',
+      labels,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      true,
+      summary.lastSeen,
+    )
   }
 }
 
@@ -359,4 +420,29 @@ export function getClientLogger<
 >(): Logger<AppLabels> {
   if (!instance) throw new Error('[fsl] initLogger() not called')
   return instance as Logger<AppLabels>
+}
+
+/**
+ * Repeat summaries are sent hourly and when the tab is hidden (README,
+ * "Repeats are counted, not dropped") — neither of which an app necessarily
+ * triggers by logging. `send` already checks opportunistically on every log,
+ * which covers an active app; these two make it work for an idle one too.
+ *
+ * Neither exists in the esbuild bundle test's sandbox (no `window`/`document`
+ * there — see tests/browserBundle.ts), so both are guarded.
+ */
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'hidden') return
+    flushDueSummaries(true)
+    instance?.sendPendingSummaries()
+  })
+}
+
+if (typeof window !== 'undefined') {
+  const interval = setInterval(() => {
+    flushDueSummaries()
+    instance?.sendPendingSummaries()
+  }, 60_000)
+  ;(interval as unknown as { unref?: () => void }).unref?.()
 }

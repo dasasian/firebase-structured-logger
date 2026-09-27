@@ -3,21 +3,25 @@
  * Run: npx tsx test-logger.ts
  */
 
-import { sessionStorageStub } from './browserStubs.js'
+import { sessionStorageStub, localStorageStub, withFrozenTime, setVisibility } from './browserStubs.js'
 import { initLogger } from '../src/client/logger.js'
 import { configureRateLimiter, resetRateLimiter } from '../src/client/rateLimiter.js'
 import type { LogPayload } from '../src/shared/types.js'
 import type { Logger } from '../src/client/logger.js'
 import { assert, reportResults } from './testHelpers.js'
 
-function makeLogger(): { logger: Logger; lastPayload: () => LogPayload | undefined } {
-  let captured: LogPayload | undefined
+function makeLogger(): {
+  logger: Logger
+  lastPayload: () => LogPayload | undefined
+  allPayloads: () => LogPayload[]
+} {
+  const captured: LogPayload[] = []
   const logger = initLogger({
     appId: 'test-app',
     releaseId: 'test-release',
-    logFunction: async (data) => { captured = data },
+    logFunction: async (data) => { captured.push(data) },
   })
-  return { logger, lastPayload: () => captured }
+  return { logger, lastPayload: () => captured[captured.length - 1], allPayloads: () => captured }
 }
 
 // --- Tests ---
@@ -105,10 +109,11 @@ async function testInfoHasNoError() {
 
 async function testEverySeverityCostsOneUnitOfBudget() {
   console.log('\nTest: every severity costs exactly one unit of session budget')
-  const budget = () => JSON.parse(sessionStorageStub.peek('fsl_ratelimit') ?? '{"logCount":0}').logCount
+  const spent = (sessionLimit = 50) =>
+    sessionLimit - JSON.parse(sessionStorageStub.peek('fsl_ratelimit') ?? `{"available":${sessionLimit}}`).available
 
   for (const severity of ['info', 'warning', 'debug', 'error'] as const) {
-    configureRateLimiter({ sessionLimit: 50, duplicateLimit: 99, storageKey: 'fsl_ratelimit' })
+    configureRateLimiter({ sessionLimit: 50, duplicateLimit: 99, storageKey: 'fsl_ratelimit', errorReserve: 0.2 })
     resetRateLimiter()
     const { logger } = makeLogger()
     if (severity === 'error') logger.error(new Error('boom'))
@@ -117,8 +122,124 @@ async function testEverySeverityCostsOneUnitOfBudget() {
 
     // error() used to spend two: recordError() incremented, then recordLog()
     // incremented again inside send(). A limit of 50 was really 25 for errors.
-    assert(`${severity}() spends exactly 1`, budget() === 1, `spent ${budget()}`)
+    assert(`${severity}() spends exactly 1`, spent() === 1, `spent ${spent()}`)
   }
+}
+
+async function testReserveIsHonouredBySeverity() {
+  console.log('\nTest: the reserve case — a WARNING is refused once only the reserve is left, an ERROR still sends')
+  configureRateLimiter({ sessionLimit: 10, duplicateLimit: 99, storageKey: 'fsl_ratelimit', errorReserve: 0.2 })
+  resetRateLimiter()
+  const { logger, allPayloads } = makeLogger()
+
+  // Frozen throughout: real elapsed time between calls would refill a sliver
+  // of budget (refillPerMinute applies continuously), which is enough to tip
+  // `available` back over the reserve threshold at this exact boundary.
+  const now = 1_700_000_000_000
+  withFrozenTime(now, () => {
+    for (let i = 0; i < 8; i++) logger.info(`fill ${i}`)
+    logger.warning('at the edge of the reserve')
+    logger.error(new Error('still goes through'))
+  })
+  await new Promise((r) => setTimeout(r, 10))
+
+  assert('8 non-reserved units spent, the WARNING refused, the ERROR sent', allPayloads().length === 9, `got ${allPayloads().length}`)
+  assert('the reserve-refused entry is missing, not a WARNING', !allPayloads().some((p) => p.message === 'at the edge of the reserve'))
+  assert('the error still went through', allPayloads()[8]?.severity === 'ERROR')
+}
+
+/**
+ * "Done when": 200 copies of one error send 3 full entries and one summary
+ * with repeatCount 197, the right repeatOf, firstSeen and lastSeen — driven
+ * through the real Logger, not the rate limiter directly.
+ */
+async function testTwoHundredErrorsThroughTheLoggerSendThreeCopiesAndASummary() {
+  console.log('\nTest: 200 logger.error() calls of the same error send 3 full copies and one summary')
+  configureRateLimiter({
+    sessionLimit: 1000,
+    duplicateLimit: 3,
+    storageKey: 'fsl_ratelimit',
+    summaryIntervalMinutes: 60,
+  })
+  resetRateLimiter()
+  localStorageStub.setItem('fsl_pending_summaries', '[]')
+  const { logger, allPayloads } = makeLogger()
+
+  const t0 = 1_700_000_000_000
+  for (let i = 0; i < 200; i++) {
+    withFrozenTime(t0 + i * 1000, () => {
+      logger.error(new Error('cart sync failed'), undefined, undefined, undefined)
+    })
+  }
+  // send() is async (attachment handling awaits even with none); let every
+  // microtask queued so far settle before reading what was sent.
+  await new Promise((r) => setTimeout(r, 10))
+
+  const fullCopies = allPayloads().filter((p) => p.jsonPayload?.error?.message === 'cart sync failed')
+  assert('exactly 3 full copies were sent', fullCopies.length === 3, `got ${fullCopies.length}`)
+  assert('each full copy carries a repeatKey label', fullCopies.every((p) => typeof p.labels.repeatKey === 'string'))
+  const repeatKey = fullCopies[0]?.labels.repeatKey
+  assert('all three share the same repeatKey', fullCopies.every((p) => p.labels.repeatKey === repeatKey))
+
+  // Nothing is due before the hour is up.
+  assert('no summary yet, still within the hour', allPayloads().length === 3, `got ${allPayloads().length}`)
+
+  // Force it due, the way a hidden tab would.
+  withFrozenTime(t0 + 200_000 + 61 * 60_000, () => {
+    setVisibility('hidden')
+  })
+  await new Promise((r) => setTimeout(r, 10))
+  setVisibility('visible')
+
+  const summaries = allPayloads().filter((p) => p.labels.repeatOf !== undefined)
+  assert('exactly one summary was sent', summaries.length === 1, `got ${summaries.length}`)
+  const summary = summaries[0]!
+  assert('repeatCount is 197', summary.labels.repeatCount === '197', `got: ${summary.labels.repeatCount}`)
+  assert('repeatOf matches the full copies’ repeatKey', summary.labels.repeatOf === repeatKey)
+  assert('it is a WARNING', summary.severity === 'WARNING')
+  assert('it carries no stack', summary.jsonPayload?.error === undefined)
+  assert('firstSeen and lastSeen are present', typeof summary.labels.firstSeen === 'string' && typeof summary.labels.lastSeen === 'string')
+  assert('the message names the repeat count', summary.message.includes('197') && summary.message.includes('cart sync failed'))
+}
+
+async function testDroppedLogConsoleMessages() {
+  console.log('\nTest: the three console messages a dropped log produces')
+  // sessionLimit 3, reserve 1/3 -> the last 1 unit is ERROR-only.
+  configureRateLimiter({ sessionLimit: 3, duplicateLimit: 1, storageKey: 'fsl_ratelimit', errorReserve: 1 / 3 })
+  resetRateLimiter()
+  const { logger } = makeLogger()
+
+  const warnings: string[] = []
+  const realWarn = console.warn
+  console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(' ')) }
+  try {
+    logger.info('fill 1')                       // available 3 -> 2
+    logger.warning('fill 2')                     // available 2 -> 1 (now at the reserve line)
+    logger.warning('refused at the reserve')     // reserve message; available stays 1
+    const sig = new Error('cannot read id')
+    logger.error(sig, { screen: 'checkout' } as never) // full copy, spends the reserve -> 0
+    logger.error(sig, { screen: 'checkout' } as never) // duplicate message
+    logger.info('refused, budget empty')         // session-limit message
+    await new Promise((r) => setTimeout(r, 10))
+  } finally {
+    console.warn = realWarn
+  }
+
+  assert(
+    'the reserve message appears',
+    warnings.some((w) => w.includes('Log budget: only errors can use the reserve now')),
+    JSON.stringify(warnings),
+  )
+  assert(
+    'the duplicate-counted message appears',
+    warnings.some((w) => w.includes('Duplicate counted for the next summary')),
+    JSON.stringify(warnings),
+  )
+  assert(
+    'the budget-empty message appears',
+    warnings.some((w) => w.includes('Log budget empty')),
+    JSON.stringify(warnings),
+  )
 }
 
 /**
@@ -162,6 +283,9 @@ async function run() {
   await testNonErrorInput()
   await testInfoHasNoError()
   await testEverySeverityCostsOneUnitOfBudget()
+  await testReserveIsHonouredBySeverity()
+  await testTwoHundredErrorsThroughTheLoggerSendThreeCopiesAndASummary()
+  await testDroppedLogConsoleMessages()
   await testDefaultFloorFollowsNodeEnv()
 
   reportResults()

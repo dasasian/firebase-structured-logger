@@ -202,6 +202,66 @@ function testMinSeverityFloorAppliesInProductionToo() {
 }
 
 
+// --- A repeat summary's client-supplied timestamp (#40) ---
+
+function testSummaryTimestampIsUsed() {
+  console.log("\nTest: a summary's timestamp is honoured")
+  initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
+
+  const lastSeen = new Date(Date.now() - 60_000).toISOString()
+  const [entry] = captureEntries(() =>
+    writeLog({
+      message: 'Repeated 5 more times: boom',
+      severity: 'WARNING',
+      labels: { appId: 'acme', repeatCount: '5' } as never,
+      timestamp: lastSeen,
+    }),
+  )
+  assert('the entry carries the summary timestamp', entry?.timestamp === lastSeen, String(entry?.timestamp))
+}
+
+function testNonSummaryTimestampIsIgnored() {
+  console.log('\nTest: a timestamp on a non-summary entry is ignored')
+  initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
+
+  const [entry] = captureEntries(() =>
+    writeLog({
+      message: 'ordinary',
+      severity: 'INFO',
+      labels: { appId: 'acme' } as never,
+      timestamp: new Date().toISOString(),
+    }),
+  )
+  assert('no timestamp key without repeatCount', !('timestamp' in (entry ?? {})), JSON.stringify(entry))
+}
+
+function testOutOfRangeSummaryTimestampIsIgnored() {
+  console.log('\nTest: an out-of-range summary timestamp is ignored')
+  initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
+
+  const tooOld = new Date(Date.now() - 9 * 24 * 60 * 60 * 1000).toISOString()
+  const [old] = captureEntries(() =>
+    writeLog({
+      message: 'Repeated 5 more times: boom',
+      severity: 'WARNING',
+      labels: { appId: 'acme', repeatCount: '5' } as never,
+      timestamp: tooOld,
+    }),
+  )
+  assert('a timestamp older than 8 days is ignored', !('timestamp' in (old ?? {})), JSON.stringify(old))
+
+  const tooFuture = new Date(Date.now() + 6 * 60 * 1000).toISOString()
+  const [future] = captureEntries(() =>
+    writeLog({
+      message: 'Repeated 5 more times: boom',
+      severity: 'WARNING',
+      labels: { appId: 'acme', repeatCount: '5' } as never,
+      timestamp: tooFuture,
+    }),
+  )
+  assert('a timestamp more than 5 minutes in the future is ignored', !('timestamp' in (future ?? {})), JSON.stringify(future))
+}
+
 // --- Unknown severity (#28) ---
 
 function testUnknownSeverityDoesNotCrash() {
@@ -701,6 +761,9 @@ async function run() {
   testAttachmentsAreStrippedButFlagged()
   testHasAttachmentsAbsentWhenNoneGiven()
   testMinSeverityFloorAppliesInProductionToo()
+  testSummaryTimestampIsUsed()
+  testNonSummaryTimestampIsIgnored()
+  testOutOfRangeSummaryTimestampIsIgnored()
   testUnknownSeverityDoesNotCrash()
   testUnknownSeverityIsNotSilent()
   testUnknownSeverityBypassedTheFloor()

@@ -29,6 +29,13 @@ export interface LogPayload {
   }
   /** Base64-encoded attachments keyed by name. Uploaded to GCS, stripped before writing to Cloud Logging. */
   attachments?: Record<string, string>
+  /**
+   * Client-supplied ISO timestamp. Only honoured for a repeat summary
+   * (`labels.repeatCount` present), and only within the last 8 days and not
+   * more than 5 minutes in the future — see `writeLog`'s production branch.
+   * Anything else keeps the server's own time.
+   */
+  timestamp?: string
 }
 
 export interface BreadcrumbEntry {

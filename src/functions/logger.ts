@@ -128,6 +128,7 @@ const PROTECTED_ENTRY_KEYS = new Set([
   "serviceContext",
   "error",
   "breadcrumbs",
+  "timestamp",
 ]);
 
 /** Keep only the last 10 breadcrumbs, each with its `data` field removed. */
@@ -516,11 +517,33 @@ export function writeLog(
   // Cloud Functions their value is authoritative.
   const trace = traceField();
 
+  // A repeat summary is timestamped at `lastSeen`, not at the moment it was
+  // sent — see README, "Repeats are counted, not dropped". Anything else
+  // keeps Cloud Logging's own ingestion time: `labels.repeatCount` is the only
+  // signal that this is a summary, so a plain entry that happens to carry a
+  // `timestamp` (an unrelated caller, or a replay) has it ignored rather than
+  // trusted. Bounded to the last 8 days and no more than 5 minutes into the
+  // future, so a malformed or stale value cannot backdate — or postdate — an
+  // entry into or out of a retention window.
+  let summaryTimestamp: string | undefined;
+  if ((labels as Record<string, unknown>).repeatCount !== undefined && payload.timestamp) {
+    const parsed = Date.parse(payload.timestamp);
+    if (!Number.isNaN(parsed)) {
+      const now = Date.now();
+      const eightDaysMs = 8 * 24 * 60 * 60 * 1000;
+      const fiveMinutesMs = 5 * 60 * 1000;
+      if (now - parsed <= eightDaysMs && parsed - now <= fiveMinutesMs) {
+        summaryTimestamp = payload.timestamp;
+      }
+    }
+  }
+
   const finishedEntry: Record<string, unknown> = {
     severity,
     message: payload.message,
     "logging.googleapis.com/labels": labels,
     ...(trace ? { "logging.googleapis.com/trace": trace } : {}),
+    ...(summaryTimestamp ? { timestamp: summaryTimestamp } : {}),
     ...errorReporting,
     ...jsonPayload,
   };

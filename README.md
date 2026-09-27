@@ -695,9 +695,15 @@ breadcrumbs. After that the browser only counts them, and sends one summary:
 
 ```
 WARNING  Repeated 197 more times: cart sync failed
-         labels.repeatOf="<logId of the first>"  labels.repeatCount="197"
+         labels.repeatOf="<repeatKey of the first copy>"  labels.repeatCount="197"
          labels.firstSeen="…"  labels.lastSeen="…"
 ```
+
+The browser never learns the server's `logId` for the first copy — `writeLog` assigns it
+after the log has already left the tab. So each full copy instead carries its own
+`labels.repeatKey`, a client-side id, and the summary's `repeatOf` points at that instead:
+query `labels.repeatKey="…" OR labels.repeatOf="…"` to find a full copy and its summary
+together.
 
 A summary is sent once an hour, and when the tab is hidden. It is keyed by the error, the
 `releaseId` and the `userId`, so two releases or two people on one computer are never

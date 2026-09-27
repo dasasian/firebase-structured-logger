@@ -1,10 +1,10 @@
 /**
  * Real browser globals for the client suites, backed by jsdom.
  *
- * IMPORT THIS FIRST, before any module under test. `rateLimiter` reads `window`
- * at module load to register its `beforeunload` listener, and `client/logger`
- * reads `navigator` at module load to resolve the platform and browser labels —
- * a stub installed later is too late.
+ * IMPORT THIS FIRST, before any module under test. `client/logger` reads
+ * `navigator` at module load to resolve the platform and browser labels, and
+ * registers its `visibilitychange` listener (repeat-summary flushing) against
+ * `document` at load too — a stub installed later is too late for either.
  *
  * This used to hand-roll `sessionStorage`, `window` and `navigator`. That
  * started testing the stub rather than the browser: the fake `error` dispatch
@@ -84,9 +84,19 @@ export function dispatchRejectionEvent(reason: unknown): void {
 
 /** How many listeners the module under test registered for an event type. */
 export function listenerCount(type: string): number {
-  // jsdom does not expose its listener registry, so count via a probe: a
-  // registered `beforeunload` handler is the only thing we assert on today.
+  // jsdom does not expose its listener registry, so count via a probe.
   return registeredTypes.get(type) ?? 0
+}
+
+/**
+ * Simulate the tab being shown or hidden: sets `document.visibilityState`
+ * (a jsdom getter, not a writable property, hence `defineProperty`) and
+ * dispatches the real event `client/logger` listens for to flush and send
+ * any due repeat summaries.
+ */
+export function setVisibility(state: 'visible' | 'hidden'): void {
+  Object.defineProperty(win.document, 'visibilityState', { value: state, configurable: true })
+  win.document.dispatchEvent(new win.Event('visibilitychange'))
 }
 
 const registeredTypes = new Map<string, number>()
@@ -130,6 +140,14 @@ class FailableStorage {
 
 export const sessionStorageStub = new FailableStorage(win.sessionStorage)
 globals.sessionStorage = sessionStorageStub
+
+/**
+ * `localStorage` that throws on demand, same shape as `sessionStorageStub` —
+ * pending repeat summaries live here (README, "Summaries survive the tab
+ * closing"), and that write path needs the same failure-mode coverage.
+ */
+export const localStorageStub = new FailableStorage(win.localStorage)
+globals.localStorage = localStorageStub
 
 /** Run `fn` with `Date.now()` frozen at `now`, then restore the real clock. */
 export function withFrozenTime<T>(now: number, fn: () => T): T {
