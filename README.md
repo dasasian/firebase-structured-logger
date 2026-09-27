@@ -625,6 +625,24 @@ or different IAM from your source maps — none of which can be arranged with a 
 Nothing expires them. Add a lifecycle rule on `logAttachments/` to delete after N days, or
 they accumulate for the life of the project.
 
+## Big entries
+
+Cloud Functions and Cloud Run both cut a stdout/stderr log line at exactly **102,400 bytes**
+(100 KiB) — measured live. Past that the entry does not arrive truncated-but-valid: it arrives
+as broken plain text, with no `severity`, no labels, and nothing for Error Reporting to group.
+
+The backend logger watches for this. An entry over 90 KiB is shortened before it is written —
+breadcrumb data first, then other context, then the tail of a long stack (the top frames are
+what Error Reporting groups on, so those survive longest), then long text fields, and label
+values only as a last resort. `severity`, labels, the trace and `serviceContext` are never
+touched.
+
+The full, unshortened entry is saved to Cloud Storage as `fsl-overflow.json`, at the same
+`logAttachments/{logId}/` path an ordinary attachment would use, whenever a bucket is
+available — see [Attachments](#attachments). A shortened entry carries `labels.truncated="true"`,
+and `labels.hasAttachments="true"` when the full entry was saved. With no Storage configured,
+the entry is still shortened; the original is lost, and the process warns once, not per entry.
+
 ## Volume controls
 
 Three separate gates decide whether a log is written. All have defaults, and the defaults

@@ -7,6 +7,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **An entry over 100 KiB arrived broken, with no severity or labels.** Cloud Functions and Cloud Run both cut a stdout/stderr log line at exactly 102,400 bytes — measured live. `writeLog`'s production branch now measures the finished entry and, past 90 KiB, shortens it (breadcrumb data, then other context, then the tail of a long stack, then long text fields, then oversized label values — `severity`, labels, trace and `serviceContext` are never touched) before writing, saves the full original to Cloud Storage as `fsl-overflow.json` when a bucket is available, and labels the entry `truncated="true"` (issue #21).
+
 ### Documentation
 
 - **The server half has to run on Google Cloud.** 0.8.0's README said "any Node server". Entries go to stdout, which reaches Cloud Logging only on Cloud Functions, Cloud Run, GKE, App Engine, or Compute Engine with the Ops Agent — elsewhere they print and go nowhere.

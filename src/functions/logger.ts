@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { ulid } from "ulid";
 import type { write as FirebaseWrite } from "firebase-functions/logger";
-import type { LogSeverity, LogPayload } from "../shared/types";
+import type { LogSeverity, LogPayload, BreadcrumbEntry } from "../shared/types";
 import { SEVERITY_ORDER, SEVERITIES, isLogSeverity, isFeedback } from "../shared/severity";
 import { toError, toErrorPayload } from "../shared/error";
 import { getAttachmentBucket, getAttachmentPrefix } from "./sourceMapCache";
@@ -43,6 +43,21 @@ function writeEntry(entry: Parameters<EntryWriter>[0]): void {
 }
 
 /**
+ * JSON.stringify with a circular-safe replacer: a self-referencing object is
+ * written as "[Circular]" rather than throwing. Shared by writeJsonLine and the
+ * entry-size budget below — both have to measure/emit the exact same bytes.
+ */
+function safeStringify(value: unknown): string {
+  const seen = new WeakSet<object>();
+  return JSON.stringify(value, (_key, v: unknown) => {
+    if (typeof v !== "object" || v === null) return v;
+    if (seen.has(v)) return "[Circular]";
+    seen.add(v);
+    return v;
+  });
+}
+
+/**
  * What firebase-functions' `write()` does, minus the trace id: one JSON line, WARNING
  * and above to stderr and the rest to stdout (its console mapping), and a
  * self-referencing object written as "[Circular]" rather than throwing. Cloud Run's log
@@ -53,16 +68,167 @@ function writeEntry(entry: Parameters<EntryWriter>[0]): void {
  * `console`, and a patched `console.error` would wrap this line a second time.
  */
 export function writeJsonLine(entry: Parameters<EntryWriter>[0]): void {
-  const seen = new WeakSet<object>();
-  const line = JSON.stringify(entry, (_key, value: unknown) => {
-    if (typeof value !== "object" || value === null) return value;
-    if (seen.has(value)) return "[Circular]";
-    seen.add(value);
-    return value;
-  });
+  const line = safeStringify(entry);
   const toStderr =
     isLogSeverity(entry.severity) && SEVERITY_ORDER[entry.severity] <= SEVERITY_ORDER.WARNING;
   (toStderr ? process.stderr : process.stdout).write(line + "\n");
+}
+
+/**
+ * Cloud Functions and Cloud Run both cut a stdout/stderr log line at exactly
+ * 102,400 bytes (100 KiB) — past that, the platform delivers it as broken
+ * plain text with no severity or labels, and Error Reporting never sees it
+ * (issue #21). The margin below that ceiling covers firebase-functions adding
+ * its own trace field after this measurement, plus multi-byte UTF-8
+ * characters, which count for more bytes than JS string length.
+ */
+const MAX_ENTRY_BYTES = 90 * 1024;
+const MAX_FIELD_BYTES = 8 * 1024;
+const MAX_LABEL_BYTES = 1024;
+const OVERFLOW_ATTACHMENT_NAME = "fsl-overflow.json";
+const STACK_TRUNCATION_MARKER = "    … truncated by fsl";
+
+function entryByteLength(entry: unknown): number {
+  return Buffer.byteLength(safeStringify(entry), "utf-8");
+}
+
+/** Cut a string to `maxBytes` UTF-8 bytes, ending in "…" when it was cut. */
+function truncateToBytes(text: string, maxBytes: number): string {
+  if (Buffer.byteLength(text, "utf-8") <= maxBytes) return text;
+  // Binary search the largest prefix (in UTF-16 code units) whose UTF-8
+  // encoding still fits, leaving room for the ellipsis.
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (Buffer.byteLength(text.slice(0, mid), "utf-8") <= maxBytes - 3) lo = mid;
+    else hi = mid - 1;
+  }
+  return text.slice(0, lo) + "…";
+}
+
+/** Keep the first `keepLines` lines of a stack, noting that it was cut. */
+function truncateStackLines(stack: string, keepLines: number): string {
+  const lines = stack.split("\n");
+  if (lines.length <= keepLines) return stack;
+  return [...lines.slice(0, keepLines), STACK_TRUNCATION_MARKER].join("\n");
+}
+
+// Top-level keys writeLog itself puts on the entry, or that it spreads
+// straight from jsonPayload.error/breadcrumbs. Anything else spread from
+// jsonPayload (context, or a future field) is an "other payload key" for
+// shrink step (b). severity, the two logging.googleapis.com/* keys and
+// serviceContext are never removed by any step.
+const PROTECTED_ENTRY_KEYS = new Set([
+  "severity",
+  "message",
+  "logging.googleapis.com/labels",
+  "logging.googleapis.com/trace",
+  "stack_trace",
+  "serviceContext",
+  "error",
+  "breadcrumbs",
+]);
+
+/** Keep only the last 10 breadcrumbs, each with its `data` field removed. */
+function shrinkBreadcrumbs(breadcrumbs: BreadcrumbEntry[]): BreadcrumbEntry[] {
+  return breadcrumbs.slice(-10).map(({ data: _data, ...rest }) => rest);
+}
+
+/**
+ * Shrink a too-large entry, re-measuring after each step and stopping as soon
+ * as it fits under MAX_ENTRY_BYTES. Order runs from least to most useful:
+ * breadcrumb `data` first, then whole non-error payload keys, then the tail of
+ * a stack (Error Reporting groups on the top frames, so those are kept
+ * longest), then long text fields, and label values only as a last resort.
+ *
+ * Builds new objects at every step — the caller's original entry (and the
+ * copy saved as the overflow attachment) must not be mutated.
+ */
+function shrinkEntry(original: Record<string, unknown>): Record<string, unknown> {
+  const fits = (entry: Record<string, unknown>) => entryByteLength(entry) <= MAX_ENTRY_BYTES;
+
+  let entry = original;
+  if (fits(entry)) return entry;
+
+  // a. breadcrumbs -> last 10, without `data`.
+  if (Array.isArray(entry.breadcrumbs)) {
+    entry = { ...entry, breadcrumbs: shrinkBreadcrumbs(entry.breadcrumbs as BreadcrumbEntry[]) };
+    if (fits(entry)) return entry;
+  }
+
+  // b. every other jsonPayload key (context, and anything else a caller adds).
+  const extraKeys = Object.keys(entry).filter((k) => !PROTECTED_ENTRY_KEYS.has(k));
+  if (extraKeys.length > 0) {
+    const trimmed = { ...entry };
+    for (const key of extraKeys) delete trimmed[key];
+    entry = trimmed;
+    if (fits(entry)) return entry;
+  }
+
+  // c. stack_trace and error.stack -> the top frames matter most, so cut
+  // harder in steps rather than all the way in one go.
+  const originalStackTrace = typeof entry.stack_trace === "string" ? entry.stack_trace : undefined;
+  const originalError = entry.error as Record<string, unknown> | undefined;
+  const originalErrorStack = typeof originalError?.stack === "string" ? originalError.stack : undefined;
+  if (originalStackTrace !== undefined || originalErrorStack !== undefined) {
+    for (const keepLines of [30, 15, 7, 3, 1]) {
+      const next = { ...entry };
+      if (originalStackTrace !== undefined) {
+        next.stack_trace = truncateStackLines(originalStackTrace, keepLines);
+      }
+      if (originalErrorStack !== undefined) {
+        next.error = { ...originalError, stack: truncateStackLines(originalErrorStack, keepLines) };
+      }
+      entry = next;
+      if (fits(entry)) return entry;
+    }
+  }
+
+  // d. message, error.message and error.cause -> 8 KiB each.
+  {
+    const next = { ...entry };
+    if (typeof next.message === "string") next.message = truncateToBytes(next.message, MAX_FIELD_BYTES);
+    const error = next.error as Record<string, unknown> | undefined;
+    if (error) {
+      const nextError = { ...error };
+      if (typeof nextError.message === "string") nextError.message = truncateToBytes(nextError.message, MAX_FIELD_BYTES);
+      if (typeof nextError.cause === "string") nextError.cause = truncateToBytes(nextError.cause, MAX_FIELD_BYTES);
+      next.error = nextError;
+    }
+    entry = next;
+    if (fits(entry)) return entry;
+  }
+
+  // e. last resort: any label value over 1 KiB.
+  const labels = entry["logging.googleapis.com/labels"] as Record<string, string> | undefined;
+  if (labels) {
+    const nextLabels: Record<string, string> = {};
+    for (const [k, v] of Object.entries(labels)) {
+      nextLabels[k] = Buffer.byteLength(v, "utf-8") > MAX_LABEL_BYTES ? truncateToBytes(v, MAX_LABEL_BYTES) : v;
+    }
+    entry = { ...entry, "logging.googleapis.com/labels": nextLabels };
+  }
+
+  return entry;
+}
+
+// Warned once per process, not per entry — an app producing one oversized
+// entry usually produces many, and the cause is the same every time.
+let warnedOverBudget = false;
+function warnOverBudget(objectPath: string | undefined): void {
+  if (warnedOverBudget) return;
+  warnedOverBudget = true;
+  console.warn(
+    `[fsl] A log entry was over ${MAX_ENTRY_BYTES} bytes. Cloud Functions and Cloud Run cut a ` +
+      "line at 102,400 bytes and it would have arrived broken, so it was shortened before writing.",
+  );
+  console.warn(
+    objectPath
+      ? `[fsl]   The full entry was saved to ${objectPath}.`
+      : "[fsl]   It was lost: there is no Storage to save the full entry to. " +
+          "Fix: name a bucket (createHttpLogHandler({ bucketName }) or configureAttachments({ bucket })).",
+  );
 }
 
 const IS_EMULATOR = process.env.FUNCTIONS_EMULATOR === "true";
@@ -350,14 +516,53 @@ export function writeLog(
   // Cloud Functions their value is authoritative.
   const trace = traceField();
 
-  writeEntry({
+  const finishedEntry: Record<string, unknown> = {
     severity,
     message: payload.message,
     "logging.googleapis.com/labels": labels,
     ...(trace ? { "logging.googleapis.com/trace": trace } : {}),
     ...errorReporting,
     ...jsonPayload,
-  });
+  };
+
+  if (entryByteLength(finishedEntry) <= MAX_ENTRY_BYTES) {
+    writeEntry(finishedEntry as Parameters<EntryWriter>[0]);
+    return;
+  }
+
+  // Over budget. Resolve a bucket for the overflow attachment the same way
+  // attachments do: firebase-admin can throw synchronously with no
+  // initialised app, and that is "no Storage", not a crash.
+  let overflowBucket: Bucket | null = null;
+  try {
+    overflowBucket = getAttachmentBucket();
+  } catch (err) {
+    console.warn("[fsl] Log attachment upload failed:", err);
+  }
+  const overflowPath = attachmentPath(logId, OVERFLOW_ATTACHMENT_NAME, getAttachmentPrefix());
+
+  const shrunkEntry = shrinkEntry(finishedEntry);
+  const shrunkLabels = {
+    ...(shrunkEntry["logging.googleapis.com/labels"] as Record<string, string>),
+    truncated: "true",
+    ...(overflowBucket ? { hasAttachments: "true" } : {}),
+  };
+
+  writeEntry({
+    ...shrunkEntry,
+    "logging.googleapis.com/labels": shrunkLabels,
+  } as unknown as Parameters<EntryWriter>[0]);
+
+  if (overflowBucket) {
+    overflowBucket
+      .file(overflowPath)
+      .save(Buffer.from(safeStringify(finishedEntry), "utf-8"))
+      .catch((err) => {
+        console.warn(`[fsl] Overflow upload failed for ${overflowPath}:`, err);
+      });
+  }
+
+  warnOverBudget(overflowBucket ? overflowPath : undefined);
 }
 
 function logAttachmentsToBase64(

@@ -70,6 +70,17 @@ is always present in this repo. `STORAGE_EMULATOR_HOST` points at a closed local
 it and in `productionOutput`, so no attachment upload can reach real Storage with this
 machine's credentials.
 
+`entrySize` runs with the flag unset too — the 90 KiB shrink-and-warn path lives entirely
+in `writeLog`'s production branch; the emulator branch writes to a local file with no
+line-length ceiling, so there is nothing there to test. It reuses `storageChain`'s
+`Module._load` hook for the "no Storage at all" case, and `productionOutput`'s closed-port
+`STORAGE_EMULATOR_HOST` so the overflow upload fails fast instead of reaching real Storage.
+One case needs the failure itself — it asserts the failed upload names the overflow
+object — and that warning arrives from the upload's own `.catch`, asynchronously, after
+`writeLog` has already returned; the test has to keep its `console.warn` stub in place
+across a flush, not just the synchronous call, or the warning fires after the stub is
+gone and the assertion sees nothing.
+
 **`npm run smoke:install`** is the check nothing in `npm test` can do: it builds, packs,
 installs the tarball into an empty temp directory with no optional peers, and sends one
 ERROR through `createHttpLogHandler` from CommonJS and ESM. It needs the npm registry and

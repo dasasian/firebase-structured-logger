@@ -608,6 +608,7 @@ async function main(): Promise<void> {
   assert('two invocations do not', traceOf(client) !== backendTraces[0])
 
   await cloudRunLeg()
+  await bigEntryLeg()
 }
 
 // --- Cloud Run: the backend without firebase-functions or firebase-admin (#39) ---
@@ -716,6 +717,59 @@ async function cloudRunLeg(): Promise<void> {
     const [exists] = await storage.bucket(BUCKET).file(`logAttachments/${labels.logId}/note`).exists()
     assert('the attachment was written without firebase-admin', exists,
       `looked for logAttachments/${labels.logId}/note`)
+  }
+}
+
+// --- A 300 KB entry: shortened, still JSON, the full copy in Storage (#21) ---
+
+/**
+ * Cloud Functions and Cloud Run cut a log line at 102,400 bytes, and past that the
+ * entry arrives as broken text with no severity or labels. writeLog shortens anything
+ * over 90 KiB and saves the whole entry as fsl-overflow.json. This sends 300 KB through
+ * the callable and asserts what arrives — the only place the platform's cut is real.
+ */
+async function bigEntryLeg(): Promise<void> {
+  console.log('\n  --- a 300 KB entry: shortened, not broken ---')
+  const marker = `[fsl-verify] big entry ${RUN_ID}`
+  await callFunction('fslSmokeClient', {
+    message: marker,
+    severity: 'ERROR',
+    labels: { appId: env.FSL_SMOKE_APP_ID ?? 'smoke-app', releaseId: RELEASE_ID, errorType: 'fsl-big', smokeRunId: RUN_ID },
+    jsonPayload: {
+      error: { message: marker, name: 'Error', stack: `duplicate@https://app.example.com/assets/${BUNDLE}:1:4` },
+      context: { blob: 'x'.repeat(300 * 1024) },
+    },
+  })
+
+  let entry: SmokeEntry | undefined
+  const started = Date.now()
+  let delay = 4_000
+  while (Date.now() - started < 240_000 && !entry) {
+    entry = (await listEntriesRest(`jsonPayload.message:"${marker}"`))[0]
+    if (!entry) {
+      await new Promise((r) => setTimeout(r, delay))
+      delay = Math.min(delay * 1.4, 15_000)
+    }
+  }
+
+  const labels = entry?.metadata?.labels ?? {}
+  assert('it arrived as JSON, not broken text', entry !== undefined)
+  assert('severity survived', entry?.metadata?.severity === 'ERROR', `got: ${entry?.metadata?.severity}`)
+  assert('labels survived', labels.errorType === 'fsl-big' && labels.smokeRunId === RUN_ID, `got: ${JSON.stringify(labels)}`)
+  assert('it is marked truncated', labels.truncated === 'true', `got: ${labels.truncated}`)
+  assert('the context was dropped', entry?.data?.context === undefined)
+  assert('the stack still resolved', stackOf(entry?.data).includes('catalogProducts.ts'), `got: ${stackOf(entry?.data).slice(0, 120)}`)
+  assert('hasAttachments points at the full copy', labels.hasAttachments === 'true', `got: ${labels.hasAttachments}`)
+  if (labels.logId) {
+    const file = storage.bucket(BUCKET).file(`logAttachments/${labels.logId}/fsl-overflow.json`)
+    const [exists] = await file.exists()
+    assert('fsl-overflow.json exists at the logId path', exists, `looked for logAttachments/${labels.logId}/fsl-overflow.json`)
+    if (exists) {
+      const [content] = await file.download()
+      const full = JSON.parse(content.toString()) as { context?: { blob?: string } }
+      assert('and holds the whole 300 KB context', full.context?.blob?.length === 300 * 1024,
+        `got ${full.context?.blob?.length}`)
+    }
   }
 }
 
