@@ -12,9 +12,11 @@ import {
 import {
   allow,
   signatureFor,
+  describeSignature,
   configureRateLimiter,
   flushDueSummaries,
-  takePendingSummaries,
+  peekPendingSummaries,
+  acknowledgeSummary,
   type RateLimitConfig,
   type SentSummary,
 } from './rateLimiter'
@@ -240,8 +242,12 @@ export class Logger<
     // it still respects the severity floor, unlike feedback above.
     skipBudget = false,
     timestamp?: string,
-  ): Promise<void> {
-    if (!bypassVolumeControls && SEVERITY_ORDER[severity] > this.minLevel) return
+    // Returns whether the entry actually reached `logFunction` — the floor,
+    // the rate limiter, and a rejected `logFunction` all resolve to `false`.
+    // A repeat summary is only removed from its queue once this is `true`;
+    // see `sendRepeatSummary`.
+  ): Promise<boolean> {
+    if (!bypassVolumeControls && SEVERITY_ORDER[severity] > this.minLevel) return false
 
     const allLabels: LogPayload['labels'] = {
       appId: this.config.appId,
@@ -263,16 +269,16 @@ export class Logger<
     const decision =
       bypassVolumeControls || skipBudget
         ? ({ allowed: true } as const)
-        : allow({ severity, signature, message, labels: allLabels })
+        : allow({ severity, signature, labels: allLabels })
     if (!decision.allowed) {
       if (decision.reason === 'duplicate') {
-        console.warn(`[fsl] Duplicate counted for the next summary: ${decision.signature}`)
+        console.warn(`[fsl] Duplicate counted for the next summary: ${describeSignature(decision.signature ?? '')}`)
       } else if (decision.reason === 'reserve') {
         console.warn('[fsl] Log budget: only errors can use the reserve now')
       } else {
         console.warn('[fsl] Log budget empty — next log in about a minute')
       }
-      return
+      return false
     }
 
     // Ties this full copy to the summary its repeats will eventually become.
@@ -328,15 +334,26 @@ export class Logger<
       }
 
       await this.config.logFunction(payload)
+      return true
     } catch (err) {
       console.error('[fsl] Failed to send log:', err instanceof Error ? err.message : err)
+      return false
     }
   }
 
-  /** Claim and send whatever repeat summaries are due, from this visit or an earlier one. */
+  // Guards against sending the same queued summary twice when a flush is
+  // triggered again (interval, visibilitychange) before a previous attempt's
+  // `logFunction` call has resolved — `peekPendingSummaries` does not remove
+  // anything, so without this a slow or slow-to-fail send could be picked up
+  // more than once.
+  private readonly summariesInFlight = new Set<string>()
+
+  /** Send whatever repeat summaries are due, from this visit or an earlier one. */
   sendPendingSummaries(): void {
-    for (const summary of takePendingSummaries()) {
-      void this.sendRepeatSummary(summary)
+    for (const summary of peekPendingSummaries()) {
+      if (this.summariesInFlight.has(summary.id)) continue
+      this.summariesInFlight.add(summary.id)
+      void this.sendRepeatSummary(summary).finally(() => this.summariesInFlight.delete(summary.id))
     }
   }
 
@@ -345,10 +362,20 @@ export class Logger<
    * README, "Repeats are counted, not dropped"). It still respects the
    * severity floor — only the budget and the duplicate gate are skipped, via
    * `send`'s `skipBudget`.
+   *
+   * It is queued in `localStorage` precisely so a failed send does not lose
+   * it — offline, or the tab tearing down right after the `visibilitychange`
+   * that triggered this. So it is only acknowledged (removed from the queue)
+   * once `send` reports the entry actually reached `logFunction`; otherwise
+   * the next flush, or the next visit, finds it still there and retries it.
    */
   private async sendRepeatSummary(summary: SentSummary): Promise<void> {
     const labels: Record<string, string | undefined> = {
-      ...summary.labels,
+      appId: this.config.appId,
+      releaseId: summary.releaseId ?? this.config.releaseId,
+      userId: summary.userId,
+      screen: summary.screen,
+      errorType: summary.errorType,
       repeatOf: summary.repeatOf,
       repeatCount: String(summary.repeatCount),
       firstSeen: summary.firstSeen,
@@ -356,7 +383,7 @@ export class Logger<
       ...(summary.sentLate ? { sentLate: 'true' } : {}),
     }
 
-    await this.send(
+    const sent = await this.send(
       `Repeated ${summary.repeatCount} more times: ${summary.message}`,
       'WARNING',
       labels,
@@ -368,6 +395,7 @@ export class Logger<
       true,
       summary.lastSeen,
     )
+    if (sent) acknowledgeSummary(summary.id)
   }
 }
 
@@ -412,6 +440,15 @@ export function initLogger<
   AppLabels extends Record<string, string | undefined> = Record<string, string | undefined>,
 >(config: InitLoggerConfig<AppLabels>): Logger<AppLabels> {
   instance = new Logger(config) as Logger<Record<string, string | undefined>>
+
+  // A previous visit's queued summaries (README, "the next visit sends
+  // them") would otherwise wait for the first `visibilitychange: hidden` or
+  // the first 60s interval tick — a short delay so init itself can finish
+  // first, not a wait for either of those.
+  if (typeof setTimeout !== 'undefined') {
+    setTimeout(() => instance?.sendPendingSummaries(), 0)
+  }
+
   return instance as Logger<AppLabels>
 }
 
@@ -424,9 +461,13 @@ export function getClientLogger<
 
 /**
  * Repeat summaries are sent hourly and when the tab is hidden (README,
- * "Repeats are counted, not dropped") — neither of which an app necessarily
- * triggers by logging. `send` already checks opportunistically on every log,
- * which covers an active app; these two make it work for an idle one too.
+ * "Repeats are counted, not dropped"). Neither is triggered by an ordinary
+ * log call — `send` does not check for due summaries itself, since doing so
+ * with frozen-for-testing time reliably makes an interval-based check look
+ * due immediately (see tests/rateLimiter.ts). So there are exactly three
+ * triggers for a flush: `initLogger` (a previous visit's queue, once, above),
+ * this `visibilitychange` listener (the tab going hidden), and the interval
+ * below (an app that never hides its tab and rarely reloads).
  *
  * Neither exists in the esbuild bundle test's sandbox (no `window`/`document`
  * there — see tests/browserBundle.ts), so both are guarded.

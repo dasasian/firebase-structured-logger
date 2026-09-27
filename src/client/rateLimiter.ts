@@ -1,4 +1,5 @@
 import type { LogSeverity } from '../shared/types'
+import { SEVERITY_ORDER } from '../shared/severity'
 
 const DEFAULT_SESSION_LIMIT = 50
 const DEFAULT_REFILL_PER_MINUTE = 1
@@ -13,6 +14,16 @@ const DEFAULT_MAX_PENDING_SUMMARIES = 50
 // documented surface (README, "Volume controls"). A second storage key for the
 // summary queue would be an eighth nobody asked for.
 const SUMMARY_STORAGE_KEY = 'fsl_pending_summaries'
+
+/**
+ * The flood this feature exists to survive is exactly "many distinct
+ * messages" — a URL, an id, anything with a variable in the string — so
+ * `state.signatures` cannot be left to grow one entry per message forever:
+ * that eventually fills sessionStorage (a quota error, then the state is
+ * silently lost) and makes every `allow()` parse an ever-larger map. Not a
+ * config knob: nobody tunes this per app, it is a safety valve.
+ */
+const MAX_SIGNATURES = 200
 
 export interface RateLimitConfig {
   /** The budget: how many logs can go out at once. Default 50. */
@@ -37,6 +48,13 @@ export interface RateLimitConfig {
  * out (capped at `duplicateLimit`), the client-side id those copies carry as
  * `labels.repeatKey` (see the module doc below), and — once the limit is
  * passed — a running count of repeats waiting to become a summary.
+ *
+ * Deliberately thin: no label snapshot, no copy of the message. Those already
+ * live in Cloud Logging on the full copies `repeatKey`/`repeatOf` link
+ * together, and the message, screen, releaseId and userId are already
+ * encoded in this signature's own key (see `parseSignatureKey`) — storing
+ * them again here would be a second copy of exactly the data this cap exists
+ * to stop piling up, one entry per distinct message, without bound.
  */
 interface SignatureState {
   count: number
@@ -44,8 +62,8 @@ interface SignatureState {
   repeatCount?: number
   firstSeen?: number
   lastSeen?: number
-  labels?: Record<string, string | undefined>
-  message?: string
+  /** Last time this signature was touched by `allow()` — what eviction sorts by. */
+  lastTouched: number
 }
 
 interface RateLimitState {
@@ -63,11 +81,20 @@ interface RateLimitState {
  * carries a different `bootId` than the one currently running, so popping it
  * here reveals it as "from a previous visit" without needing a server
  * round-trip or a wall-clock guess.
+ *
+ * `message`/`errorType`/`screen`/`releaseId`/`userId` are short fields
+ * rebuilt once from the signature's key when the summary is created (see
+ * `parseSignatureKey`) — not a full label copy. Everything else about the
+ * error (browser, platform, stack, breadcrumbs…) is already in Cloud Logging
+ * on the full copies `repeatOf` points back to.
  */
 export interface PendingSummary {
   id: string
   message: string
-  labels: Record<string, string | undefined>
+  errorType?: string
+  screen?: string
+  releaseId?: string
+  userId?: string
   repeatOf: string
   repeatCount: number
   firstSeen: string
@@ -77,8 +104,12 @@ export interface PendingSummary {
 }
 
 export interface SentSummary {
+  id: string
   message: string
-  labels: Record<string, string | undefined>
+  errorType?: string
+  screen?: string
+  releaseId?: string
+  userId?: string
   repeatOf: string
   repeatCount: number
   firstSeen: string
@@ -180,8 +211,28 @@ export function signatureFor(
   error: Error | string,
   screen?: string,
 ): string {
-  const str = error instanceof Error ? `${error.name}:${error.message}` : String(error)
-  return `${str}|${screen ?? ''}`
+  // A JSON list, not a joined string: a summary rebuilds the name, message and
+  // screen from this key (parseSignatureKey), and a message containing `:` or
+  // `|` — "upload failed: timeout" — must not split into the wrong fields.
+  const errorType = error instanceof Error ? error.name : null
+  const message = error instanceof Error ? error.message : String(error)
+  return JSON.stringify([errorType, message, screen ?? ''])
+}
+
+/** A signature as a person reads it, for the console: `TypeError: cannot read 'id' | checkout`. */
+export function describeSignature(signature: string): string {
+  const { errorType, message, screen } = parseSignature(signature)
+  return `${errorType ? `${errorType}: ` : ''}${message}${screen ? ` | ${screen}` : ''}`
+}
+
+function parseSignature(signature: string): { errorType?: string; message: string; screen?: string } {
+  try {
+    const [errorType, message, screen] = JSON.parse(signature) as [string | null, string, string]
+    return { errorType: errorType ?? undefined, message, screen: screen || undefined }
+  } catch {
+    // Not one of ours — keep it whole rather than guess at its parts.
+    return { message: signature }
+  }
 }
 
 /**
@@ -190,7 +241,29 @@ export function signatureFor(
  * running count. See README, "Repeats are counted, not dropped".
  */
 function compoundKey(signature: string, labels: Record<string, string | undefined> | undefined): string {
-  return `${signature}|${labels?.releaseId ?? ''}|${labels?.userId ?? ''}`
+  return JSON.stringify([signature, labels?.releaseId ?? '', labels?.userId ?? ''])
+}
+
+/**
+ * The inverse of `compoundKey` + `signatureFor`: recover the name, message,
+ * screen, releaseId and userId a summary needs from the key that already
+ * holds them, rather than storing a second copy per signature — see
+ * `SignatureState`'s doc for why that copy has to go. Both are JSON lists, so
+ * the fields come back exactly, whatever characters a message contains.
+ */
+function parseSignatureKey(key: string): {
+  errorType?: string
+  message: string
+  screen?: string
+  releaseId?: string
+  userId?: string
+} {
+  try {
+    const [signature, releaseId, userId] = JSON.parse(key) as [string, string, string]
+    return { ...parseSignature(signature), releaseId: releaseId || undefined, userId: userId || undefined }
+  } catch {
+    return { message: key }
+  }
 }
 
 export type RateLimitDecision =
@@ -200,7 +273,6 @@ export type RateLimitDecision =
 export interface AllowOptions {
   signature?: string
   severity: LogSeverity
-  message?: string
   labels?: Record<string, string | undefined>
 }
 
@@ -218,6 +290,29 @@ export interface AllowOptions {
  * have gone out, further occurrences are neither sent nor refused outright —
  * they are counted here, toward the next repeat summary, and cost no budget.
  */
+/**
+ * Keep `state.signatures` at or under `MAX_SIGNATURES`. Evicts the oldest
+ * (by `lastTouched`) signatures that have no pending repeat count first;
+ * a signature with an unsent `repeatCount` is never dropped, even if that
+ * leaves the map over the cap — losing a count already promised to a summary
+ * is worse than a temporarily oversized map.
+ */
+function pruneSignatures(state: RateLimitState): void {
+  const keys = Object.keys(state.signatures)
+  let overflow = keys.length - MAX_SIGNATURES
+  if (overflow <= 0) return
+
+  const evictable = keys
+    .filter((k) => state.signatures[k].repeatCount === undefined)
+    .sort((a, b) => state.signatures[a].lastTouched - state.signatures[b].lastTouched)
+
+  for (const k of evictable) {
+    if (overflow <= 0) break
+    delete state.signatures[k]
+    overflow--
+  }
+}
+
 export function allow(options: AllowOptions): RateLimitDecision {
   const now = Date.now()
   const state = readState()
@@ -227,16 +322,16 @@ export function allow(options: AllowOptions): RateLimitDecision {
   let sig: SignatureState | undefined
   if (options.signature !== undefined) {
     key = compoundKey(options.signature, options.labels)
-    sig = state.signatures[key] ?? { count: 0, repeatKey: generateId() }
+    sig = state.signatures[key] ?? { count: 0, repeatKey: generateId(), lastTouched: now }
+    sig.lastTouched = now
   }
 
   if (sig && key && sig.count >= config.duplicateLimit) {
     sig.repeatCount = (sig.repeatCount ?? 0) + 1
     if (sig.firstSeen === undefined) sig.firstSeen = now
     sig.lastSeen = now
-    if (sig.labels === undefined) sig.labels = options.labels
-    if (sig.message === undefined) sig.message = options.message
     state.signatures[key] = sig
+    pruneSignatures(state)
     writeState(state)
     return { allowed: false, reason: 'duplicate', signature: options.signature }
   }
@@ -246,7 +341,9 @@ export function allow(options: AllowOptions): RateLimitDecision {
     writeState(state)
     return { allowed: false, reason: 'session-limit' }
   }
-  if (state.available <= reserveThreshold && options.severity !== 'ERROR') {
+  // "ERROR and above" as a rank, not the literal string 'ERROR' — so the check
+  // stays right if a more severe level is ever added to SEVERITY_ORDER.
+  if (state.available <= reserveThreshold && SEVERITY_ORDER[options.severity] > SEVERITY_ORDER.ERROR) {
     writeState(state)
     return { allowed: false, reason: 'reserve' }
   }
@@ -255,6 +352,7 @@ export function allow(options: AllowOptions): RateLimitDecision {
   if (sig && key) {
     sig.count += 1
     state.signatures[key] = sig
+    pruneSignatures(state)
   }
   writeState(state)
   return { allowed: true, repeatKey: sig?.repeatKey }
@@ -281,12 +379,16 @@ export function flushDueSummaries(force = false): void {
     if (!sig.repeatCount || sig.firstSeen === undefined || sig.lastSeen === undefined) continue
     if (!force && now - sig.firstSeen < intervalMs) continue
 
+    const { errorType, message, screen, releaseId, userId } = parseSignatureKey(key)
     const maxAgeMs = config.summaryMaxAgeDays * 24 * 60 * 60 * 1000
     const queue = readSummaryQueue().filter((s) => now - s.createdAt < maxAgeMs)
     queue.push({
       id: generateId(),
-      message: sig.message ?? '',
-      labels: sig.labels ?? {},
+      message,
+      errorType,
+      screen,
+      releaseId,
+      userId,
       repeatOf: sig.repeatKey,
       repeatCount: sig.repeatCount,
       firstSeen: new Date(sig.firstSeen).toISOString(),
@@ -303,34 +405,57 @@ export function flushDueSummaries(force = false): void {
     sig.repeatCount = undefined
     sig.firstSeen = undefined
     sig.lastSeen = undefined
-    sig.labels = undefined
-    sig.message = undefined
     changed = true
   }
 
   if (changed) writeState(state)
 }
 
-/**
- * Claim every pending summary not past `summaryMaxAgeDays`, and empty the
- * queue — this tab now owns sending them. `sentLate` is true for anything
- * queued by an earlier page load (a different `bootId`): the case the
- * README's "next visit sends them" describes.
- */
-export function takePendingSummaries(): SentSummary[] {
-  const now = Date.now()
-  const queue = readSummaryQueue()
-  const fresh = queue.filter((s) => !isExpired(s, now))
-  writeSummaryQueue([])
-  return fresh.map((s) => ({
+function toSentSummary(s: PendingSummary): SentSummary {
+  return {
+    id: s.id,
     message: s.message,
-    labels: s.labels,
+    errorType: s.errorType,
+    screen: s.screen,
+    releaseId: s.releaseId,
+    userId: s.userId,
     repeatOf: s.repeatOf,
     repeatCount: s.repeatCount,
     firstSeen: s.firstSeen,
     lastSeen: s.lastSeen,
     sentLate: s.bootId !== bootId,
-  }))
+  }
+}
+
+/**
+ * Look at every pending summary not past `summaryMaxAgeDays`, WITHOUT
+ * removing it from the queue. A summary may only leave the queue once its
+ * send has actually succeeded — see `acknowledgeSummary` — so a failed send
+ * (offline, or the tab tearing down right after the `visibilitychange` that
+ * triggered this) leaves it queued for the next flush or the next visit to
+ * retry, instead of losing it. `sentLate` is true for anything queued by an
+ * earlier page load (a different `bootId`): the case the README's "next
+ * visit sends them" describes.
+ *
+ * Expired entries ARE removed here — there is no send to wait on for those.
+ */
+export function peekPendingSummaries(): SentSummary[] {
+  const now = Date.now()
+  const queue = readSummaryQueue()
+  const fresh = queue.filter((s) => !isExpired(s, now))
+  if (fresh.length !== queue.length) writeSummaryQueue(fresh)
+  return fresh.map(toSentSummary)
+}
+
+/**
+ * Remove one summary from the queue by id, once its send has resolved. A
+ * retry that calls this again for an id already gone is a no-op — it never
+ * re-adds anything, so it cannot create a second entry.
+ */
+export function acknowledgeSummary(id: string): void {
+  const queue = readSummaryQueue()
+  const next = queue.filter((s) => s.id !== id)
+  if (next.length !== queue.length) writeSummaryQueue(next)
 }
 
 /**

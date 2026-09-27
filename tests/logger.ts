@@ -5,7 +5,7 @@
 
 import { sessionStorageStub, localStorageStub, withFrozenTime, setVisibility } from './browserStubs.js'
 import { initLogger } from '../src/client/logger.js'
-import { configureRateLimiter, resetRateLimiter } from '../src/client/rateLimiter.js'
+import { configureRateLimiter, resetRateLimiter, flushDueSummaries } from '../src/client/rateLimiter.js'
 import type { LogPayload } from '../src/shared/types.js'
 import type { Logger } from '../src/client/logger.js'
 import { assert, reportResults } from './testHelpers.js'
@@ -165,7 +165,7 @@ async function testTwoHundredErrorsThroughTheLoggerSendThreeCopiesAndASummary() 
   localStorageStub.setItem('fsl_pending_summaries', '[]')
   const { logger, allPayloads } = makeLogger()
 
-  const t0 = 1_700_000_000_000
+  const t0 = Date.now()
   for (let i = 0; i < 200; i++) {
     withFrozenTime(t0 + i * 1000, () => {
       logger.error(new Error('cart sync failed'), undefined, undefined, undefined)
@@ -199,7 +199,73 @@ async function testTwoHundredErrorsThroughTheLoggerSendThreeCopiesAndASummary() 
   assert('it is a WARNING', summary.severity === 'WARNING')
   assert('it carries no stack', summary.jsonPayload?.error === undefined)
   assert('firstSeen and lastSeen are present', typeof summary.labels.firstSeen === 'string' && typeof summary.labels.lastSeen === 'string')
+  assert('errorType is recovered from the signature', summary.labels.errorType === 'Error', `got: ${summary.labels.errorType}`)
+  assert('releaseId is recovered — from the time of the errors', summary.labels.releaseId === 'test-release', `got: ${summary.labels.releaseId}`)
+  assert('appId is set', summary.labels.appId === 'test-app', `got: ${summary.labels.appId}`)
   assert('the message names the repeat count', summary.message.includes('197') && summary.message.includes('cart sync failed'))
+}
+
+/**
+ * A summary is queued in localStorage so it survives the tab closing — the
+ * exact case where the send that follows can plausibly fail (offline, or the
+ * tab tearing down right after `visibilitychange: hidden`). A summary may
+ * only leave the queue once its `logFunction` call has actually resolved;
+ * otherwise the "next visit sends them" promise in the README is false.
+ */
+async function testFailedSummarySendKeepsItQueued() {
+  console.log('\nTest: a summary stays queued until its send succeeds, and is not sent twice')
+  configureRateLimiter({ sessionLimit: 500, duplicateLimit: 1, storageKey: 'fsl_ratelimit', summaryIntervalMinutes: 60 })
+  resetRateLimiter()
+  localStorageStub.setItem('fsl_pending_summaries', '[]')
+
+  let failNextSummary = true
+  const summariesSent: LogPayload[] = []
+  const logger = initLogger({
+    appId: 'test-app',
+    releaseId: 'test-release',
+    logFunction: async (data) => {
+      if (data.labels.repeatOf !== undefined) {
+        if (failNextSummary) {
+          failNextSummary = false
+          throw new Error('offline')
+        }
+        summariesSent.push(data)
+      }
+    },
+  })
+
+  // Only microtask waits below, on purpose: `initLogger` also schedules a
+  // one-shot flush (a real macrotask, for a previous visit's queue) that
+  // would otherwise race an arbitrary retry in here. Waiting on resolved
+  // promises settles this test's own async chain without ever handing
+  // control to the macrotask queue, so that timer plays no part.
+  const settle = async () => { for (let i = 0; i < 8; i++) await Promise.resolve() }
+
+  const t0 = Date.now()
+  withFrozenTime(t0, () => {
+    logger.error(new Error('queued-boom')) // full copy
+    logger.error(new Error('queued-boom')) // repeat — same message, same (unset) screen
+  })
+
+  // First attempt: force the summary due, and let the (failing) send run.
+  withFrozenTime(t0 + 61 * 60_000, () => {
+    flushDueSummaries(true)
+    logger.sendPendingSummaries()
+  })
+  await settle()
+
+  const afterFailure = JSON.parse(localStorageStub.peek('fsl_pending_summaries') ?? '[]') as unknown[]
+  assert('the summary is still queued after a failed send', afterFailure.length === 1, `got: ${afterFailure.length}`)
+  assert('nothing was recorded as sent yet', summariesSent.length === 0, `got: ${summariesSent.length}`)
+
+  // Retry: the next flush must pick up the SAME queued summary, not create a
+  // second one, and this time the send succeeds.
+  logger.sendPendingSummaries()
+  await settle()
+
+  const afterRetry = JSON.parse(localStorageStub.peek('fsl_pending_summaries') ?? '[]') as unknown[]
+  assert('the queue is empty once the retry succeeds', afterRetry.length === 0, `got: ${afterRetry.length}`)
+  assert('the summary was sent exactly once', summariesSent.length === 1, `got: ${summariesSent.length}`)
 }
 
 async function testDroppedLogConsoleMessages() {
@@ -285,6 +351,7 @@ async function run() {
   await testEverySeverityCostsOneUnitOfBudget()
   await testReserveIsHonouredBySeverity()
   await testTwoHundredErrorsThroughTheLoggerSendThreeCopiesAndASummary()
+  await testFailedSummarySendKeepsItQueued()
   await testDroppedLogConsoleMessages()
   await testDefaultFloorFollowsNodeEnv()
 

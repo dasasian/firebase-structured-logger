@@ -705,14 +705,23 @@ after the log has already left the tab. So each full copy instead carries its ow
 query `labels.repeatKey="…" OR labels.repeatOf="…"` to find a full copy and its summary
 together.
 
-A summary is sent once an hour, and when the tab is hidden. It is keyed by the error, the
-`releaseId` and the `userId`, so two releases or two people on one computer are never
-counted together. It carries the labels from when the errors happened, and its entry is
+A summary is sent once an hour, when the tab is hidden, and once at startup for anything
+a previous visit left queued. It is keyed by the error, the `releaseId` and the `userId`,
+so two releases or two people on one computer are never counted together. Its entry is
 timestamped at `lastSeen`, not at the time it was sent.
 
+The summary's own labels are `appId`, `releaseId`, `userId`, `screen` and `errorType` — from
+the time the errors happened, not from whoever's tab eventually sends it — plus
+`repeatOf`/`repeatCount`/`firstSeen`/`lastSeen`/`sentLate`. Everything else about the error —
+browser, platform, breadcrumbs, the stack — is not repeated here; it is already on the full
+copies `repeatOf` points back to.
+
 Unsent summaries are kept in `localStorage`, so closing the tab does not lose them: the
-next visit sends them, marked `labels.sentLate="true"`. At most 50 wait, and any older than
-7 days are deleted rather than sent — they are error messages, and may hold personal data.
+next visit sends them, marked `labels.sentLate="true"`. A summary is only removed from that
+queue once it has actually been sent — a failed attempt (offline, or the tab closing right
+after it was queued) leaves it for the next flush or the next visit to retry, never twice.
+At most 50 wait, and any older than 7 days are deleted rather than sent — they are error
+messages, and may hold personal data.
 
 A summary is a `WARNING` with no stack, so Cloud Error Reporting sees the 3 full copies and
 not the summary. For the true count, add up `labels.repeatCount` in Cloud Logging.
@@ -732,7 +741,7 @@ here whose failure mode is a bill rather than a missing log.
 The two rate limits say so in the browser console:
 
 ```
-[fsl] Duplicate counted for the next summary: TypeError: cannot read 'id'|checkout
+[fsl] Duplicate counted for the next summary: TypeError: cannot read 'id' | checkout
 [fsl] Log budget empty — next log in about a minute
 [fsl] Log budget: only errors can use the reserve now
 ```

@@ -19,7 +19,7 @@ import {
   configureRateLimiter,
   resetRateLimiter,
   flushDueSummaries,
-  takePendingSummaries,
+  peekPendingSummaries,
 } from '../src/client/rateLimiter.js'
 import { assert, reportResults } from './testHelpers.js'
 
@@ -89,12 +89,15 @@ function testRefusedLogsCostNothing() {
   configureRateLimiter({ sessionLimit: 2, duplicateLimit: 1 })
 
   const sig = signatureFor(new Error('dupe'), 'Home')
-  allow({ severity: 'INFO', signature: sig })                    // 1st: allowed, spent = 1
-  const refused = allow({ severity: 'INFO', signature: sig })    // 2nd: duplicate, counted instead
-  assert('the duplicate was refused', !refused.allowed)
-  assert('a counted duplicate did not spend budget', spent(2) === 1, `got: ${spent(2)}`)
+  const now = 1_700_000_000_000
+  withFrozenTime(now, () => {
+    allow({ severity: 'INFO', signature: sig })                    // 1st: allowed, spent = 1
+    const refused = allow({ severity: 'INFO', signature: sig })    // 2nd: duplicate, counted instead
+    assert('the duplicate was refused', !refused.allowed)
+    assert('a counted duplicate did not spend budget', spent(2) === 1, `got: ${spent(2)}`)
 
-  assert('the remaining budget is still usable', allow({ severity: 'INFO' }).allowed)
+    assert('the remaining budget is still usable', allow({ severity: 'INFO' }).allowed)
+  })
 }
 
 function testBudgetRefillsOverTime() {
@@ -177,6 +180,54 @@ function testErrorReserve() {
   })
 }
 
+/**
+ * The reserve is "ERROR and above" by rank (SEVERITY_ORDER), so every level
+ * less severe than ERROR is refused at the line — not just WARNING.
+ */
+function testReserveIsByRank() {
+  console.log('\nTest: at the reserve line, ERROR is allowed and every less severe level refused')
+  reset()
+  configureRateLimiter({ sessionLimit: 10, errorReserve: 0.5 })
+
+  const now = 1_700_000_000_000
+  withFrozenTime(now, () => {
+    for (let i = 0; i < 5; i++) allow({ severity: 'INFO' })
+    assert('half the budget is spent, at the reserve line', spent(10) === 5, `got: ${spent(10)}`)
+
+    assert('WARNING is refused at the reserve', !allow({ severity: 'WARNING' }).allowed)
+    assert('NOTICE is refused at the reserve', !allow({ severity: 'NOTICE' }).allowed)
+    assert('INFO is refused at the reserve', !allow({ severity: 'INFO' }).allowed)
+    assert('DEBUG is refused at the reserve', !allow({ severity: 'DEBUG' }).allowed)
+    assert('ERROR is allowed', allow({ severity: 'ERROR' }).allowed)
+  })
+}
+
+/**
+ * A summary rebuilds its fields from the signature key, so a message holding
+ * the characters a joined key would split on must come back whole.
+ */
+function testSignatureSurvivesColonsAndPipes() {
+  console.log('\nTest: a message with ":" and "|" comes back whole in its summary')
+  reset()
+  let summaries: ReturnType<typeof peekPendingSummaries> = []
+  configureRateLimiter({ duplicateLimit: 1 })
+  const now = 1_700_000_000_000
+  withFrozenTime(now, () => {
+    const sig = signatureFor('upload failed: timeout | retrying', 'Up|load')
+    allow({ severity: 'WARNING', signature: sig, labels: { releaseId: 'r1', userId: 'u1' } })
+    allow({ severity: 'WARNING', signature: sig, labels: { releaseId: 'r1', userId: 'u1' } })
+    flushDueSummaries(true)
+    // Read inside the frozen clock: outside it, a summary created "in 2023"
+    // is past summaryMaxAgeDays and is correctly filtered as expired.
+    summaries = peekPendingSummaries()
+  })
+  const [summary] = summaries
+  assert('the message is whole', summary?.message === 'upload failed: timeout | retrying', `got: ${summary?.message}`)
+  assert('no error type is invented from the colon', summary?.errorType === undefined, `got: ${summary?.errorType}`)
+  assert('the screen is whole', summary?.screen === 'Up|load', `got: ${summary?.screen}`)
+  assert('releaseId and userId come back', summary?.releaseId === 'r1' && summary?.userId === 'u1')
+}
+
 // --- Duplicate suppression becomes repeat counting ---
 
 function testDuplicateSuppression() {
@@ -253,6 +304,41 @@ function testSessionLimitOutranksDuplicate() {
   assert('reported as the session limit, not a duplicate', !refused.allowed && refused.reason === 'session-limit')
 }
 
+/**
+ * The flood this feature exists for is exactly "many different messages" —
+ * URLs, ids, anything with a variable in the string. Left unbounded,
+ * `state.signatures` grows one entry per distinct message forever, which
+ * eventually fills sessionStorage (a quota error, then the whole state is
+ * silently lost) and makes every `allow()` parse an ever-larger map.
+ */
+function testSignatureMapIsBounded() {
+  console.log('\nTest: the signature map is capped, and a signature with pending repeats survives the cap')
+  reset()
+  configureRateLimiter({ sessionLimit: 5000, duplicateLimit: 1 })
+
+  const t0 = 1_700_000_000_000
+  const survivorSig = signatureFor(new Error('keep-me'), 'Home')
+  withFrozenTime(t0, () => {
+    allow({ severity: 'WARNING', signature: survivorSig })       // full copy
+    allow({ severity: 'WARNING', signature: survivorSig })       // repeat — has a pending count
+  })
+
+  withFrozenTime(t0 + 1, () => {
+    for (let i = 0; i < 1000; i++) {
+      allow({ severity: 'WARNING', signature: signatureFor(new Error(`msg-${i}`), 'Home') })
+    }
+  })
+
+  const state = storedState()
+  const count = Object.keys(state?.signatures ?? {}).length
+  assert('the signature map stays bounded', count <= 200, `got: ${count}`)
+  // Keys are JSON lists: [signature, releaseId, userId].
+  const survivorKey = Object.keys(state?.signatures ?? {}).find(
+    (k) => (JSON.parse(k) as [string, string, string])[0] === survivorSig,
+  )
+  assert('the signature with pending repeats survived the cap', survivorKey !== undefined)
+}
+
 // --- Repeats become summaries ---
 
 function testTwoHundredCopiesSendThreeFullEntriesAndOneSummary() {
@@ -269,14 +355,14 @@ function testTwoHundredCopiesSendThreeFullEntriesAndOneSummary() {
   let lastRepeatAt = -1
   withFrozenTime(t0, () => {
     for (let i = 0; i < 3; i++) {
-      const decision = allow({ severity: 'ERROR', signature: sig, message: 'cart sync failed', labels })
+      const decision = allow({ severity: 'ERROR', signature: sig, labels })
       if (decision.allowed) fullCopies++
     }
   })
   for (let i = 0; i < 197; i++) {
     const now = t0 + (i + 1) * 1000
     withFrozenTime(now, () => {
-      const decision = allow({ severity: 'ERROR', signature: sig, message: 'cart sync failed', labels })
+      const decision = allow({ severity: 'ERROR', signature: sig, labels })
       assert(`repeat ${i + 1} is counted, not sent`, !decision.allowed)
       if (firstRepeatAt === -1) firstRepeatAt = now
       lastRepeatAt = now
@@ -285,10 +371,10 @@ function testTwoHundredCopiesSendThreeFullEntriesAndOneSummary() {
 
   assert('exactly 3 full copies were sent', fullCopies === 3, `got: ${fullCopies}`)
 
-  let pending: ReturnType<typeof takePendingSummaries> = []
+  let pending: ReturnType<typeof peekPendingSummaries> = []
   withFrozenTime(lastRepeatAt + 1, () => {
     flushDueSummaries(true)
-    pending = takePendingSummaries()
+    pending = peekPendingSummaries()
   })
   assert('exactly one summary is pending', pending.length === 1, `got: ${pending.length}`)
 
@@ -299,6 +385,13 @@ function testTwoHundredCopiesSendThreeFullEntriesAndOneSummary() {
   assert('repeatOf is set', typeof summary?.repeatOf === 'string' && summary.repeatOf.length > 0)
   assert('the message survived', summary?.message === 'cart sync failed')
   assert('not marked sentLate — same visit', summary?.sentLate === false)
+
+  // Slim SignatureState stores none of this — it is rebuilt from the
+  // signature's own key at flush time (see parseSignatureKey).
+  assert('errorType is recovered from the signature', summary?.errorType === 'Error', `got: ${summary?.errorType}`)
+  assert('screen is recovered', summary?.screen === 'Checkout', `got: ${summary?.screen}`)
+  assert('releaseId is recovered', summary?.releaseId === 'r1', `got: ${summary?.releaseId}`)
+  assert('userId is recovered', summary?.userId === 'u1', `got: ${summary?.userId}`)
 }
 
 function testTwoReleasesOrTwoUsersGiveTwoSummaries() {
@@ -308,24 +401,24 @@ function testTwoReleasesOrTwoUsersGiveTwoSummaries() {
 
   const sig = signatureFor(new Error('boom'), 'Home')
   const now = 1_700_000_000_000
-  let byRelease: ReturnType<typeof takePendingSummaries> = []
+  let byRelease: ReturnType<typeof peekPendingSummaries> = []
   withFrozenTime(now, () => {
     // release r1/r2, same user
-    for (let i = 0; i < 3; i++) allow({ severity: 'ERROR', signature: sig, message: 'boom', labels: { releaseId: 'r1', userId: 'u1' } })
-    for (let i = 0; i < 3; i++) allow({ severity: 'ERROR', signature: sig, message: 'boom', labels: { releaseId: 'r2', userId: 'u1' } })
+    for (let i = 0; i < 3; i++) allow({ severity: 'ERROR', signature: sig, labels: { releaseId: 'r1', userId: 'u1' } })
+    for (let i = 0; i < 3; i++) allow({ severity: 'ERROR', signature: sig, labels: { releaseId: 'r2', userId: 'u1' } })
     flushDueSummaries(true)
-    byRelease = takePendingSummaries()
+    byRelease = peekPendingSummaries()
   })
   assert('two releases give two summaries', byRelease.length === 2, `got: ${byRelease.length}`)
 
   reset()
   configureRateLimiter({ sessionLimit: 500, duplicateLimit: 1 })
-  let byUser: ReturnType<typeof takePendingSummaries> = []
+  let byUser: ReturnType<typeof peekPendingSummaries> = []
   withFrozenTime(now, () => {
-    for (let i = 0; i < 3; i++) allow({ severity: 'ERROR', signature: sig, message: 'boom', labels: { releaseId: 'r1', userId: 'u1' } })
-    for (let i = 0; i < 3; i++) allow({ severity: 'ERROR', signature: sig, message: 'boom', labels: { releaseId: 'r1', userId: 'u2' } })
+    for (let i = 0; i < 3; i++) allow({ severity: 'ERROR', signature: sig, labels: { releaseId: 'r1', userId: 'u1' } })
+    for (let i = 0; i < 3; i++) allow({ severity: 'ERROR', signature: sig, labels: { releaseId: 'r1', userId: 'u2' } })
     flushDueSummaries(true)
-    byUser = takePendingSummaries()
+    byUser = peekPendingSummaries()
   })
   assert('two users give two summaries', byUser.length === 2, `got: ${byUser.length}`)
 }
@@ -338,24 +431,24 @@ function testSummarySentOnceAnHourOrWhenForced() {
   const sig = signatureFor(new Error('slow'), 'Checkout')
   const t0 = 1_700_000_000_000
   withFrozenTime(t0, () => {
-    allow({ severity: 'WARNING', signature: sig, message: 'slow' })
-    allow({ severity: 'WARNING', signature: sig, message: 'slow' }) // repeat #1
+    allow({ severity: 'WARNING', signature: sig })
+    allow({ severity: 'WARNING', signature: sig }) // repeat #1
   })
 
   let notYetDue = -1
   withFrozenTime(t0 + 59 * 60_000, () => {
     flushDueSummaries()
-    notYetDue = takePendingSummaries().length
+    notYetDue = peekPendingSummaries().length
   })
   assert('not due yet at 59 minutes', notYetDue === 0, `got: ${notYetDue}`)
 
   withFrozenTime(t0 + 59 * 60_000, () => {
-    allow({ severity: 'WARNING', signature: sig, message: 'slow' }) // repeat #2, keeps firstSeen
+    allow({ severity: 'WARNING', signature: sig }) // repeat #2, keeps firstSeen
   })
   let due = -1
   withFrozenTime(t0 + 61 * 60_000, () => {
     flushDueSummaries()
-    due = takePendingSummaries().length
+    due = peekPendingSummaries().length
   })
   assert('due at 61 minutes from the first repeat', due === 1, `got: ${due}`)
 }
@@ -370,8 +463,8 @@ function testPendingSummarySurvivesAndIsMarkedSentLate() {
   const sig = signatureFor(new Error('late'), 'Home')
   const t0 = 1_700_000_000_000
   withFrozenTime(t0, () => {
-    allow({ severity: 'WARNING', signature: sig, message: 'late' })
-    allow({ severity: 'WARNING', signature: sig, message: 'late' })
+    allow({ severity: 'WARNING', signature: sig })
+    allow({ severity: 'WARNING', signature: sig })
     flushDueSummaries(true)
   })
 
@@ -380,9 +473,9 @@ function testPendingSummarySurvivesAndIsMarkedSentLate() {
   // untouched — exactly what resetRateLimiter is for in tests.
   resetRateLimiter()
 
-  let pending: ReturnType<typeof takePendingSummaries> = []
+  let pending: ReturnType<typeof peekPendingSummaries> = []
   withFrozenTime(t0 + 60_000, () => {
-    pending = takePendingSummaries()
+    pending = peekPendingSummaries()
   })
   assert('the summary survived', pending.length === 1, `got: ${pending.length}`)
   assert('it is marked sentLate', pending[0]?.sentLate === true)
@@ -396,13 +489,13 @@ function testOldSummaryIsDeletedNotSent() {
   const sig = signatureFor(new Error('stale'), 'Home')
   const t0 = 1_700_000_000_000
   withFrozenTime(t0, () => {
-    allow({ severity: 'WARNING', signature: sig, message: 'stale' })
-    allow({ severity: 'WARNING', signature: sig, message: 'stale' })
+    allow({ severity: 'WARNING', signature: sig })
+    allow({ severity: 'WARNING', signature: sig })
     flushDueSummaries(true)
   })
 
   withFrozenTime(t0 + 8 * 24 * 60 * 60 * 1000, () => {
-    const pending = takePendingSummaries()
+    const pending = peekPendingSummaries()
     assert('the stale summary was not sent', pending.length === 0, `got: ${pending.length}`)
   })
 }
@@ -416,15 +509,15 @@ function testMaxPendingSummariesKeepsTheNewest() {
   for (let n = 0; n < 5; n++) {
     const sig = signatureFor(new Error(`err-${n}`), 'Home')
     withFrozenTime(t0 + n * 60_000, () => {
-      allow({ severity: 'WARNING', signature: sig, message: `err-${n}` })
-      allow({ severity: 'WARNING', signature: sig, message: `err-${n}` })
+      allow({ severity: 'WARNING', signature: sig })
+      allow({ severity: 'WARNING', signature: sig })
       flushDueSummaries(true)
     })
   }
 
-  let pending: ReturnType<typeof takePendingSummaries> = []
+  let pending: ReturnType<typeof peekPendingSummaries> = []
   withFrozenTime(t0 + 5 * 60_000, () => {
-    pending = takePendingSummaries()
+    pending = peekPendingSummaries()
   })
   assert('only the cap is kept', pending.length === 3, `got: ${pending.length}`)
   const messages = pending.map((p) => p.message).sort()
@@ -503,14 +596,14 @@ function testLocalStorageFailureIsNonFatal() {
   reset()
   configureRateLimiter({ duplicateLimit: 1 })
   const sig = signatureFor(new Error('boom'), 'Home')
-  allow({ severity: 'WARNING', signature: sig, message: 'boom' })
-  allow({ severity: 'WARNING', signature: sig, message: 'boom' })
+  allow({ severity: 'WARNING', signature: sig })
+  allow({ severity: 'WARNING', signature: sig })
 
   localStorageStub.failing = true
   let threw = false
   try {
     flushDueSummaries(true)
-    assert('no summaries could be taken while storage is blocked', takePendingSummaries().length === 0)
+    assert('no summaries could be taken while storage is blocked', peekPendingSummaries().length === 0)
   } catch {
     threw = true
   }
@@ -527,12 +620,15 @@ function run() {
   testBudgetRefillsOverTime()
   testReloadDoesNotResetTheBudget()
   testErrorReserve()
+  testReserveIsByRank()
+  testSignatureSurvivesColonsAndPipes()
   testDuplicateSuppression()
   testUnsignedLogsAreNeverSuppressedAsDuplicates()
   testSuppressionIsAvailableToAnySeverity()
   testSignatureIsScopedToContext()
   testStringErrorsAreSupported()
   testSessionLimitOutranksDuplicate()
+  testSignatureMapIsBounded()
   testTwoHundredCopiesSendThreeFullEntriesAndOneSummary()
   testTwoReleasesOrTwoUsersGiveTwoSummaries()
   testSummarySentOnceAnHourOrWhenForced()
