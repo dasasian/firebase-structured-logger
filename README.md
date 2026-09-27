@@ -674,6 +674,13 @@ initLogger({
 })
 ```
 
+The client's production default comes from `process.env.NODE_ENV`, which Vite replaces at
+build time. A `define: { 'process.env': {} }` in `vite.config` — common, to quiet a library
+that expects Node — replaces the whole object instead, `NODE_ENV` reads as undefined, and
+the floor is silently `DEBUG` in production. If your config has that line, pass
+`minLogLevel` explicitly. Stating it is the safe habit either way: it is the one default
+here whose failure mode is a bill rather than a missing log.
+
 ### The budget refills
 
 Each browser tab starts with 50 logs. Every log spends one, and one comes back each minute,
@@ -728,13 +735,6 @@ not the summary. For the true count, add up `labels.repeatCount` in Cloud Loggin
 
 Summaries do not spend the log budget. There is at most one per error, per release, per user,
 per hour.
-
-The client's production default comes from `process.env.NODE_ENV`, which Vite replaces at
-build time. A `define: { 'process.env': {} }` in `vite.config` — common, to quiet a library
-that expects Node — replaces the whole object instead, `NODE_ENV` reads as undefined, and
-the floor is silently `DEBUG` in production. If your config has that line, pass
-`minLogLevel` explicitly. Stating it is the safe habit either way: it is the one default
-here whose failure mode is a bill rather than a missing log.
 
 ### What a dropped log looks like
 
