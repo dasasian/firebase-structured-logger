@@ -186,6 +186,25 @@ chain in `sourceMapCache.ts` is the worked example.
 `tests/loadsWithoutOptionalPeers.ts` checks every `src/` file for a top-level value
 import of any peer. `npm run smoke:install` does it for real against the packed tarball.
 
+## fsl doctor — facts, not guesses
+
+Doctor reports only what it can read from a file with a fixed format — `firebase.json`,
+`package.json`, `node_modules/*/package.json`, `dist/`, `.release` — and never infers
+from source code. A check that has to guess ("is `initLogger` called?") stays out, or
+ships later as a finding marked as a hint. A doctor that is sometimes wrong is ignored.
+
+A check that cannot run is the error `could-not-check`, never a pass: expo-doctor once
+exited 0 when it could not read its config, and CI went green on projects nobody
+checked. The finding ids and `--json` fields are public API from 1.0.
+
+## Tests run from a fresh clone
+
+Everything in `npm test` and `npm run smoke:install` must run for someone who has just
+cloned the repo and run `npm install` — no Google Cloud project, no `.env` files, no
+installs in `smoke/`. Doctor's tests build small fake projects in temp folders rather
+than pointing at `smoke/functions` or `smoke/cloudrun`, which depend on the maintainer's
+private smoke setup. Only `npm run smoke` needs a real project.
+
 ## Releasing
 
 A library → **npm only** (no registry, no `server.json`, no tag-triggered publish workflow).

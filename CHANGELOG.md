@@ -7,6 +7,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`fsl doctor`** checks the setup from disk — no network, no credentials — and prints how it will behave plus any findings, as text or `--json`. It reports only facts it can read from files, never guesses from source code. Errors fail with exit code 1, `--strict` fails on warnings too, and a check it could not run always fails. `--backend`/`--dist` point it at a setup with no `firebase.json`.
+
 ### Fixed
 
 - **Warnings could spend the error reserve.** The log limit recharges continuously, so its count is almost never a whole number, and the reserve check `available <= reserve` let a warning through at, say, 1.02 with a reserve of 1 — spending the room kept for the next crash. It now asks whether spending one log would dip into the reserve. Found as a CI-only test flake: on a fast machine the calls share one millisecond and the count stays whole.
@@ -19,7 +23,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Deprecated
 
-- **Seven names, renamed before the 1.0 API freeze.** `minLogLevel` → `minSeverity` (the server already used it, and so does Cloud Logging); `bucketName` → `bucket` (every other bucket option already was); `rateLimitOptions.sessionLimit` → `burstLimit`, `refillPerMinute` → `rechargeSecondsPerLog`, and `errorReserve` (a share) → `reservedForErrors` (a count), because the limit now recharges one log at a time rather than lasting a session; type `ClientLogRequest` → `LogRequest`; `triggerTestLog()` → `sendTestLog()`. Every old name still works in 1.x with a one-time console warning, and is removed in 2.0. The README's Reference has the full table.
+- **Eight names, renamed before the 1.0 API freeze.** `minLogLevel` → `minSeverity` (the server already used it, and so does Cloud Logging); `bucketName` → `bucket` (every other bucket option already was); `rateLimitOptions.sessionLimit` → `burstLimit`, `refillPerMinute` → `rechargeSecondsPerLog`, and `errorReserve` (a share) → `reservedForErrors` (a count), because the limit now recharges one log at a time rather than lasting a session; type `ClientLogRequest` → `LogRequest`; `triggerTestLog()` → `sendTestLog()`; the CLI flag `fsl upload-sourcemaps --functions` → `--backend`. Every old name still works in 1.x with a one-time console warning, and is removed in 2.0. The README's Reference has the full table.
 
 ## [0.9.0] — 2026-09-27
 

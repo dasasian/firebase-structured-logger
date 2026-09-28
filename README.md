@@ -137,7 +137,7 @@ to your project's default bucket.
 **3. Wire the deploy script** — upload source maps and strip them from the hosting bundle as part of deploy. Merge into your root `package.json` scripts, keeping any existing flags like `--project`:
 
 ```json
-"deploy": "export VITE_RELEASE_ID=$(git rev-parse --short HEAD) && npm run build && npx fsl upload-sourcemaps --functions=./functions --embed-sourcemaps && firebase deploy"
+"deploy": "export VITE_RELEASE_ID=$(git rev-parse --short HEAD) && npm run build && npx fsl upload-sourcemaps --backend=./functions --embed-sourcemaps && firebase deploy"
 ```
 
 `fsl upload-sourcemaps` reads the bucket from `VITE_FIREBASE_STORAGE_BUCKET` (or `FIREBASE_STORAGE_BUCKET`) after loading `.env.local`. It uploads source maps to Cloud Storage, embeds a copy in `functions/sourcemaps/current/` for fast lookup, and deletes them from `dist/` so they are **not** served to browsers.
@@ -343,6 +343,71 @@ A gate that throws counts as a rejection, not an opening.
   `firebase-admin` nor a bucket name, the log says so once at the first lookup.
 - **Response codes:** `204` written, `400` malformed payload, `401` gate refused, `405`
   not a POST, `500` something else. The client treats a non-2xx as a throw.
+
+## Check your setup
+
+Most of what can go wrong here goes wrong silently: logs that never arrive, stacks that
+never resolve, source code published next to the app. `fsl doctor` reads the project from
+disk and says what it finds. It needs no network and no credentials, and it only reports
+facts it can read from a file — it never guesses from your source code, so a finding is
+never a false alarm.
+
+```bash
+npx fsl doctor                                     # Firebase: reads firebase.json
+npx fsl doctor --backend=./server --dist=./dist    # anything else: say where things are
+```
+
+It prints a summary of how your setup will behave, then any findings:
+
+```
+Setup: Firebase — functions in ./functions, web build in ./dist
+
+  Logging        firebase-functions write()              ok
+  Trace ids      from each Cloud Functions trigger       ok
+  Storage        firebase-admin, default bucket          ok
+  Callable       createClientLogFunction available       ok
+
+  ⚠ duplicate-storage   2 copies of @google-cloud/storage (8.2.0 for fsl, 7.22.0 for firebase-admin)
+                        Fix: npm dedupe
+```
+
+| Id | Level | Means |
+|---|---|---|
+| `maps-published` | error | `.map` files are in the folder hosting serves — your source code is public |
+| `node-version` | error | the backend's Node is below 22 |
+| `callable-without-firebase-functions` | error | `firebase.json` has functions, but `firebase-functions` is not installed there |
+| `could-not-check` | error | doctor could not read something it needed — including "run `npm install` first" |
+| `duplicate-storage` | warning | two copies of `@google-cloud/storage`; fix with `npm dedupe` |
+| `unsupported-peer` | warning | an installed peer (`firebase-admin`, `firebase-functions`, `firebase`) is outside the supported range |
+| `embedded-maps-without-release` | warning | maps are embedded without a `.release` marker, so an older release can resolve against the wrong map |
+
+**Exit code:** `0` when there are no errors, `1` when there is one. `--strict` also fails on
+warnings, for teams that want a spotless setup; without it, a deliberate choice like
+running with no Storage does not break CI. A check doctor could not run is always an
+error, never a pass.
+
+**`--json`** prints the same result for scripts and agents:
+
+```json
+{
+  "setup": { "kind": "firebase", "backend": "./functions", "dist": "./dist",
+             "logging": "firebase-functions", "trace": "trigger", "storage": "firebase-admin",
+             "callable": true },
+  "findings": [
+    { "id": "duplicate-storage", "level": "warning",
+      "message": "2 copies of @google-cloud/storage (8.2.0 for fsl, 7.22.0 for firebase-admin)",
+      "fix": "npm dedupe" }
+  ],
+  "exitCode": 0
+}
+```
+
+The ids and fields are part of the 1.0 API: scripts may depend on them.
+
+What doctor does not check: anything set in your own code — the release id you pass to
+`initLogger`, a bucket name passed to a handler. It says so ("bucket: set in code, not
+checked") rather than guessing. [`fsl verify`](https://github.com/dasasian/firebase-structured-logger/issues/25),
+planned after 1.0, will check those by sending a real log.
 
 ## Local development
 
@@ -844,6 +909,7 @@ and are removed in 2.0:
 | `rateLimitOptions.errorReserve` (a share) | `rateLimitOptions.reservedForErrors` (a count: `errorReserve × burstLimit`) |
 | type `ClientLogRequest` | type `LogRequest` |
 | `triggerTestLog()` | `sendTestLog()` |
+| `fsl upload-sourcemaps --functions=<dir>` | `--backend=<dir>` (it is not only for Cloud Functions) |
 
 `Logger` is exported as a **type only** — the client logger is a session singleton, so
 annotate with `Logger<MyAppLabels>` and construct with `initLogger()`. A second instance
@@ -879,13 +945,18 @@ bare handler only if you are wrapping it in something else yourself.
 
 ```bash
 # Upload source maps to Cloud Storage and strip local .map files (run in deploy)
-npx fsl upload-sourcemaps --functions=./functions --embed-sourcemaps
+npx fsl upload-sourcemaps --backend=./functions --embed-sourcemaps
 
 # Same, to a bucket and prefix of your choosing — tell the reader the same values
-npx fsl upload-sourcemaps --functions=./functions --embed-sourcemaps --bucket=my-maps --prefix=fsl-maps
+npx fsl upload-sourcemaps --backend=./functions --embed-sourcemaps --bucket=my-maps --prefix=fsl-maps
 
 # No bucket at all: embed the current release, upload nothing
-npx fsl upload-sourcemaps --functions=./backend --embed-sourcemaps
+npx fsl upload-sourcemaps --backend=./backend --embed-sourcemaps
+
+# Check the setup from disk — no network, no credentials (see "Check your setup")
+npx fsl doctor
+npx fsl doctor --backend=./server --dist=./dist   # no firebase.json to read
+npx fsl doctor --strict --json                   # CI: fail on warnings too, machine-readable
 
 # Install the Claude Code skills into the current project (or --global, --force)
 npx fsl install-skills
