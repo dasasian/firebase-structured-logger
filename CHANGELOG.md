@@ -7,6 +7,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Built with TypeScript 6** (was 5.9), with `module`/`moduleResolution: node16`. The published JavaScript is byte-identical and the `.d.ts` unchanged; a consumer on TypeScript 5.9, or resolving with `node16` or `bundler`, compiles against it as before.
+
 ### Deprecated
 
 - **Seven names, renamed before the 1.0 API freeze.** `minLogLevel` → `minSeverity` (the server already used it, and so does Cloud Logging); `bucketName` → `bucket` (every other bucket option already was); `rateLimitOptions.sessionLimit` → `burstLimit`, `refillPerMinute` → `rechargeSecondsPerLog`, and `errorReserve` (a share) → `reservedForErrors` (a count), because the limit now recharges one log at a time rather than lasting a session; type `ClientLogRequest` → `LogRequest`; `triggerTestLog()` → `sendTestLog()`. Every old name still works in 1.x with a one-time console warning, and is removed in 2.0. The README's Reference has the full table.
