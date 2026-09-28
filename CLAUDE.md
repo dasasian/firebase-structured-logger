@@ -11,6 +11,13 @@ no MCP registry step.
 
 `npm run build` (tsc) · `npm run typecheck` · `npm test`.
 
+**TypeScript 6, not 7, on purpose.** Both were tried against this repo: the emitted `.js`
+is byte-identical across 5.9, 6.0 and 7.0, and 7 changes only quote style in one `.d.ts`.
+6 is chosen because 7.0 has no programmatic compiler API until 7.1, and tools this
+package may want (typedoc, typescript-eslint) need it. Both builds use `module`/
+`moduleResolution: node16` — TS 7 removed `Node` (node10) — so moving to 7 later is a
+version bump. Dependabot ignores TypeScript majors for that reason.
+
 `typecheck` runs **two** configs. `tsconfig.json` is the build — CommonJS, `rootDir ./src`,
 and it covers `src/` only. `tsconfig.check.json` covers `tests/` and `smoke/` as well, with
 ESM settings and `noEmit`, because `smoke/run.ts` uses `import.meta` and CommonJS rejects it
