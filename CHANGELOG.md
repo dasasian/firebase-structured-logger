@@ -7,6 +7,15 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-09-27
+
+The logger no longer goes quiet when things get bad. A long session used to spend its
+50-log budget by mid-morning and send nothing after, a flood of one error hid everything
+behind it, and an entry past 100 KiB arrived as broken text. Now the budget refills and
+keeps a fifth for errors, repeats are counted and sent as a summary — on the next visit
+if the tab closed first — and a big entry is shortened with its full copy in Storage.
+Each was checked live, and the live checks found two bugs the unit tests had passed.
+
 ### Changed
 
 - **The client's log budget refills, keeps an error reserve, and turns repeats into summaries instead of dropping them (#40).** The budget was 50 logs per page load, cleared on `beforeunload`, with every severity spending from the same pool and every duplicate past 3 copies simply dropped. Now: the budget refills at `refillPerMinute` (default 1/min) and survives a reload in `sessionStorage` — `beforeunload` no longer resets it; the last `errorReserve` share (default 20%) can only be spent by `ERROR` and above, by rank (`SEVERITY_ORDER`), so `CRITICAL`, `ALERT` and `EMERGENCY` — new severities, see below — may spend it too; and after `duplicateLimit` full copies, further occurrences are counted rather than dropped and sent as one `WARNING` summary — hourly, when the tab is hidden, and once at startup for anything a previous visit left queued — carrying `repeatOf`, `repeatCount`, `firstSeen`, `lastSeen`, and `appId`/`releaseId`/`userId`/`screen`/`errorType` recovered from the signature itself rather than a second stored copy of them. The browser has no server `logId` for the first copy, so `repeatOf` instead points at a client-side `labels.repeatKey` that every full copy carries. The per-signature map is capped at 200 entries (evicting the oldest with nothing pending first) so a flood of distinct messages cannot grow it without bound. Unsent summaries wait in `localStorage` (survives the tab closing), capped at `maxPendingSummaries`, expired after `summaryMaxAgeDays`, marked `sentLate="true"` when a later visit sends them, and removed from the queue only once their send has actually succeeded — a failed send (offline, or the tab closing right after) leaves it queued for the next flush or visit to retry, never twice. All seven numbers are configurable via `rateLimitOptions`. The three console messages a dropped or counted log produces changed to match. See README, "Volume controls".
@@ -18,6 +27,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Documentation
 
+- **`/query-logs` counts repeats.** The shipped skill now adds `repeatCount` from the summaries to the full copies when asked how often something happened, and reads `fsl-overflow.json` for a shortened entry. The README's Querying table gains the `truncated`, `repeatKey`/`repeatOf` and `sentLate` filters.
 - **The server half has to run on Google Cloud.** 0.8.0's README said "any Node server". Entries go to stdout, which reaches Cloud Logging only on Cloud Functions, Cloud Run, GKE, App Engine, or Compute Engine with the Ops Agent — elsewhere they print and go nowhere.
 
 ## [0.8.0] — 2026-09-24
@@ -217,7 +227,8 @@ The README is reorganised around what you get rather than how the machine is bui
 - **Emulator mode** — under `FUNCTIONS_EMULATOR=true`, entries are written to a local `dev.jsonl` with rotation instead of Cloud Logging, so local development needs no live credentials.
 - **`fsl` CLI** — source map upload to Storage, deploy packing, and skill installation.
 
-[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.5.0...v0.6.0
