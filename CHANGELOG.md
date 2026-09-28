@@ -7,6 +7,15 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-09-28
+
+The API is stable. From here, a breaking change means 2.0. Before freezing it, every
+public name was reviewed and eight were renamed; the old ones keep working through 1.x
+with a one-time warning, so upgrading breaks nothing. New in 1.0 is `fsl doctor`, which
+reads a setup off disk and says what will go wrong before it does. Also here: warnings
+can no longer spend the error reserve, one copy of Storage whatever firebase-admin a
+project has, TypeScript 6, and Node 22 and 24 tested — Node 20 reached end of life.
+
 ### Added
 
 - **`fsl doctor`** checks the setup from disk — no network, no credentials — and prints how it will behave plus any findings, as text or `--json`. It reports only facts it can read from files, never guesses from source code. Errors fail with exit code 1, `--strict` fails on warnings too, and a check it could not run always fails. `--backend`/`--dist` point it at a setup with no `firebase.json`.
@@ -245,7 +254,8 @@ The README is reorganised around what you get rather than how the machine is bui
 - **Emulator mode** — under `FUNCTIONS_EMULATOR=true`, entries are written to a local `dev.jsonl` with rotation instead of Cloud Logging, so local development needs no live credentials.
 - **`fsl` CLI** — source map upload to Storage, deploy packing, and skill installation.
 
-[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.6.0...v0.7.0
