@@ -387,7 +387,11 @@ export class Logger<
       `Repeated ${summary.repeatCount} more times: ${summary.message}`,
       'WARNING',
       labels,
-      undefined,
+      // A body besides the message. With only `message` left once the timestamp
+      // is promoted, Cloud Logging files the entry as textPayload, and a search on
+      // jsonPayload.message — /query-logs, or anyone's saved query — misses every
+      // summary. The smoke run found it.
+      { repeat: { count: summary.repeatCount, firstSeen: summary.firstSeen, lastSeen: summary.lastSeen } },
       undefined,
       undefined,
       undefined,

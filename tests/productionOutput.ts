@@ -217,7 +217,13 @@ function testSummaryTimestampIsUsed() {
       timestamp: lastSeen,
     }),
   )
-  assert('the entry carries the summary timestamp', entry?.timestamp === lastSeen, String(entry?.timestamp))
+  // The shape Cloud Logging's agent reads — an ISO string under `timestamp` is not
+  // one, and passed this test while being ignored live. See writeLog.
+  const ts = entry?.timestamp as { seconds?: number; nanos?: number } | undefined
+  const expected = Date.parse(lastSeen)
+  assert('the summary timestamp is written as { seconds, nanos }',
+    ts?.seconds === Math.floor(expected / 1000) && ts?.nanos === (expected % 1000) * 1_000_000,
+    JSON.stringify(entry?.timestamp))
 }
 
 function testNonSummaryTimestampIsIgnored() {

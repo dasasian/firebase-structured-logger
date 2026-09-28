@@ -609,6 +609,7 @@ async function main(): Promise<void> {
 
   await cloudRunLeg()
   await bigEntryLeg()
+  await repeatSummaryLeg()
 }
 
 // --- Cloud Run: the backend without firebase-functions or firebase-admin (#39) ---
@@ -771,6 +772,81 @@ async function bigEntryLeg(): Promise<void> {
         `got ${full.context?.blob?.length}`)
     }
   }
+}
+
+// --- A repeat summary keeps its own time (#40) ---
+
+/**
+ * A repeat summary is sent after the fact — up to an hour later, or on a later visit —
+ * so writeLog writes the client's `timestamp` into the entry, but only for a summary
+ * (`labels.repeatCount` present) and only within the last 8 days. The unit suites prove
+ * the entry carries the field; only Cloud Logging can say it honours it. This sends a
+ * summary stamped two hours ago and a plain WARNING carrying the same stamp, and checks
+ * that the first lands two hours back and the second at the time it was written.
+ */
+async function repeatSummaryLeg(): Promise<void> {
+  console.log('\n  --- a repeat summary keeps its own time ---')
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000)
+  const stamp = twoHoursAgo.toISOString()
+  const summaryMarker = `[fsl-verify] repeat summary ${RUN_ID}`
+  const plainMarker = `[fsl-verify] plain with timestamp ${RUN_ID}`
+  const base = { appId: env.FSL_SMOKE_APP_ID ?? 'smoke-app', releaseId: RELEASE_ID, smokeRunId: RUN_ID }
+
+  const sentAt = Date.now()
+  await callFunction('fslSmokeClient', {
+    message: summaryMarker,
+    severity: 'WARNING',
+    // The same body the client gives a summary (sendRepeatSummary), so it is
+    // filed as JSON and not textPayload.
+    jsonPayload: { context: { repeat: { count: 197 } } },
+    labels: {
+      ...base,
+      repeatOf: 'smoke-repeat-key',
+      repeatCount: '197',
+      firstSeen: new Date(twoHoursAgo.getTime() - 50 * 60 * 1000).toISOString(),
+      lastSeen: stamp,
+      sentLate: 'true',
+    },
+    timestamp: stamp,
+  })
+  await callFunction('fslSmokeClient', {
+    message: plainMarker,
+    severity: 'WARNING',
+    labels: base,
+    // Without a second payload field, Cloud Logging files a message-only entry as
+    // textPayload, and the jsonPayload.message filter below would never see it.
+    jsonPayload: { context: { runId: RUN_ID } },
+    timestamp: stamp,
+  })
+
+  // Filtered on the marker, with a window reaching back past the stamp — a
+  // summary filed two hours ago is outside any "since the run started" window.
+  const find = async (marker: string) =>
+    (await listEntriesRest(`jsonPayload.message:"${marker}" AND timestamp >= "${new Date(twoHoursAgo.getTime() - 60_000).toISOString()}"`))[0]
+  let summary: SmokeEntry | undefined
+  let plain: SmokeEntry | undefined
+  const started = Date.now()
+  let delay = 4_000
+  while (Date.now() - started < 240_000 && (!summary || !plain)) {
+    summary ??= await find(summaryMarker)
+    plain ??= await find(plainMarker)
+    if (!summary || !plain) {
+      await new Promise((r) => setTimeout(r, delay))
+      delay = Math.min(delay * 1.4, 15_000)
+    }
+  }
+
+  const summaryTime = Date.parse(summary?.metadata?.timestamp ?? '')
+  const plainTime = Date.parse(plain?.metadata?.timestamp ?? '')
+  assert('the summary arrived', summary !== undefined)
+  assert('it is filed at its own lastSeen, two hours back',
+    Math.abs(summaryTime - twoHoursAgo.getTime()) < 1_000, `got: ${summary?.metadata?.timestamp}, sent: ${stamp}`)
+  const labels = summary?.metadata?.labels ?? {}
+  assert('its repeat labels survived', labels.repeatCount === '197' && labels.repeatOf === 'smoke-repeat-key'
+    && labels.sentLate === 'true', `got: ${JSON.stringify(labels)}`)
+  assert('the plain WARNING arrived', plain !== undefined)
+  assert('a non-summary keeps the server\'s time, not the one it sent',
+    Math.abs(plainTime - sentAt) < 5 * 60 * 1000, `got: ${plain?.metadata?.timestamp}, sent stamp: ${stamp}`)
 }
 
 async function cleanup(): Promise<void> {

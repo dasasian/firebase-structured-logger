@@ -442,6 +442,12 @@ logger.error(err, { orderId })
 | resolved file and line | function | your source maps — `Checkout.tsx:42`, not `app-4f2a.js:1:98432` |
 | trace context | function | request correlation in Cloud Logging |
 
+**Repeats are counted, not thrown away.** The usual answer to an error that fires 200 times
+is to send the first few and drop the rest. This one sends 3 in full, counts the other 197,
+and tells you when it started, when it stopped, which release and which user. Close the tab
+and the count waits on the device for the next visit. See
+[Repeats are counted, not dropped](#repeats-are-counted-not-dropped).
+
 Backend logs get the same treatment: `withLogging` attaches `functionName`, `userId` from
 the verified `request.auth.uid`, and whatever else you bind.
 
@@ -705,6 +711,9 @@ WARNING  Repeated 197 more times: cart sync failed
          labels.repeatOf="<repeatKey of the first copy>"  labels.repeatCount="197"
          labels.firstSeen="…"  labels.lastSeen="…"
 ```
+
+The same count and window are in the entry's body, under `context.repeat`, so a summary is
+filed as JSON like every other entry and a search on `jsonPayload.message` finds it.
 
 The browser never learns the server's `logId` for the first copy — `writeLog` assigns it
 after the log has already left the tab. So each full copy instead carries its own

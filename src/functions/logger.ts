@@ -121,6 +121,7 @@ function truncateStackLines(stack: string, keepLines: number): string {
 // serviceContext are never removed by any step.
 const PROTECTED_ENTRY_KEYS = new Set([
   "severity",
+  "timestamp",
   "message",
   "logging.googleapis.com/labels",
   "logging.googleapis.com/trace",
@@ -525,7 +526,11 @@ export function writeLog(
   // trusted. Bounded to the last 8 days and no more than 5 minutes into the
   // future, so a malformed or stale value cannot backdate — or postdate — an
   // entry into or out of a retention window.
-  let summaryTimestamp: string | undefined;
+  // Written as `{ seconds, nanos }`: an RFC 3339 *string* under `timestamp` is
+  // not one of the shapes Cloud Logging's agent reads (it takes this object, a
+  // timestampSeconds/timestampNanos pair, or a `time` string), so it stays in
+  // jsonPayload and the entry keeps its ingestion time. The smoke run caught it.
+  let summaryTimestamp: { seconds: number; nanos: number } | undefined;
   if ((labels as Record<string, unknown>).repeatCount !== undefined && payload.timestamp) {
     const parsed = Date.parse(payload.timestamp);
     if (!Number.isNaN(parsed)) {
@@ -533,7 +538,7 @@ export function writeLog(
       const eightDaysMs = 8 * 24 * 60 * 60 * 1000;
       const fiveMinutesMs = 5 * 60 * 1000;
       if (now - parsed <= eightDaysMs && parsed - now <= fiveMinutesMs) {
-        summaryTimestamp = payload.timestamp;
+        summaryTimestamp = { seconds: Math.floor(parsed / 1000), nanos: (parsed % 1000) * 1_000_000 };
       }
     }
   }
@@ -543,9 +548,10 @@ export function writeLog(
     message: payload.message,
     "logging.googleapis.com/labels": labels,
     ...(trace ? { "logging.googleapis.com/trace": trace } : {}),
-    ...(summaryTimestamp ? { timestamp: summaryTimestamp } : {}),
     ...errorReporting,
     ...jsonPayload,
+    // Last, so a payload field of the same name cannot replace it.
+    ...(summaryTimestamp ? { timestamp: summaryTimestamp } : {}),
   };
 
   if (entryByteLength(finishedEntry) <= MAX_ENTRY_BYTES) {

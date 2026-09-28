@@ -195,6 +195,9 @@ async function testTwoHundredErrorsThroughTheLoggerSendThreeCopiesAndASummary() 
   assert('exactly one summary was sent', summaries.length === 1, `got ${summaries.length}`)
   const summary = summaries[0]!
   assert('repeatCount is 197', summary.labels.repeatCount === '197', `got: ${summary.labels.repeatCount}`)
+  // A body besides the message, so Cloud Logging files it as JSON, not textPayload.
+  const repeat = (summary.jsonPayload?.context as { repeat?: { count?: number } } | undefined)?.repeat
+  assert('the summary has a JSON body with the count', repeat?.count === 197, JSON.stringify(summary.jsonPayload))
   assert('repeatOf matches the full copies’ repeatKey', summary.labels.repeatOf === repeatKey)
   assert('it is a WARNING', summary.severity === 'WARNING')
   assert('it carries no stack', summary.jsonPayload?.error === undefined)
