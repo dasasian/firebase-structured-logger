@@ -28,7 +28,7 @@ initLogger({
 function reset() {
   captured = []
   clearBreadcrumbs()
-  configureRateLimiter({ sessionLimit: 50, duplicateLimit: 3 })
+  configureRateLimiter({ burstLimit: 50, duplicateLimit: 3 })
   resetRateLimiter()
 }
 

@@ -1,9 +1,10 @@
 import type { LogSeverity } from '../shared/types'
 import { SEVERITY_ORDER } from '../shared/severity'
+import { warnDeprecated } from '../shared/deprecate'
 
-const DEFAULT_SESSION_LIMIT = 50
-const DEFAULT_REFILL_PER_MINUTE = 1
-const DEFAULT_ERROR_RESERVE = 0.2
+const DEFAULT_BURST_LIMIT = 50
+const DEFAULT_RECHARGE_SECONDS_PER_LOG = 60
+const DEFAULT_RESERVED_FOR_ERRORS = 10
 const DEFAULT_DUPLICATE_LIMIT = 3
 const DEFAULT_STORAGE_KEY = 'fsl_ratelimit'
 const DEFAULT_SUMMARY_INTERVAL_MINUTES = 60
@@ -27,11 +28,12 @@ const MAX_SIGNATURES = 200
 
 export interface RateLimitConfig {
   /** The budget: how many logs can go out at once. Default 50. */
-  sessionLimit?: number
-  /** How fast the budget comes back, per minute. Default 1. */
-  refillPerMinute?: number
-  /** Share of `sessionLimit` only ERROR and above may spend. Default 0.2. */
-  errorReserve?: number
+  burstLimit?: number
+  /** After a burst, how many seconds before one more log recharges. Default 60. */
+  rechargeSecondsPerLog?: number
+  /** Of `burstLimit`, how many only ERROR and above may spend. A value over half of
+   *  `burstLimit` is capped at half, with one warning. Default 10. */
+  reservedForErrors?: number
   /** Full copies of one error before it is only counted. Default 3. */
   duplicateLimit?: number
   storageKey?: string
@@ -41,6 +43,13 @@ export interface RateLimitConfig {
   summaryMaxAgeDays?: number
   /** Most pending summaries kept at once; oldest are dropped first. Default 50. */
   maxPendingSummaries?: number
+
+  /** @deprecated Use `burstLimit`. */
+  sessionLimit?: number
+  /** @deprecated Use `rechargeSecondsPerLog` (`60 / refillPerMinute`). */
+  refillPerMinute?: number
+  /** @deprecated Use `reservedForErrors` (`Math.round(errorReserve * burstLimit)`), a count rather than a share. */
+  errorReserve?: number
 }
 
 /**
@@ -117,12 +126,17 @@ export interface SentSummary {
   sentLate: boolean
 }
 
+/** The config actually held in module scope — always the new names, never the aliases. */
+type ResolvedRateLimitConfig = Required<
+  Omit<RateLimitConfig, 'sessionLimit' | 'refillPerMinute' | 'errorReserve'>
+>
+
 // Session-scoped by design: one browser session, one budget. Deliberately not
 // per-Logger — see the module-scoped state rule in CLAUDE.md.
-let config: Required<RateLimitConfig> = {
-  sessionLimit: DEFAULT_SESSION_LIMIT,
-  refillPerMinute: DEFAULT_REFILL_PER_MINUTE,
-  errorReserve: DEFAULT_ERROR_RESERVE,
+let config: ResolvedRateLimitConfig = {
+  burstLimit: DEFAULT_BURST_LIMIT,
+  rechargeSecondsPerLog: DEFAULT_RECHARGE_SECONDS_PER_LOG,
+  reservedForErrors: DEFAULT_RESERVED_FOR_ERRORS,
   duplicateLimit: DEFAULT_DUPLICATE_LIMIT,
   storageKey: DEFAULT_STORAGE_KEY,
   summaryIntervalMinutes: DEFAULT_SUMMARY_INTERVAL_MINUTES,
@@ -130,8 +144,50 @@ let config: Required<RateLimitConfig> = {
   maxPendingSummaries: DEFAULT_MAX_PENDING_SUMMARIES,
 }
 
+/**
+ * `reservedForErrors` above half of `burstLimit` would leave warnings no room
+ * to spend at all, so it is capped there — whether it arrived directly or was
+ * converted from the deprecated `errorReserve`. Warned once per process, like
+ * the renames themselves.
+ */
+let warnedReservedForErrorsCapped = false
+function capReservedForErrors(value: number, burstLimit: number): number {
+  const half = burstLimit / 2
+  if (value <= half) return value
+  if (!warnedReservedForErrorsCapped) {
+    warnedReservedForErrorsCapped = true
+    console.warn('[fsl] "reservedForErrors" above half of "burstLimit" is capped at half, so warnings always have room.')
+  }
+  return half
+}
+
 export function configureRateLimiter(options: RateLimitConfig): void {
-  config = { ...config, ...options }
+  const { sessionLimit, refillPerMinute, errorReserve, burstLimit, rechargeSecondsPerLog, reservedForErrors, ...rest } =
+    options
+
+  if (sessionLimit !== undefined) warnDeprecated('sessionLimit', 'burstLimit')
+  const resolvedBurstLimit = burstLimit ?? sessionLimit
+
+  if (refillPerMinute !== undefined) warnDeprecated('refillPerMinute', 'rechargeSecondsPerLog')
+  const resolvedRecharge = rechargeSecondsPerLog ?? (refillPerMinute !== undefined ? 60 / refillPerMinute : undefined)
+
+  // Needed to convert `errorReserve` (a share) and to cap either name — both
+  // read the burst limit this same call is possibly also changing.
+  const effectiveBurstLimit = resolvedBurstLimit ?? config.burstLimit
+
+  if (errorReserve !== undefined) warnDeprecated('errorReserve', 'reservedForErrors')
+  const rawReservedForErrors =
+    reservedForErrors ?? (errorReserve !== undefined ? Math.round(errorReserve * effectiveBurstLimit) : undefined)
+  const resolvedReservedForErrors =
+    rawReservedForErrors !== undefined ? capReservedForErrors(rawReservedForErrors, effectiveBurstLimit) : undefined
+
+  config = {
+    ...config,
+    ...rest,
+    ...(resolvedBurstLimit !== undefined ? { burstLimit: resolvedBurstLimit } : {}),
+    ...(resolvedRecharge !== undefined ? { rechargeSecondsPerLog: resolvedRecharge } : {}),
+    ...(resolvedReservedForErrors !== undefined ? { reservedForErrors: resolvedReservedForErrors } : {}),
+  }
 }
 
 // This tab's identity for `sentLate`. Regenerated by `resetRateLimiter`, which
@@ -144,7 +200,7 @@ function generateId(): string {
 }
 
 function defaultState(): RateLimitState {
-  return { available: config.sessionLimit, lastRefillAt: Date.now(), signatures: {} }
+  return { available: config.burstLimit, lastRefillAt: Date.now(), signatures: {} }
 }
 
 function readState(): RateLimitState {
@@ -187,13 +243,14 @@ function isExpired(summary: PendingSummary, now: number): boolean {
 
 /**
  * Refill the budget for the time elapsed since it was last touched, capped at
- * `sessionLimit`. Mutates `state` in place; the caller decides whether the
+ * `burstLimit`. Mutates `state` in place; the caller decides whether the
  * result is worth persisting.
  */
 function refill(state: RateLimitState, now: number): void {
   const elapsedMinutes = (now - state.lastRefillAt) / 60_000
   if (elapsedMinutes <= 0) return
-  state.available = Math.min(config.sessionLimit, state.available + elapsedMinutes * config.refillPerMinute)
+  const perMinute = 60 / config.rechargeSecondsPerLog
+  state.available = Math.min(config.burstLimit, state.available + elapsedMinutes * perMinute)
   state.lastRefillAt = now
 }
 
@@ -336,7 +393,7 @@ export function allow(options: AllowOptions): RateLimitDecision {
     return { allowed: false, reason: 'duplicate', signature: options.signature }
   }
 
-  const reserveThreshold = config.sessionLimit * config.errorReserve
+  const reserveThreshold = config.reservedForErrors
   if (state.available < 1) {
     writeState(state)
     return { allowed: false, reason: 'session-limit' }

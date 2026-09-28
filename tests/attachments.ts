@@ -20,12 +20,12 @@ import { assert, reportResults } from './testHelpers.js'
 
 function makeLogger(): { send: (a?: Record<string, Blob | File | string>) => void; last: () => LogPayload | undefined } {
   let captured: LogPayload | undefined
-  configureRateLimiter({ sessionLimit: 500, duplicateLimit: 99 })
+  configureRateLimiter({ burstLimit: 500, duplicateLimit: 99 })
   resetRateLimiter()
   const logger = initLogger({
     appId: 'acme',
     releaseId: 'r1',
-    minLogLevel: 'DEBUG',
+    minSeverity: 'DEBUG',
     logFunction: async (data) => {
       captured = data
     },

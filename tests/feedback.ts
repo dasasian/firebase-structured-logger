@@ -21,16 +21,16 @@ import { assert, reportResults } from './testHelpers.js'
 
 let captured: LogPayload[] = []
 
-function freshLogger(minLogLevel: LogSeverity = 'DEBUG') {
+function freshLogger(minSeverity: LogSeverity = 'DEBUG') {
   captured = []
   clearBreadcrumbs()
   sessionStorageStub.failing = false
-  configureRateLimiter({ sessionLimit: 50, duplicateLimit: 3 })
+  configureRateLimiter({ burstLimit: 50, duplicateLimit: 3 })
   resetRateLimiter()
   return initLogger({
     appId: 'acme',
     releaseId: 'r1',
-    minLogLevel,
+    minSeverity,
     logFunction: async (data) => { captured.push(data) },
   })
 }
@@ -68,7 +68,7 @@ async function testAnOrdinaryNoticeStillRespectsTheFloor() {
 async function testIgnoresTheSessionLimit() {
   console.log('\nTest: feedback is not counted against the session limit')
   freshLogger()
-  configureRateLimiter({ sessionLimit: 2 })
+  configureRateLimiter({ burstLimit: 2 })
 
   for (let i = 0; i < 5; i++) sendFeedback(`report ${i}`)
   await flush()
@@ -93,7 +93,7 @@ async function testIsNotDuplicateSuppressed() {
 async function testFeedbackDoesNotConsumeTheBudgetForOtherLogs() {
   console.log('\nTest: feedback does not eat the budget real logs need')
   const logger = freshLogger()
-  configureRateLimiter({ sessionLimit: 3, duplicateLimit: 99 })
+  configureRateLimiter({ burstLimit: 3, duplicateLimit: 99 })
 
   for (let i = 0; i < 10; i++) sendFeedback(`report ${i}`)
   await flush()

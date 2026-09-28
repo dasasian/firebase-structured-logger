@@ -7,7 +7,7 @@ export { withLogging, getLogger } from './requestLogger'
 export { configureAttachments } from './sourceMapCache'
 export { createClientLogHandler, createClientLogFunction, ClientLogError } from './logHandler'
 export { createHttpLogHandler } from './httpHandler'
-export type { ClientLogHandlerConfig, ClientLogRequest } from './logHandler'
+export type { ClientLogHandlerConfig, ClientLogRequest, LogRequest } from './logHandler'
 export type { HttpLogHandlerConfig, HttpLogRequest, HttpLogResponse } from './httpHandler'
 export type { LogSeverity, LogPayload, BaseLabels } from '../shared/types'
 

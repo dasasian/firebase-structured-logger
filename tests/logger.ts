@@ -109,11 +109,11 @@ async function testInfoHasNoError() {
 
 async function testEverySeverityCostsOneUnitOfBudget() {
   console.log('\nTest: every severity costs exactly one unit of session budget')
-  const spent = (sessionLimit = 50) =>
-    sessionLimit - JSON.parse(sessionStorageStub.peek('fsl_ratelimit') ?? `{"available":${sessionLimit}}`).available
+  const spent = (burstLimit = 50) =>
+    burstLimit - JSON.parse(sessionStorageStub.peek('fsl_ratelimit') ?? `{"available":${burstLimit}}`).available
 
   for (const severity of ['info', 'warning', 'debug', 'error'] as const) {
-    configureRateLimiter({ sessionLimit: 50, duplicateLimit: 99, storageKey: 'fsl_ratelimit', errorReserve: 0.2 })
+    configureRateLimiter({ burstLimit: 50, duplicateLimit: 99, storageKey: 'fsl_ratelimit', reservedForErrors: 10 })
     resetRateLimiter()
     const { logger } = makeLogger()
     if (severity === 'error') logger.error(new Error('boom'))
@@ -128,12 +128,12 @@ async function testEverySeverityCostsOneUnitOfBudget() {
 
 async function testReserveIsHonouredBySeverity() {
   console.log('\nTest: the reserve case — a WARNING is refused once only the reserve is left, an ERROR still sends')
-  configureRateLimiter({ sessionLimit: 10, duplicateLimit: 99, storageKey: 'fsl_ratelimit', errorReserve: 0.2 })
+  configureRateLimiter({ burstLimit: 10, duplicateLimit: 99, storageKey: 'fsl_ratelimit', reservedForErrors: 2 })
   resetRateLimiter()
   const { logger, allPayloads } = makeLogger()
 
   // Frozen throughout: real elapsed time between calls would refill a sliver
-  // of budget (refillPerMinute applies continuously), which is enough to tip
+  // of budget (rechargeSecondsPerLog applies continuously), which is enough to tip
   // `available` back over the reserve threshold at this exact boundary.
   const now = 1_700_000_000_000
   withFrozenTime(now, () => {
@@ -156,7 +156,7 @@ async function testReserveIsHonouredBySeverity() {
 async function testTwoHundredErrorsThroughTheLoggerSendThreeCopiesAndASummary() {
   console.log('\nTest: 200 logger.error() calls of the same error send 3 full copies and one summary')
   configureRateLimiter({
-    sessionLimit: 1000,
+    burstLimit: 1000,
     duplicateLimit: 3,
     storageKey: 'fsl_ratelimit',
     summaryIntervalMinutes: 60,
@@ -217,7 +217,7 @@ async function testTwoHundredErrorsThroughTheLoggerSendThreeCopiesAndASummary() 
  */
 async function testFailedSummarySendKeepsItQueued() {
   console.log('\nTest: a summary stays queued until its send succeeds, and is not sent twice')
-  configureRateLimiter({ sessionLimit: 500, duplicateLimit: 1, storageKey: 'fsl_ratelimit', summaryIntervalMinutes: 60 })
+  configureRateLimiter({ burstLimit: 500, duplicateLimit: 1, storageKey: 'fsl_ratelimit', summaryIntervalMinutes: 60 })
   resetRateLimiter()
   localStorageStub.setItem('fsl_pending_summaries', '[]')
 
@@ -273,8 +273,8 @@ async function testFailedSummarySendKeepsItQueued() {
 
 async function testDroppedLogConsoleMessages() {
   console.log('\nTest: the three console messages a dropped log produces')
-  // sessionLimit 3, reserve 1/3 -> the last 1 unit is ERROR-only.
-  configureRateLimiter({ sessionLimit: 3, duplicateLimit: 1, storageKey: 'fsl_ratelimit', errorReserve: 1 / 3 })
+  // burstLimit 3, reserve 1/3 -> the last 1 unit is ERROR-only.
+  configureRateLimiter({ burstLimit: 3, duplicateLimit: 1, storageKey: 'fsl_ratelimit', reservedForErrors: 1 })
   resetRateLimiter()
   const { logger } = makeLogger()
 
@@ -296,7 +296,7 @@ async function testDroppedLogConsoleMessages() {
 
   assert(
     'the reserve message appears',
-    warnings.some((w) => w.includes('Log budget: only errors can use the reserve now')),
+    warnings.some((w) => w.includes('Log limit: only errors can use the reserved logs now')),
     JSON.stringify(warnings),
   )
   assert(
@@ -306,7 +306,7 @@ async function testDroppedLogConsoleMessages() {
   )
   assert(
     'the budget-empty message appears',
-    warnings.some((w) => w.includes('Log budget empty')),
+    warnings.some((w) => w.includes('Log limit reached — recharging')),
     JSON.stringify(warnings),
   )
 }
@@ -314,7 +314,7 @@ async function testDroppedLogConsoleMessages() {
 /**
  * The default floor, read from NODE_ENV. Only the Node half is testable here — the
  * browser half is a bundler fold, and the bug was the `typeof process` guard in front of
- * it (see defaultMinLevel). What this pins: with NODE_ENV=production and no minLogLevel,
+ * it (see defaultMinLevel). What this pins: with NODE_ENV=production and no minSeverity,
  * INFO is dropped and WARNING is sent; with it unset, INFO is sent.
  */
 async function testDefaultFloorFollowsNodeEnv() {

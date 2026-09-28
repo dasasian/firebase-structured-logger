@@ -24,7 +24,7 @@ initLogger({ appId: process.env.FSL_SMOKE_APP_ID || 'smoke-app', minSeverity: 'D
 
 const logHandler = createHttpLogHandler({
   authorize: 'unauthenticated',
-  bucketName: process.env.FSL_SMOKE_BUCKET,
+  bucket: process.env.FSL_SMOKE_BUCKET,
 })
 
 const server = http.createServer((req, res) => {

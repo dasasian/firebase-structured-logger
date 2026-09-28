@@ -1,6 +1,7 @@
 import type * as FirebaseHttps from 'firebase-functions/v2/https'
 import type { LogPayload, ErrorPayload } from '../shared/types'
 import { SEVERITIES } from '../shared/severity'
+import { warnDeprecated } from '../shared/deprecate'
 import { writeLog, cleanLabels } from './logger'
 import { configureSourceMapBucket, getSourceMap } from './sourceMapCache'
 import {
@@ -34,6 +35,8 @@ export interface ClientLogHandlerConfig {
    * handler. Override either half independently with `sourceMaps` below or
    * `configureAttachments()`.
    */
+  bucket?: string
+  /** @deprecated Use `bucket`. */
   bucketName?: string
   cors?: boolean | string | string[]
   maxInstances?: number
@@ -42,7 +45,8 @@ export interface ClientLogHandlerConfig {
    *
    * Genuinely per-handler: both values travel explicitly to `getSourceMap`, so
    * two handlers configured differently cannot resolve to whichever was
-   * constructed last. `bucket` overrides `bucketName` for map lookups only.
+   * constructed last. `sourceMaps.bucket` overrides the top-level `bucket` for
+   * map lookups only.
    *
    * `prefix` must match `fsl upload-sourcemaps --prefix`. They are the two ends
    * of one contract (#35) and nothing checks them against each other — when they
@@ -52,6 +56,15 @@ export interface ClientLogHandlerConfig {
    * upload happens outside any handler, so a field here would be a lie.
    */
   sourceMaps?: { bucket?: string; prefix?: string }
+}
+
+/**
+ * `bucket`, falling back to the deprecated `bucketName` with a warning. The new
+ * name wins when both are given, and the warning still fires — see #44.
+ */
+function resolveBucket(config: ClientLogHandlerConfig): string | undefined {
+  if (config.bucketName !== undefined) warnDeprecated('bucketName', 'bucket')
+  return config.bucket ?? config.bucketName
 }
 
 const VALID_SEVERITIES = new Set<string>(SEVERITIES)
@@ -82,9 +95,12 @@ export class ClientLogError extends Error {
  * not `.auth`, not `.rawRequest`. Saying so is what lets an Express adapter, or
  * anything else, call this without constructing a callable request (#34).
  */
-export interface ClientLogRequest {
+export interface LogRequest {
   data: LogPayload
 }
+
+/** @deprecated Use `LogRequest`. */
+export type ClientLogRequest = LogRequest
 
 /**
  * Extract the bundle filename (e.g. "index-DnZ05f3M.js") from a frame URL.
@@ -150,12 +166,13 @@ async function symbolicateError(
  * symbolicates stack traces, and writes structured entries to Cloud Logging.
  *
  * @example
- * export const logFrontendEvent = onCall(createClientLogHandler({ bucketName: 'my-bucket' }))
+ * export const logFrontendEvent = onCall(createClientLogHandler({ bucket: 'my-bucket' }))
  */
 export function createClientLogHandler(config: ClientLogHandlerConfig) {
-  if (config.bucketName) configureSourceMapBucket(config.bucketName)
+  const bucket = resolveBucket(config)
+  if (bucket) configureSourceMapBucket(bucket)
 
-  return async (request: ClientLogRequest): Promise<void> => {
+  return async (request: LogRequest): Promise<void> => {
     const { message, severity, labels, jsonPayload } = request.data
 
     if (!message || !severity) {
@@ -175,7 +192,7 @@ export function createClientLogHandler(config: ClientLogHandlerConfig) {
         processedError = await symbolicateError(
           releaseId,
           processedError,
-          config.sourceMaps?.bucket ?? config.bucketName,
+          config.sourceMaps?.bucket ?? bucket,
           config.sourceMaps?.prefix,
         )
       }
@@ -200,7 +217,7 @@ export function createClientLogHandler(config: ClientLogHandlerConfig) {
  * Use when you want a ready-to-export Cloud Function.
  *
  * @example
- * export const logFrontendEvent = createClientLogFunction({ bucketName: 'my-bucket' })
+ * export const logFrontendEvent = createClientLogFunction({ bucket: 'my-bucket' })
  */
 export function createClientLogFunction(
   config: ClientLogHandlerConfig & { cors?: boolean | string | string[]; maxInstances?: number },

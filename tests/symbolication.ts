@@ -226,8 +226,8 @@ function testPerHandlerBucketIsolation() {
   // read that state, so whichever handler was constructed LAST silently won for
   // both — app A's maps were sought in app B's bucket, found nothing, and the
   // stack stayed minified with no error raised anywhere.
-  createClientLogHandler({ bucketName: 'app-a-sourcemaps' })
-  createClientLogHandler({ bucketName: 'app-b-sourcemaps' })
+  createClientLogHandler({ bucket: 'app-a-sourcemaps' })
+  createClientLogHandler({ bucket: 'app-b-sourcemaps' })
 
   // The module default is now whatever was set last...
   assert(

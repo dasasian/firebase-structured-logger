@@ -95,7 +95,7 @@ function send(res: HttpLogResponse, status: number, body?: Record<string, string
  *
  *     const app = express()
  *     app.use(express.json({ limit: '10mb' }))   // attachments ride in the body
- *     app.post('/log', createHttpLogHandler({ bucketName, authorize }))
+ *     app.post('/log', createHttpLogHandler({ bucket, authorize }))
  *
  * On the client, point `logFunction` at it:
  *

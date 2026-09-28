@@ -280,8 +280,8 @@ async function testPerHandlerBucketDoesNotBreakEmbedded() {
 
   // Two handlers with different buckets. The embedded path ignores the bucket,
   // so both must resolve — this asserts the wiring from 16a9667 survives.
-  const a = stackOf(await runHandler({ stack: frame('duplicate', APP_BUNDLE, 4) }, { bucketName: 'app-a-maps' }))
-  const b = stackOf(await runHandler({ stack: frame('duplicate', APP_BUNDLE, 4) }, { bucketName: 'app-b-maps' }))
+  const a = stackOf(await runHandler({ stack: frame('duplicate', APP_BUNDLE, 4) }, { bucket: 'app-a-maps' }))
+  const b = stackOf(await runHandler({ stack: frame('duplicate', APP_BUNDLE, 4) }, { bucket: 'app-b-maps' }))
 
   assert('handler A symbolicated', a.includes('catalogProducts.ts'), `got: ${a}`)
   assert('handler B symbolicated', b.includes('catalogProducts.ts'), `got: ${b}`)

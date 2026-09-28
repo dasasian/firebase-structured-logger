@@ -28,6 +28,7 @@ const EXPECTED: Record<string, string[]> = {
     'handleReactError',
     'initLogger',
     'sendFeedback',
+    'sendTestLog',
     'setupGlobalErrorHandler',
     'triggerTestLog',
   ],

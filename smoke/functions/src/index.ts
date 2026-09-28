@@ -45,12 +45,12 @@ export const fslSmokeClient = createClientLogFunction(OPTS)
  * Client path with an explicit bucket.
  *
  * What this does NOT prove: with a single bucket both functions resolve to the
- * same place, so this covers the explicit-bucketName code path, not
+ * same place, so this covers the explicit-bucket code path, not
  * per-handler isolation. Isolation is covered deterministically in
  * tests/configureTwice.ts.
  */
 export const fslSmokeClientBucket = createClientLogFunction(
-  BUCKET ? { ...OPTS, bucketName: BUCKET } : OPTS,
+  BUCKET ? { ...OPTS, bucket: BUCKET } : OPTS,
 )
 
 /**

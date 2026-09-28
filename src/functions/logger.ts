@@ -229,7 +229,7 @@ function warnOverBudget(objectPath: string | undefined): void {
     objectPath
       ? `[fsl]   The full entry was saved to ${objectPath}.`
       : "[fsl]   It was lost: there is no Storage to save the full entry to. " +
-          "Fix: name a bucket (createHttpLogHandler({ bucketName }) or configureAttachments({ bucket })).",
+          "Fix: name a bucket (createHttpLogHandler({ bucket }) or configureAttachments({ bucket })).",
   );
 }
 

@@ -217,7 +217,7 @@ function warnNoStorage(): void {
   console.warn('[fsl] No Storage: firebase-admin is not installed and no bucket is named.')
   console.warn("[fsl]   Only the source maps embedded in this deploy resolve; errors from older")
   console.warn('[fsl]   releases stay minified, and attachments are dropped (the log entry is kept).')
-  console.warn('[fsl]   Fix: name a bucket (createHttpLogHandler({ bucketName }) or')
+  console.warn('[fsl]   Fix: name a bucket (createHttpLogHandler({ bucket }) or')
   console.warn('[fsl]   configureAttachments({ bucket })), or install firebase-admin.')
 }
 

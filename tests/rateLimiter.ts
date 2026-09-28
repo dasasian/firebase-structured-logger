@@ -28,9 +28,9 @@ const SUMMARY_KEY = 'fsl_pending_summaries'
 
 function reset() {
   configureRateLimiter({
-    sessionLimit: 50,
-    refillPerMinute: 1,
-    errorReserve: 0.2,
+    burstLimit: 50,
+    rechargeSecondsPerLog: 60,
+    reservedForErrors: 10,
     duplicateLimit: 3,
     storageKey: STORAGE_KEY,
     summaryIntervalMinutes: 60,
@@ -48,8 +48,8 @@ function storedState(): { available: number; signatures: Record<string, unknown>
   return raw ? JSON.parse(raw) : null
 }
 
-function spent(sessionLimit = 50): number {
-  return sessionLimit - (storedState()?.available ?? sessionLimit)
+function spent(burstLimit = 50): number {
+  return burstLimit - (storedState()?.available ?? burstLimit)
 }
 
 // --- Session limit and refill ---
@@ -57,7 +57,7 @@ function spent(sessionLimit = 50): number {
 function testSessionLimit() {
   console.log('\nTest: session limit')
   reset()
-  configureRateLimiter({ sessionLimit: 3 })
+  configureRateLimiter({ burstLimit: 3, reservedForErrors: 0 })
 
   assert('1st is allowed', allow({ severity: 'INFO' }).allowed)
   assert('2nd is allowed', allow({ severity: 'INFO' }).allowed)
@@ -86,7 +86,7 @@ function testEachAllowCostsExactlyOne() {
 function testRefusedLogsCostNothing() {
   console.log('\nTest: a refused log does not consume budget')
   reset()
-  configureRateLimiter({ sessionLimit: 2, duplicateLimit: 1 })
+  configureRateLimiter({ burstLimit: 2, duplicateLimit: 1, reservedForErrors: 0 })
 
   const sig = signatureFor(new Error('dupe'), 'Home')
   const now = 1_700_000_000_000
@@ -104,7 +104,7 @@ function testBudgetRefillsOverTime() {
   console.log('\nTest: the budget refills — a minute back after emptying it, full after 50')
   reset()
   // No reserve here — this test is about refill timing, not the reserve gate.
-  configureRateLimiter({ sessionLimit: 50, refillPerMinute: 1, errorReserve: 0 })
+  configureRateLimiter({ burstLimit: 50, rechargeSecondsPerLog: 60, reservedForErrors: 0 })
 
   const t0 = 1_700_000_000_000
   withFrozenTime(t0, () => {
@@ -120,7 +120,7 @@ function testBudgetRefillsOverTime() {
   // A separate, fresh session: emptied at t0 again, then left untouched for a
   // full 50 minutes — the earlier probe spend must not confound this.
   reset()
-  configureRateLimiter({ sessionLimit: 50, refillPerMinute: 1, errorReserve: 0 })
+  configureRateLimiter({ burstLimit: 50, rechargeSecondsPerLog: 60, reservedForErrors: 0 })
   withFrozenTime(t0, () => {
     for (let i = 0; i < 50; i++) allow({ severity: 'INFO' })
   })
@@ -133,7 +133,7 @@ function testBudgetRefillsOverTime() {
 function testReloadDoesNotResetTheBudget() {
   console.log('\nTest: a reload in the same tab does not reset the budget')
   reset()
-  configureRateLimiter({ sessionLimit: 5 })
+  configureRateLimiter({ burstLimit: 5, reservedForErrors: 0 })
 
   // Frozen throughout — otherwise the tiny real elapsed time between calls
   // refills a sliver of budget, which is true and harmless in production but
@@ -160,7 +160,7 @@ function testReloadDoesNotResetTheBudget() {
 function testErrorReserve() {
   console.log('\nTest: the last 20% of the budget is reserved for ERROR and above')
   reset()
-  configureRateLimiter({ sessionLimit: 50, errorReserve: 0.2 })
+  configureRateLimiter({ burstLimit: 50, reservedForErrors: 10 })
 
   // Frozen throughout — spending right up to the reserve boundary leaves no
   // room for the real-time refill sliver that would otherwise creep in.
@@ -187,7 +187,7 @@ function testErrorReserve() {
 function testReserveIsByRank() {
   console.log('\nTest: at the reserve line, ERROR is allowed and every less severe level refused')
   reset()
-  configureRateLimiter({ sessionLimit: 10, errorReserve: 0.5 })
+  configureRateLimiter({ burstLimit: 10, reservedForErrors: 5 })
 
   const now = 1_700_000_000_000
   withFrozenTime(now, () => {
@@ -248,7 +248,7 @@ function testDuplicateSuppression() {
 function testUnsignedLogsAreNeverSuppressedAsDuplicates() {
   console.log('\nTest: a log with no signature opts out of duplicate suppression')
   reset()
-  configureRateLimiter({ sessionLimit: 50, duplicateLimit: 1 })
+  configureRateLimiter({ burstLimit: 50, duplicateLimit: 1 })
 
   for (let i = 0; i < 10; i++) {
     assert(`unsigned log ${i + 1} allowed`, allow({ severity: 'INFO' }).allowed)
@@ -296,7 +296,7 @@ function testStringErrorsAreSupported() {
 function testSessionLimitOutranksDuplicate() {
   console.log('\nTest: the session limit is checked before the duplicate rule')
   reset()
-  configureRateLimiter({ sessionLimit: 2, duplicateLimit: 99 })
+  configureRateLimiter({ burstLimit: 2, duplicateLimit: 99, reservedForErrors: 0 })
 
   allow({ severity: 'INFO' }); allow({ severity: 'INFO' })
   const refused = allow({ severity: 'ERROR', signature: signatureFor(new Error('fresh'), 'Home') })
@@ -314,7 +314,7 @@ function testSessionLimitOutranksDuplicate() {
 function testSignatureMapIsBounded() {
   console.log('\nTest: the signature map is capped, and a signature with pending repeats survives the cap')
   reset()
-  configureRateLimiter({ sessionLimit: 5000, duplicateLimit: 1 })
+  configureRateLimiter({ burstLimit: 5000, duplicateLimit: 1 })
 
   const t0 = 1_700_000_000_000
   const survivorSig = signatureFor(new Error('keep-me'), 'Home')
@@ -344,7 +344,7 @@ function testSignatureMapIsBounded() {
 function testTwoHundredCopiesSendThreeFullEntriesAndOneSummary() {
   console.log('\nTest: 200 copies of one error → 3 full copies + one summary of 197')
   reset()
-  configureRateLimiter({ sessionLimit: 500, duplicateLimit: 3 })
+  configureRateLimiter({ burstLimit: 500, duplicateLimit: 3 })
 
   const sig = signatureFor(new Error('cart sync failed'), 'Checkout')
   const labels = { appId: 'app', releaseId: 'r1', userId: 'u1' }
@@ -397,7 +397,7 @@ function testTwoHundredCopiesSendThreeFullEntriesAndOneSummary() {
 function testTwoReleasesOrTwoUsersGiveTwoSummaries() {
   console.log('\nTest: the same error under two releaseIds, or two userIds, gives two summaries')
   reset()
-  configureRateLimiter({ sessionLimit: 500, duplicateLimit: 1 })
+  configureRateLimiter({ burstLimit: 500, duplicateLimit: 1 })
 
   const sig = signatureFor(new Error('boom'), 'Home')
   const now = 1_700_000_000_000
@@ -412,7 +412,7 @@ function testTwoReleasesOrTwoUsersGiveTwoSummaries() {
   assert('two releases give two summaries', byRelease.length === 2, `got: ${byRelease.length}`)
 
   reset()
-  configureRateLimiter({ sessionLimit: 500, duplicateLimit: 1 })
+  configureRateLimiter({ burstLimit: 500, duplicateLimit: 1 })
   let byUser: ReturnType<typeof peekPendingSummaries> = []
   withFrozenTime(now, () => {
     for (let i = 0; i < 3; i++) allow({ severity: 'ERROR', signature: sig, labels: { releaseId: 'r1', userId: 'u1' } })
@@ -426,7 +426,7 @@ function testTwoReleasesOrTwoUsersGiveTwoSummaries() {
 function testSummarySentOnceAnHourOrWhenForced() {
   console.log('\nTest: a summary is not due before summaryIntervalMinutes, unless forced')
   reset()
-  configureRateLimiter({ sessionLimit: 500, duplicateLimit: 1, summaryIntervalMinutes: 60 })
+  configureRateLimiter({ burstLimit: 500, duplicateLimit: 1, summaryIntervalMinutes: 60 })
 
   const sig = signatureFor(new Error('slow'), 'Checkout')
   const t0 = 1_700_000_000_000
@@ -458,7 +458,7 @@ function testSummarySentOnceAnHourOrWhenForced() {
 function testPendingSummarySurvivesAndIsMarkedSentLate() {
   console.log('\nTest: a summary written in one visit is sent by the next, marked sentLate')
   reset()
-  configureRateLimiter({ sessionLimit: 500, duplicateLimit: 1 })
+  configureRateLimiter({ burstLimit: 500, duplicateLimit: 1 })
 
   const sig = signatureFor(new Error('late'), 'Home')
   const t0 = 1_700_000_000_000
@@ -484,7 +484,7 @@ function testPendingSummarySurvivesAndIsMarkedSentLate() {
 function testOldSummaryIsDeletedNotSent() {
   console.log('\nTest: a summary older than summaryMaxAgeDays is deleted, not sent')
   reset()
-  configureRateLimiter({ sessionLimit: 500, duplicateLimit: 1, summaryMaxAgeDays: 7 })
+  configureRateLimiter({ burstLimit: 500, duplicateLimit: 1, summaryMaxAgeDays: 7 })
 
   const sig = signatureFor(new Error('stale'), 'Home')
   const t0 = 1_700_000_000_000
@@ -503,7 +503,7 @@ function testOldSummaryIsDeletedNotSent() {
 function testMaxPendingSummariesKeepsTheNewest() {
   console.log('\nTest: more than maxPendingSummaries keeps the newest')
   reset()
-  configureRateLimiter({ sessionLimit: 5000, duplicateLimit: 1, maxPendingSummaries: 3 })
+  configureRateLimiter({ burstLimit: 5000, duplicateLimit: 1, maxPendingSummaries: 3 })
 
   const t0 = 1_700_000_000_000
   for (let n = 0; n < 5; n++) {
@@ -530,7 +530,7 @@ function testConfigureMerges() {
   console.log('\nTest: configureRateLimiter merges, it does not replace')
   reset()
   configureRateLimiter({ duplicateLimit: 2 })
-  configureRateLimiter({ sessionLimit: 10 })    // only sessionLimit
+  configureRateLimiter({ burstLimit: 10 })    // only burstLimit
 
   const sig = signatureFor(new Error('dupe'), 'Home')
   allow({ severity: 'ERROR', signature: sig }); allow({ severity: 'ERROR', signature: sig })
@@ -556,7 +556,7 @@ function testCustomStorageKey() {
 function testResetClearsState() {
   console.log('\nTest: resetRateLimiter clears the session')
   reset()
-  configureRateLimiter({ sessionLimit: 2 })
+  configureRateLimiter({ burstLimit: 2, reservedForErrors: 0 })
 
   allow({ severity: 'INFO' }); allow({ severity: 'INFO' })
   assert('the limit is reached', !allow({ severity: 'INFO' }).allowed)

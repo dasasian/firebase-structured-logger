@@ -39,12 +39,12 @@ function testConfigureRateLimiterTwice() {
   console.log('\nTest: configureRateLimiter — second call merges into the first')
   resetRateLimiter()
 
-  configureRateLimiter({ sessionLimit: 5, duplicateLimit: 2 })
-  configureRateLimiter({ sessionLimit: 3 })          // only sessionLimit
+  configureRateLimiter({ burstLimit: 5, duplicateLimit: 2, reservedForErrors: 0 })
+  configureRateLimiter({ burstLimit: 3 })          // only burstLimit
 
   // Documented semantics: MERGE, last value wins per field.
   for (let i = 0; i < 3; i++) allow({ severity: 'INFO' })
-  assert('the newer sessionLimit is in force', !allow({ severity: 'INFO' }).allowed)
+  assert('the newer burstLimit is in force', !allow({ severity: 'INFO' }).allowed)
 
   resetRateLimiter()
   for (let i = 0; i < 2; i++) allow({ severity: 'INFO' })

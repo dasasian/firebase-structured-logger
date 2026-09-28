@@ -1,4 +1,4 @@
-export { initLogger, getClientLogger, sendFeedback, triggerTestLog } from './logger'
+export { initLogger, getClientLogger, sendFeedback, sendTestLog, triggerTestLog } from './logger'
 // Logger is exported as a TYPE only. The client logger is a session singleton:
 // breadcrumbs, current screen and the rate-limit budget all
 // live in module scope because they are facts about the session, not about an

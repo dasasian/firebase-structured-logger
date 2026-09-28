@@ -1,6 +1,7 @@
 import type { LogSeverity, LogPayload, ErrorPayload, BaseLabels } from '../shared/types'
 import { SEVERITY_ORDER, FEEDBACK_LABEL } from '../shared/severity'
 import { toError, toErrorPayload } from '../shared/error'
+import { warnDeprecated } from '../shared/deprecate'
 import {
   addBreadcrumb,
   getLastBreadcrumbs,
@@ -40,8 +41,10 @@ export interface InitLoggerConfig<
   appId: string
   releaseId: string
   logFunction: LogCallable
-  minLogLevel?: LogSeverity
+  minSeverity?: LogSeverity
   rateLimitOptions?: RateLimitConfig
+  /** @deprecated Use `minSeverity`. */
+  minLogLevel?: LogSeverity
 }
 
 /**
@@ -116,7 +119,8 @@ export class Logger<
 
   constructor(config: InitLoggerConfig<AppLabels>) {
     this.config = config
-    this.minLevel = SEVERITY_ORDER[config.minLogLevel ?? defaultMinLevel()]
+    if (config.minLogLevel !== undefined) warnDeprecated('minLogLevel', 'minSeverity')
+    this.minLevel = SEVERITY_ORDER[config.minSeverity ?? config.minLogLevel ?? defaultMinLevel()]
     if (config.rateLimitOptions) {
       configureRateLimiter(config.rateLimitOptions)
     }
@@ -274,9 +278,9 @@ export class Logger<
       if (decision.reason === 'duplicate') {
         console.warn(`[fsl] Duplicate counted for the next summary: ${describeSignature(decision.signature ?? '')}`)
       } else if (decision.reason === 'reserve') {
-        console.warn('[fsl] Log budget: only errors can use the reserve now')
+        console.warn('[fsl] Log limit: only errors can use the reserved logs now')
       } else {
-        console.warn('[fsl] Log budget empty — next log in about a minute')
+        console.warn('[fsl] Log limit reached — recharging, next log in about a minute')
       }
       return false
     }
@@ -416,7 +420,7 @@ export function sendFeedback<
 }
 
 /**
- * Trigger a test log entry to verify the logging pipeline is working end-to-end.
+ * Send a test log entry to verify the logging pipeline is working end-to-end.
  * Logs at all severities with errorType: 'fsl-verify'. Safe to call in dev only.
  *
  * After clicking, check:
@@ -424,8 +428,8 @@ export function sendFeedback<
  * 2. Stack trace is symbolicated (points to source file, not minified bundle)
  * 3. MCP query: source: local, where: [{ field: "labels.errorType", operator: "==", value: "fsl-verify" }]
  */
-export function triggerTestLog(): void {
-  console.info('[fsl] triggerTestLog called')
+export function sendTestLog(): void {
+  console.info('[fsl] sendTestLog called')
   const logger = getClientLogger()
   const testError = new Error('[fsl-verify] Test error — logging pipeline check')
   console.info('[fsl] sending error log...')
@@ -434,7 +438,12 @@ export function triggerTestLog(): void {
   logger.warning('[fsl-verify] Test warning', { errorType: 'fsl-verify' })
   console.info('[fsl] sending info log...')
   logger.info('[fsl-verify] Test info', { errorType: 'fsl-verify' })
-  console.info('[fsl] triggerTestLog scheduled — sends are fire-and-forget; check dev.jsonl in ~1-2s')
+  console.info('[fsl] sendTestLog scheduled — sends are fire-and-forget; check dev.jsonl in ~1-2s')
+}
+
+/** @deprecated Use `sendTestLog()`. */
+export function triggerTestLog(): void {
+  sendTestLog()
 }
 
 // Module-level singleton
