@@ -113,7 +113,7 @@ import { initLogger, createClientLogFunction } from '@dasasian/firebase-structur
 initLogger({ appId: 'my-app' })
 
 export const logFrontendEvent = createClientLogFunction({
-  bucketName: 'my-app.firebasestorage.app', // holds source maps AND attachments
+  bucket: 'my-app.firebasestorage.app', // holds source maps AND attachments
 })
 ```
 
@@ -126,7 +126,7 @@ gs://my-app.firebasestorage.app/logAttachments/{logId}/{name}
 
 Both the bucket and the prefix can be changed per half — see [Source maps](#source-maps)
 for `sourceMaps: { bucket, prefix }`, and [Attachments](#attachments) for
-`configureAttachments({ bucket, prefix })`. Omit `bucketName` entirely and both fall back
+`configureAttachments({ bucket, prefix })`. Omit `bucket` entirely and both fall back
 to your project's default bucket.
 
 **3. Wire the deploy script** — upload source maps and strip them from the hosting bundle as part of deploy. Merge into your root `package.json` scripts, keeping any existing flags like `--project`:
@@ -142,9 +142,9 @@ to your project's default bucket.
 **4. Verify it works** — prove the round trip before you trust it:
 
 ```ts
-import { triggerTestLog } from '@dasasian/firebase-structured-logger/client'
+import { sendTestLog } from '@dasasian/firebase-structured-logger/client'
 
-triggerTestLog() // wire to a dev-only button; sends one error, one warning, one info
+sendTestLog() // wire to a dev-only button; sends one error, one warning, one info
 ```
 
 Look for `labels.errorType="fsl-verify"` — in Cloud Logging once deployed, or in `dev.jsonl`
@@ -215,7 +215,7 @@ const app = express()
 app.use(express.json({ limit: '10mb' }))   // attachments ride in the body
 
 app.post('/log', createHttpLogHandler({
-  bucketName: 'my-app.firebasestorage.app', // holds source maps AND attachments
+  bucket: 'my-app.firebasestorage.app', // holds source maps AND attachments
   authorize: async (req) => {
     const header = String(req.headers.authorization ?? '')
     if (!header.startsWith('Bearer ')) return false
@@ -286,7 +286,7 @@ Nothing here needs a Firebase project — only a Google Cloud one. What changes:
   whatever credential your app already uses.
 - **`authorize`** checks your own session instead of a Firebase ID token — for example
   `authorize: (req) => sessions.isValid(req.headers.cookie)`.
-- **Storage** has no Firebase default bucket to fall back to. Name one with `bucketName`
+- **Storage** has no Firebase default bucket to fall back to. Name one with `bucket`
   (it holds source maps and attachments), and give the service's account access to it.
   Or name none: embedded maps still resolve the current release, older releases stay
   minified, and attachments are dropped — the log says so once.
@@ -328,7 +328,7 @@ A gate that throws counts as a rejection, not an opening.
   the trace id is still written, but does not join the platform's request log.
 - **No `firebase-admin`? Also optional.** Storage is only needed for older releases'
   source maps and for attachments. With `firebase-admin` installed, its Storage and
-  default bucket are used. Without it, name the bucket — `bucketName` on the handler, or
+  default bucket are used. Without it, name the bucket — `bucket` on the handler, or
   `configureAttachments({ bucket })` — and the service's own credentials are used.
 - **No Storage bucket?** You do not need one. `fsl upload-sourcemaps --embed-sourcemaps`
   without `--bucket` embeds the current release's maps into your deploy and uploads
@@ -609,7 +609,7 @@ labels.hasAttachments="true"     # entries that have files
 labels.logId="01J..."            # the entry whose files you are looking for
 ```
 
-By default they share the bucket passed to `createClientLogFunction({ bucketName })` — the
+By default they share the bucket passed to `createClientLogFunction({ bucket })` — the
 same one the source maps live in, falling back to the project's default bucket.
 
 Send them somewhere else with `configureAttachments`, in your functions entry point:
@@ -656,9 +656,9 @@ hold things back — so this is worth reading before you conclude something is b
 
 | Gate | Default | Where |
 |---|---|---|
-| Log budget | **50 logs**, refilling **1 per minute**; the last **20%** for errors only | client, per browser tab |
+| Log limit | bursts of up to **50 logs**, then **one log recharges every 60 s**; the last **10** for errors only | client, per browser tab |
 | Duplicates | **3** full copies of the same error, then counted and sent as a summary | client, per browser tab |
-| Client severity floor | `WARNING` in production, `DEBUG` in dev | client, `minLogLevel` |
+| Client severity floor | `WARNING` in production, `DEBUG` in dev | client, `minSeverity` |
 | Server severity floor | `WARNING` in production, `DEBUG` in the emulator | function, `minSeverity` |
 | Function concurrency | `maxInstances: 1` on `createClientLogFunction` | function |
 
@@ -667,11 +667,11 @@ initLogger({
   appId: 'my-app',
   releaseId,
   logFunction,
-  minLogLevel: 'INFO',
+  minSeverity: 'INFO',
   rateLimitOptions: {
-    sessionLimit: 50,        // the budget: how many logs can go at once
-    refillPerMinute: 1,      // how fast it comes back
-    errorReserve: 0.2,       // share of the budget only ERROR and above may spend
+    burstLimit: 50,              // how many logs can go at once
+    rechargeSecondsPerLog: 60,   // after a burst, one log recharges every 60 seconds
+    reservedForErrors: 10,       // of the burst, how many only ERROR and above may use
     duplicateLimit: 3,       // full copies of one error before counting starts
     summaryIntervalMinutes: 60,
     summaryMaxAgeDays: 7,    // how long an unsent summary waits on the device
@@ -684,21 +684,24 @@ The client's production default comes from `process.env.NODE_ENV`, which Vite re
 build time. A `define: { 'process.env': {} }` in `vite.config` — common, to quiet a library
 that expects Node — replaces the whole object instead, `NODE_ENV` reads as undefined, and
 the floor is silently `DEBUG` in production. If your config has that line, pass
-`minLogLevel` explicitly. Stating it is the safe habit either way: it is the one default
+`minSeverity` explicitly. Stating it is the safe habit either way: it is the one default
 here whose failure mode is a bill rather than a missing log.
 
-### The budget refills
+### Bursts recharge
 
-Each browser tab starts with 50 logs. Every log spends one, and one comes back each minute,
-up to 50. A reload does not reset it — the tab keeps its budget in `sessionStorage`.
+Each browser tab can send a burst of up to `burstLimit` logs (50). After that, one log
+recharges every `rechargeSecondsPerLog` seconds (60) — one at a time, so a full burst takes
+50 minutes to come back. A reload does not reset it: the tab keeps its count in
+`sessionStorage`.
 
 So a burst at start-up is fine, and a user who works in the app all afternoon is never
 silenced for long. A bug that logs in a loop is still held to about 60 entries an hour per
 user: 1,000 users stuck in such a loop for a working month stays around the 50 GiB of
 Cloud Logging that each project gets free.
 
-The last 20% of the budget is reserved: warnings can spend it down to 10, and only
-`ERROR` and above can spend the rest. A noisy warning cannot use up the room a crash needs.
+The last `reservedForErrors` logs (10) are kept for errors: warnings can use the burst down
+to 10, and only `ERROR` and above can use the rest. A value over half of `burstLimit` is
+capped at half, with one warning, so warnings always have room. A noisy warning cannot use up the room a crash needs.
 
 ### Repeats are counted, not dropped
 
@@ -742,7 +745,7 @@ messages, and may hold personal data.
 A summary is a `WARNING` with no stack, so Cloud Error Reporting sees the 3 full copies and
 not the summary. For the true count, add up `labels.repeatCount` in Cloud Logging.
 
-Summaries do not spend the log budget. There is at most one per error, per release, per user,
+Summaries do not count against the burst. There is at most one per error, per release, per user,
 per hour.
 
 ### What a dropped log looks like
@@ -751,11 +754,11 @@ The two rate limits say so in the browser console:
 
 ```
 [fsl] Duplicate counted for the next summary: TypeError: cannot read 'id' | checkout
-[fsl] Log budget empty — next log in about a minute
-[fsl] Log budget: only errors can use the reserve now
+[fsl] Log limit reached — recharging, next log in about a minute
+[fsl] Log limit: only errors can use the reserved logs now
 ```
 
-**The severity floors are silent.** Both of them — the client's `minLogLevel` and the
+**The severity floors are silent.** Both of them — the client's `minSeverity` and the
 function's `minSeverity` — simply return, with nothing written and nothing logged about it.
 
 So if an entry never arrived and there is no `[fsl]` warning in the console, it was a floor,
@@ -764,7 +767,7 @@ not a limit. In production both default to `WARNING`, which drops `DEBUG`, `INFO
 `INFO` you expected to see has two places it can vanish.
 
 `maxInstances: 1` is a deliberate cost guard on what is usually the busiest function in the
-system. Raise it (`createClientLogFunction({ bucketName, maxInstances: 5 })`) if you are
+system. Raise it (`createClientLogFunction({ bucket, maxInstances: 5 })`) if you are
 dropping client logs under load — and watch your Cloud Logging bill when you do.
 
 Feedback is exempt from every one of these. See [User feedback](#user-feedback).
@@ -822,7 +825,20 @@ logger.addBreadcrumb(type, name, data?)
 ```
 
 Also exported: `initLogger`, `getClientLogger`, `setupGlobalErrorHandler`, `handleReactError`,
-`sendFeedback`, `triggerTestLog`, `addBreadcrumb`, `bc`.
+`sendFeedback`, `sendTestLog`, `addBreadcrumb`, `bc`.
+
+**Renamed in 1.0.** The old names still work in 1.x, each with a one-time console warning,
+and are removed in 2.0:
+
+| Old | New |
+|---|---|
+| `minLogLevel` (client `initLogger`) | `minSeverity` |
+| `bucketName` (`createClientLogHandler`, `createClientLogFunction`, `createHttpLogHandler`) | `bucket` |
+| `rateLimitOptions.sessionLimit` | `rateLimitOptions.burstLimit` |
+| `rateLimitOptions.refillPerMinute` | `rateLimitOptions.rechargeSecondsPerLog` (seconds, not a rate: `60 / refillPerMinute`) |
+| `rateLimitOptions.errorReserve` (a share) | `rateLimitOptions.reservedForErrors` (a count: `errorReserve × burstLimit`) |
+| type `ClientLogRequest` | type `LogRequest` |
+| `triggerTestLog()` | `sendTestLog()` |
 
 `Logger` is exported as a **type only** — the client logger is a session singleton, so
 annotate with `Logger<MyAppLabels>` and construct with `initLogger()`. A second instance
@@ -841,7 +857,7 @@ logError / logWarn / logInfo / logDebug (message, labels?, context?, attachments
 configureAttachments({ bucket?, prefix? })    // once, at module load — see Attachments
 
 // Receiving client logs. All three take the same source-map config:
-//   { bucketName?, sourceMaps?: { bucket?, prefix? } }
+//   { bucket?, sourceMaps?: { bucket?, prefix? } }
 createClientLogFunction({ …, cors?, maxInstances? })   // a ready-to-export callable
 createHttpLogHandler({ …, authorize, allowOrigin? })   // an (req, res) handler for Express etc.
 createClientLogHandler({ … })                          // the bare handler, wrap it yourself

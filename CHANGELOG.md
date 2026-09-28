@@ -7,6 +7,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Deprecated
+
+- **Seven names, renamed before the 1.0 API freeze.** `minLogLevel` → `minSeverity` (the server already used it, and so does Cloud Logging); `bucketName` → `bucket` (every other bucket option already was); `rateLimitOptions.sessionLimit` → `burstLimit`, `refillPerMinute` → `rechargeSecondsPerLog`, and `errorReserve` (a share) → `reservedForErrors` (a count), because the limit now recharges one log at a time rather than lasting a session; type `ClientLogRequest` → `LogRequest`; `triggerTestLog()` → `sendTestLog()`. Every old name still works in 1.x with a one-time console warning, and is removed in 2.0. The README's Reference has the full table.
+
 ## [0.9.0] — 2026-09-27
 
 The logger no longer goes quiet when things get bad. A long session used to spend its
