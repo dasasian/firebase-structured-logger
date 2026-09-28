@@ -393,7 +393,12 @@ export function allow(options: AllowOptions): RateLimitDecision {
     return { allowed: false, reason: 'duplicate', signature: options.signature }
   }
 
-  const reserveThreshold = config.reservedForErrors
+  // Capped here, where it is used, not only where it was configured: the
+  // default reservedForErrors (10) with a small burstLimit, or a later call
+  // that lowers burstLimit alone, would otherwise reserve the whole burst and
+  // refuse every warning. capReservedForErrors warns only for a value someone
+  // actually passed.
+  const reserveThreshold = Math.min(config.reservedForErrors, config.burstLimit / 2)
   if (state.available < 1) {
     writeState(state)
     return { allowed: false, reason: 'session-limit' }

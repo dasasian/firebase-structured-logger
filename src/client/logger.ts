@@ -443,6 +443,7 @@ export function sendTestLog(): void {
 
 /** @deprecated Use `sendTestLog()`. */
 export function triggerTestLog(): void {
+  warnDeprecated('triggerTestLog', 'sendTestLog')
   sendTestLog()
 }
 

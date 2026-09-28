@@ -241,6 +241,51 @@ async function testTriggerTestLogCallsSendTestLog() {
 
 // --- Runner ---
 
+function testOldRateLimitNamesWarnOnce() {
+  console.log('\nTest: refillPerMinute and errorReserve each warn exactly once')
+  resetDeprecationWarnings()
+  const { warnings } = captureWarnings(() => {
+    configureRateLimiter({ refillPerMinute: 1, errorReserve: 0.2 })
+    configureRateLimiter({ refillPerMinute: 2, errorReserve: 0.1 })
+  })
+  assert('refillPerMinute warned once', warnings.filter((w) => w.includes('"refillPerMinute"')).length === 1, JSON.stringify(warnings))
+  assert('errorReserve warned once', warnings.filter((w) => w.includes('"errorReserve"')).length === 1, JSON.stringify(warnings))
+  configureRateLimiter({ burstLimit: 50, rechargeSecondsPerLog: 60, reservedForErrors: 10 })
+}
+
+/**
+ * The cap is on what is used, not only on a value someone passed. The default
+ * reservedForErrors (10) with a small burstLimit, or a later call that lowers
+ * burstLimit alone, must still leave warnings half the burst — as the README says.
+ */
+function testDefaultReserveIsCappedBySmallBurst() {
+  console.log('\nTest: the default reserve is capped at half a small burstLimit, and after a later lowering')
+  const now = 1_700_000_000_000
+
+  resetRateLimiter()
+  configureRateLimiter({ burstLimit: 50, reservedForErrors: 10, duplicateLimit: 99 })
+  configureRateLimiter({ burstLimit: 10 })
+  withFrozenTime(now, () => {
+    for (let i = 0; i < 5; i++) {
+      assert(`WARNING ${i + 1}/5 allowed — the reserve is 5, half of 10`, allow({ severity: 'WARNING' }).allowed)
+    }
+    assert('the 6th WARNING is refused', !allow({ severity: 'WARNING' }).allowed)
+    assert('an ERROR still gets through', allow({ severity: 'ERROR' }).allowed)
+  })
+  configureRateLimiter({ burstLimit: 50, reservedForErrors: 10 })
+}
+
+async function testTriggerTestLogWarnsOnce() {
+  console.log('\nTest: triggerTestLog warns exactly once')
+  resetDeprecationWarnings()
+  const { warnings } = captureWarnings(() => {
+    triggerTestLog()
+    triggerTestLog()
+  })
+  await new Promise((r) => setTimeout(r, 0))
+  assert('triggerTestLog warned once', warnings.filter((w) => w.includes('"triggerTestLog"')).length === 1, JSON.stringify(warnings))
+}
+
 async function run() {
   await testMinLogLevelActsLikeMinSeverity()
   await testMinLogLevelWarnsOnce()
@@ -256,9 +301,12 @@ async function run() {
   testRefillPerMinuteConvertsToRechargeSeconds()
   testErrorReserveConvertsToReservedForErrors()
   testReservedForErrorsAboveHalfIsCapped()
+  testOldRateLimitNamesWarnOnce()
+  testDefaultReserveIsCappedBySmallBurst()
 
   testClientLogRequestIsUsableAsLogRequest()
   await testTriggerTestLogCallsSendTestLog()
+  await testTriggerTestLogWarnsOnce()
 
   reportResults()
 }
