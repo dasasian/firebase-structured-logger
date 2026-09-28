@@ -72,6 +72,11 @@ npm install @dasasian/firebase-structured-logger
 
 Ships ESM with three entry points — `/client`, `/functions`, `/tools` — plus the `fsl` CLI. `firebase`, `firebase-admin`, and `firebase-functions` are optional peer dependencies (bring your own versions). None of them is needed to load the package; each only switches on the part that uses it — see [Without Firebase](#without-firebase).
 
+Installing next to **firebase-admin 13** in one command can leave two copies of
+`@google-cloud/storage` (8 for this package, 7 for firebase-admin). Both work; run
+`npm dedupe` once and npm keeps the one they share. firebase-admin 14.5 and later use
+the same Storage as this package, so there is nothing to do.
+
 ## Setup
 
 Most projects do both halves. They share one step — `initLogger` inside `functions/` — and

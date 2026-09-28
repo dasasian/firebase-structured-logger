@@ -61,6 +61,29 @@ const PROBES: Record<string, string> = {
   'probe.mjs': `import fsl from '@dasasian/firebase-structured-logger/functions'\n${PROBE_BODY}`,
 }
 
+/** Every installed copy of @google-cloud/storage under `dir`, by version. */
+function storageCopies(dir: string): string[] {
+  const found: string[] = []
+  const walk = (nodeModules: string) => {
+    if (!fs.existsSync(nodeModules)) return
+    for (const entry of fs.readdirSync(nodeModules)) {
+      if (entry.startsWith('.')) continue
+      const pkgDirs = entry.startsWith('@')
+        ? fs.readdirSync(path.join(nodeModules, entry)).map((n) => path.join(nodeModules, entry, n))
+        : [path.join(nodeModules, entry)]
+      for (const pkgDir of pkgDirs) {
+        if (pkgDir.endsWith(path.join('@google-cloud', 'storage'))) {
+          const pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf-8')) as { version: string }
+          found.push(pkg.version)
+        }
+        walk(path.join(pkgDir, 'node_modules'))
+      }
+    }
+  }
+  walk(path.join(dir, 'node_modules'))
+  return found
+}
+
 const STORAGE_PROBE = `
 const fsl = require('@dasasian/firebase-structured-logger/functions')
 fsl.initLogger({ appId: 'install-smoke', minSeverity: 'DEBUG' })
@@ -175,6 +198,22 @@ function run() {
         out.stderr.slice(0, 600),
       )
     }
+
+    // A user's real install, not a pinned one: firebase-admin 13 and this package in
+    // one command. npm picks the newest Storage it can for us (8) before it sees that
+    // firebase-admin 13 needs 7, so this gives two copies — measured, and documented
+    // in the README with its fix. What must hold is that `npm dedupe` folds them into one.
+    console.log('\nTest: firebase-admin 13 installed alongside — npm dedupe leaves one Storage')
+    const project = path.join(work, 'with-firebase-admin-13')
+    fs.mkdirSync(project)
+    fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ private: true }))
+    npm(['install', '--no-audit', '--no-fund', 'firebase-admin@13', path.join(work, tarball)], project)
+    const before = storageCopies(project)
+    console.log(`  (installed together: ${before.join(', ')})`)
+    npm(['dedupe', '--no-audit', '--no-fund'], project)
+    const after = storageCopies(project)
+    assert('after npm dedupe there is exactly one copy of Storage', after.length === 1, after.join(', '))
+    assert('and it is the 7.x firebase-admin 13 needs', after[0]?.startsWith('7.'), after.join(', '))
   } finally {
     fs.rmSync(work, { recursive: true, force: true })
   }
