@@ -16,6 +16,8 @@
  * Run: FUNCTIONS_EMULATOR=true npx tsx tests/publicApi.ts
  */
 
+import { spawnSync } from 'child_process'
+import * as path from 'path'
 import { assert, reportResults } from './testHelpers.js'
 import * as client from '../src/client/index.js'
 import * as functions from '../src/functions/index.js'
@@ -69,10 +71,22 @@ function testClientLoggerIsNotConstructible() {
   )
 }
 
+function testDoctorCommandSurface() {
+  console.log('\nTest: fsl doctor is listed with its documented flags')
+  const cli = path.join(process.cwd(), 'src', 'tools', 'index.ts')
+  const out = spawnSync('npx', ['tsx', cli], { encoding: 'utf-8' })
+  const help = out.stdout
+  assert('help lists fsl doctor', help.includes('fsl doctor'), help)
+  for (const flag of ['--backend=<path>', '--dist=<path>', '--strict', '--json']) {
+    assert(`help documents ${flag}`, help.includes(flag), help)
+  }
+}
+
 function run() {
   checkSurface('client', client)
   checkSurface('functions', functions)
   testClientLoggerIsNotConstructible()
+  testDoctorCommandSurface()
   reportResults()
 }
 

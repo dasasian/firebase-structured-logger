@@ -22,6 +22,7 @@ import os from 'os'
 import path from 'path'
 import { execFileSync, spawnSync } from 'child_process'
 import { assert, reportResults } from '../tests/testHelpers.js'
+import { findPackageCopies } from '../src/shared/nodeModules.js'
 
 const repo = process.cwd()
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'fsl-install-'))
@@ -63,25 +64,7 @@ const PROBES: Record<string, string> = {
 
 /** Every installed copy of @google-cloud/storage under `dir`, by version. */
 function storageCopies(dir: string): string[] {
-  const found: string[] = []
-  const walk = (nodeModules: string) => {
-    if (!fs.existsSync(nodeModules)) return
-    for (const entry of fs.readdirSync(nodeModules)) {
-      if (entry.startsWith('.')) continue
-      const pkgDirs = entry.startsWith('@')
-        ? fs.readdirSync(path.join(nodeModules, entry)).map((n) => path.join(nodeModules, entry, n))
-        : [path.join(nodeModules, entry)]
-      for (const pkgDir of pkgDirs) {
-        if (pkgDir.endsWith(path.join('@google-cloud', 'storage'))) {
-          const pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf-8')) as { version: string }
-          found.push(pkg.version)
-        }
-        walk(path.join(pkgDir, 'node_modules'))
-      }
-    }
-  }
-  walk(path.join(dir, 'node_modules'))
-  return found
+  return findPackageCopies(dir, '@google-cloud/storage').map((c) => c.version)
 }
 
 const STORAGE_PROBE = `
@@ -210,10 +193,31 @@ function run() {
     npm(['install', '--no-audit', '--no-fund', 'firebase-admin@13', path.join(work, tarball)], project)
     const before = storageCopies(project)
     console.log(`  (installed together: ${before.join(', ')})`)
+
+    const doctorBin = path.join(project, 'node_modules', '@dasasian', 'firebase-structured-logger', 'dist', 'tools', 'index.js')
+    const doctorJson = (cwd: string): { findings: Array<{ id: string }> } => {
+      const out = execFileSync('node', [doctorBin, 'doctor', '--backend=.', '--json'], { cwd, encoding: 'utf-8' })
+      return JSON.parse(out.trim().split('\n').pop()!)
+    }
+
+    const beforeReport = doctorJson(project)
+    assert(
+      'fsl doctor --json reports duplicate-storage before dedupe',
+      beforeReport.findings.some((f) => f.id === 'duplicate-storage'),
+      JSON.stringify(beforeReport.findings),
+    )
+
     npm(['dedupe', '--no-audit', '--no-fund'], project)
     const after = storageCopies(project)
     assert('after npm dedupe there is exactly one copy of Storage', after.length === 1, after.join(', '))
     assert('and it is the 7.x firebase-admin 13 needs', after[0]?.startsWith('7.'), after.join(', '))
+
+    const afterReport = doctorJson(project)
+    assert(
+      'fsl doctor --json does not report duplicate-storage after dedupe',
+      !afterReport.findings.some((f) => f.id === 'duplicate-storage'),
+      JSON.stringify(afterReport.findings),
+    )
   } finally {
     fs.rmSync(work, { recursive: true, force: true })
   }

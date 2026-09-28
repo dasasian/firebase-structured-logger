@@ -37,7 +37,14 @@ export interface UploadOptions {
   bucket?: string
   release?: string
   distDir?: string
-  functionsDir?: string // path to Cloud Functions directory (e.g. './functions' or './backend')
+  /**
+   * Path to the backend directory (e.g. './functions' or './backend').
+   *
+   * Named `functionsDir` internally; the CLI flag is `--backend` (`--functions` is
+   * kept as a deprecated alias) — this option also serves a Cloud Run backend that
+   * is not a Cloud Functions directory at all.
+   */
+  functionsDir?: string
   embedSourcemaps?: boolean  // copy maps to {functionsDir}/sourcemaps/current/ (default false)
   /**
    * Cloud Storage prefix to upload under. Defaults to `sourcemaps/`.

@@ -3,6 +3,8 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { uploadSourceMaps, EXIT_UPLOAD_FAILED_BUT_EMBEDDED } from './uploadSourceMaps'
 import { installSkills } from './installSkills'
+import { runDoctor, exitCodeFor, formatDoctorReport } from './doctor'
+import { warnDeprecated } from '../shared/deprecate'
 
 const [, , command, ...rawArgs] = process.argv
 
@@ -46,10 +48,14 @@ async function main() {
     case 'upload-sourcemaps': {
       const bucket = args.bucket ?? process.env.VITE_FIREBASE_STORAGE_BUCKET ?? process.env.FIREBASE_STORAGE_BUCKET
       const embed = args['embed-sourcemaps'] === 'true'
+      if (args.functions !== undefined) {
+        warnDeprecated('--functions', '--backend')
+      }
+      const backend = args.backend ?? args.functions
       // A bucket is only required when something is going to be uploaded.
       // Embed-only is the whole flow for a backend that has no bucket — see #34.
       if (!bucket && !embed) {
-        console.error('Usage: fsl upload-sourcemaps [--bucket=<name>] [--functions=<path>] [--embed-sourcemaps] [--release=<id>] [--dist=<path>] [--prefix=<path>]')
+        console.error('Usage: fsl upload-sourcemaps [--bucket=<name>] [--backend=<path>] [--embed-sourcemaps] [--release=<id>] [--dist=<path>] [--prefix=<path>]')
         console.error('Bucket can also be set via VITE_FIREBASE_STORAGE_BUCKET or FIREBASE_STORAGE_BUCKET env var (loaded from .env.local automatically).')
         console.error('Omit the bucket only with --embed-sourcemaps, to embed the current release without uploading.')
         process.exit(1)
@@ -58,7 +64,7 @@ async function main() {
         bucket,
         release: args.release,
         distDir: args.dist,
-        functionsDir: args.functions,
+        functionsDir: backend,
         embedSourcemaps: embed,
         prefix: args.prefix,
       })
@@ -73,22 +79,45 @@ async function main() {
       break
     }
 
+    case 'doctor': {
+      const report = runDoctor({
+        projectRoot: process.cwd(),
+        backend: args.backend,
+        dist: args.dist,
+      })
+      if (args.json === 'true') {
+        console.log(JSON.stringify({ ...report, exitCode: exitCodeFor(report, args.strict === 'true') }))
+      } else {
+        console.log(formatDoctorReport(report))
+      }
+      process.exit(exitCodeFor(report, args.strict === 'true'))
+    }
+
     default: {
       console.log(`
 firebase-structured-logger (fsl)
 
 Commands:
-  fsl upload-sourcemaps [--bucket=<name>] [--functions=<path>] [--embed-sourcemaps] [--release=<id>] [--dist=<path>] [--prefix=<path>]
+  fsl upload-sourcemaps [--bucket=<name>] [--backend=<path>] [--embed-sourcemaps] [--release=<id>] [--dist=<path>] [--prefix=<path>]
       Upload .map files from dist/ to Cloud Storage and delete them locally.
       --bucket defaults to VITE_FIREBASE_STORAGE_BUCKET or FIREBASE_STORAGE_BUCKET (loaded from .env.local automatically).
-      --functions path to Cloud Functions directory (e.g. ./functions or ./backend).
-      --embed-sourcemaps copies maps to {functions}/sourcemaps/current/ for fast lookup of current release.
+      --backend path to the backend directory (e.g. ./functions or ./backend). --functions is
+               a deprecated alias, kept for existing scripts.
+      --embed-sourcemaps copies maps to {backend}/sourcemaps/current/ for fast lookup of current release.
                Given without --bucket, embeds only and uploads nothing — for a backend with no
                bucket. Only the deployed release can then be symbolicated.
       --prefix Cloud Storage prefix to upload under (default sourcemaps/). Must match
                createClientLogHandler({ sourceMaps: { prefix } }) or maps are not found.
       Authenticates via FIREBASE_SERVICE_ACCOUNT_PATH if set, otherwise uses ADC.
       Release ID defaults to git rev-parse --short HEAD.
+
+  fsl doctor [--backend=<path>] [--dist=<path>] [--strict] [--json]
+      Check the project's setup from disk: how logging, trace ids, Storage and the
+      callable will behave, and any findings. Reads firebase.json when present;
+      otherwise --backend and --dist say where things are.
+      --strict  also fail (exit 1) on warnings, not just errors.
+      --json    print the same result as JSON instead of the human-readable report.
+      Exit code: 0 with no errors, 1 with an error (or a warning under --strict).
 
   fsl install-skills [--global] [--force]
       Copy skills/ to .claude/skills/ (project) or ~/.claude/skills/ (--global).
