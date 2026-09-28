@@ -38,16 +38,18 @@ file that most needs it.
 its source was removed. `prepublishOnly` runs `clean && build` for that reason. Check
 `npm pack --dry-run` after deleting any source file.
 
-`.nvmrc` pins **22** for local work — `nvm use` picks it up in this directory. It exists
-because Node 20 fails in ways that look like code problems: `firebase-functions` pulls in
+`.nvmrc` pins **22** for local work — `nvm use` picks it up in this directory. Keep the
+installed 22 current (`nvm install 22`): jsdom 30, a test dependency, needs 22.22.2 or
+later. Node 20 fails in ways that look like code problems: `firebase-functions` pulls in
 `jwks-rsa` → `jose` 6, which is ESM-only, so `firebase deploy` dies during codebase
 analysis with `ERR_REQUIRE_ESM` and a plain `require()` of the built `/functions` entry
-point does the same. CI deliberately ignores `.nvmrc` and keeps its 20/22 matrix.
+point does the same.
 
-**Node 22 is the supported floor.** `firebase-admin` 14 requires it, and it is the Cloud
-Functions runtime people deploy to. CI runs 20 and 22 — 20 only as a courtesy check for
-consumers still on `firebase-admin` 13. If you change the matrix, update the required
-status checks on `main` too, or PRs wait forever on a check that never runs.
+**Node 22 is the supported floor, and CI runs 22 and 24.** `engines` says `>=22`;
+`firebase-admin` 14 and `@google-cloud/storage` 8 both require it; 24 is the current LTS.
+Node 20 was dropped at 1.0 — it reached end of life on 2026-04-30 and gets no security
+fixes. If you change the matrix, update the required status checks on `main` too
+(`build (22)`, `build (24)` today), or PRs wait forever on a check that never runs.
 
 `npm test` runs the `tests/*.ts` tsx suites. Keep them green.
 

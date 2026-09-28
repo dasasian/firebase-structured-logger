@@ -10,10 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # 22 is the supported floor (firebase-admin 14 requires it, and it is
-        # the Cloud Functions runtime people deploy to). 20 is kept as a
-        # courtesy check for consumers still on firebase-admin 13.
-        node-version: ['20', '22']
+        # 22 is the supported floor (`engines`, firebase-admin 14 and Storage 8
+        # all require it) and 24 is the current LTS. Node 20 was dropped at 1.0:
+        # it reached end of life on 2026-04-30 and gets no security fixes.
+        # If you change this, update the required status checks on `main`, or
+        # PRs wait forever on a check that never runs.
+        node-version: ['22', '24']
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
