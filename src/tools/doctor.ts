@@ -224,15 +224,40 @@ function checkDuplicateStorage(backendDir: string | null, findings: DoctorFindin
   const copies = findPackageCopies(backendDir, '@google-cloud/storage')
   const versions = [...new Set(copies.map((c) => c.version))]
   if (versions.length <= 1) return
+  const placed = copies.map((c) => `${c.version} ${describeOwner(ownerOf(c.dir))}`)
   findings.push({
     id: 'duplicate-storage',
     level: 'warning',
-    message: `${copies.length} copies of @google-cloud/storage (${versions.join(', ')})`,
+    message: `${copies.length} copies of @google-cloud/storage (${placed.join(', ')})`,
     fix: 'npm dedupe',
   })
 }
 
-function checkUnsupportedPeers(
+function displayPath(projectRoot: string, dir: string): string {
+  const relative = path.relative(projectRoot, dir)
+  if (relative === '') return '.'
+  return relative.startsWith('..') || path.isAbsolute(relative) ? relative : `./${relative}`
+}
+
+function ownerOf(packageDir: string): string | null {
+  const parts = packageDir.split(path.sep)
+  const nodeModules = parts.lastIndexOf('node_modules')
+  const previous = parts.lastIndexOf('node_modules', nodeModules - 1)
+  if (previous === -1) return null
+  const owner = parts.slice(previous + 1, nodeModules)
+  return owner.join('/')
+}
+
+function describeOwner(owner: string | null): string {
+  return owner === null ? 'at the top level' : `inside ${owner}`
+}
+
+/**
+ * A peer whose supported range cannot be evaluated is `could-not-check`, never a pass:
+ * the ranges are read from this package's own `peerDependencies`, and a range shape
+ * `meetsMinimum` does not understand must surface rather than skip the check.
+ */
+export function checkUnsupportedPeers(
   searchDirs: string[],
   ownPeerDependencies: Record<string, string>,
   findings: DoctorFinding[],
@@ -243,7 +268,14 @@ function checkUnsupportedPeers(
     const installed = findTopLevelVersion(searchDirs, peer)
     if (!installed) continue
     const meets = meetsMinimum(installed, range)
-    if (meets === false) {
+    if (meets === undefined) {
+      findings.push({
+        id: 'could-not-check',
+        level: 'error',
+        message: `Could not compare ${peer} ${installed} with the supported range ${range}.`,
+        fix: 'Report this at https://github.com/dasasian/firebase-structured-logger/issues — doctor needs to learn this range shape.',
+      })
+    } else if (meets === false) {
       findings.push({
         id: 'unsupported-peer',
         level: 'warning',
@@ -306,8 +338,8 @@ export function runDoctor(options: DoctorOptions): DoctorReport {
 
   const setup: DoctorSetup = {
     kind,
-    backend: backendDir ? path.relative(options.projectRoot, backendDir) || '.' : null,
-    dist: distDirs[0] ? path.relative(options.projectRoot, distDirs[0]) || '.' : null,
+    backend: backendDir ? displayPath(options.projectRoot, backendDir) : null,
+    dist: distDirs[0] ? displayPath(options.projectRoot, distDirs[0]) : null,
     logging,
     trace,
     storage,
@@ -348,15 +380,16 @@ const TRACE_LABEL: Record<TraceSource, string> = {
 
 const STORAGE_LABEL: Record<StoragePath, string> = {
   'firebase-admin': 'firebase-admin, default bucket',
-  'google-cloud-storage': '@google-cloud/storage, named bucket',
+  'google-cloud-storage': '@google-cloud/storage — needs a bucket named in code (not checked)',
   none: 'not configured',
 }
 
 /** Renders the human-readable report `fsl doctor` prints without `--json`. */
 export function formatDoctorReport(report: DoctorReport): string {
   const { setup, findings } = report
+  const backendNoun = setup.kind === 'firebase' ? 'functions' : 'backend'
   const location = setup.backend && setup.dist
-    ? `functions in ${setup.backend}, web build in ${setup.dist}`
+    ? `${backendNoun} in ${setup.backend}, web build in ${setup.dist}`
     : setup.backend
       ? `backend in ${setup.backend}`
       : setup.dist

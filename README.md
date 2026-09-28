@@ -362,12 +362,12 @@ It prints a summary of how your setup will behave, then any findings:
 ```
 Setup: Firebase — functions in ./functions, web build in ./dist
 
-  Logging        firebase-functions write()              ok
-  Trace ids      from each Cloud Functions trigger       ok
-  Storage        firebase-admin, default bucket          ok
-  Callable       createClientLogFunction available       ok
+  Logging        firebase-functions write()
+  Trace ids      from each Cloud Functions trigger
+  Storage        firebase-admin, default bucket
+  Callable       createClientLogFunction available
 
-  ⚠ duplicate-storage   2 copies of @google-cloud/storage (8.2.0 for fsl, 7.22.0 for firebase-admin)
+  ⚠ duplicate-storage    2 copies of @google-cloud/storage (8.2.0 at the top level, 7.22.0 inside firebase-admin)
                         Fix: npm dedupe
 ```
 
@@ -395,18 +395,22 @@ error, never a pass.
              "callable": true },
   "findings": [
     { "id": "duplicate-storage", "level": "warning",
-      "message": "2 copies of @google-cloud/storage (8.2.0 for fsl, 7.22.0 for firebase-admin)",
+      "message": "2 copies of @google-cloud/storage (8.2.0 at the top level, 7.22.0 inside firebase-admin)",
       "fix": "npm dedupe" }
   ],
   "exitCode": 0
 }
 ```
 
-The ids and fields are part of the 1.0 API: scripts may depend on them.
+`setup.kind` is `firebase`, `node`, `browser-only` or `backend-only`; `logging` is
+`firebase-functions`, `stdout` or `none`; `trace` is `trigger`, `header` or `none`; and
+`storage` is `firebase-admin`, `google-cloud-storage` (which still needs a bucket named in
+your code — doctor cannot see it) or `none`. The ids and fields are part of the 1.0 API:
+scripts may depend on them.
 
 What doctor does not check: anything set in your own code — the release id you pass to
-`initLogger`, a bucket name passed to a handler. It says so ("bucket: set in code, not
-checked") rather than guessing. [`fsl verify`](https://github.com/dasasian/firebase-structured-logger/issues/25),
+`initLogger`, a bucket name passed to a handler. Its Storage line says so — "needs a bucket named in code (not checked)" — rather than
+guessing. [`fsl verify`](https://github.com/dasasian/firebase-structured-logger/issues/25),
 planned after 1.0, will check those by sending a real log.
 
 ## Local development

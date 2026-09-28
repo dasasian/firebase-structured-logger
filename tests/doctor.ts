@@ -13,7 +13,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { runDoctor, exitCodeFor, type DoctorReport } from '../src/tools/doctor.js'
+import { runDoctor, exitCodeFor, checkUnsupportedPeers, type DoctorReport, type DoctorFinding } from '../src/tools/doctor.js'
 import { RELEASE_MARKER } from '../src/shared/paths.js'
 import { assert, reportResults } from './testHelpers.js'
 
@@ -195,6 +195,29 @@ function testUnsupportedPeerQuiet() {
   cleanup([root])
 }
 
+function testUnreadablePeerRangeIsCouldNotCheck() {
+  console.log('\nTest: a peer range doctor cannot evaluate is could-not-check, not a silent pass')
+  const findings: DoctorFinding[] = []
+  const { root, backend } = firebaseProject()
+  writePackage(backend, 'firebase-admin', '9.0.0')
+  checkUnsupportedPeers([backend], { 'firebase-admin': '^12.0.0 || ^13.0.0' }, findings)
+  assert('could-not-check fires', findings.some((f) => f.id === 'could-not-check'), JSON.stringify(findings))
+  assert('at error level', findings.find((f) => f.id === 'could-not-check')?.level === 'error')
+  cleanup([root])
+}
+
+function testDuplicateStorageNamesWhoOwnsEachCopy() {
+  console.log('\nTest: duplicate-storage says which package each copy belongs to')
+  const { root, backend } = firebaseProject()
+  writePackage(backend, '@google-cloud/storage', '8.2.0')
+  writePackage(path.join(backend, 'node_modules', 'firebase-admin'), '@google-cloud/storage', '7.22.0')
+  const report = runDoctor({ projectRoot: root })
+  const message = report.findings.find((f) => f.id === 'duplicate-storage')?.message ?? ''
+  assert('names the top-level copy', message.includes('8.2.0 at the top level'), message)
+  assert('names the copy inside firebase-admin', message.includes('7.22.0 inside firebase-admin'), message)
+  cleanup([root])
+}
+
 // --- embedded-maps-without-release ---
 
 function testEmbeddedMapsWithoutReleaseFires() {
@@ -225,8 +248,8 @@ function testFirebaseSetupSummary() {
   const { root } = firebaseProject()
   const report = runDoctor({ projectRoot: root })
   assert('kind is firebase', report.setup.kind === 'firebase')
-  assert('backend is functions', report.setup.backend === 'functions')
-  assert('dist is dist', report.setup.dist === 'dist')
+  assert('backend is ./functions', report.setup.backend === './functions')
+  assert('dist is ./dist', report.setup.dist === './dist')
   assert('logging is firebase-functions', report.setup.logging === 'firebase-functions')
   assert('trace is trigger', report.setup.trace === 'trigger')
   assert('callable is true', report.setup.callable === true)
@@ -242,8 +265,8 @@ function testCloudRunSetupSummary() {
   fs.mkdirSync(dist, { recursive: true })
   const report = runDoctor({ projectRoot: root, backend: 'server', dist: 'build' })
   assert('kind is node', report.setup.kind === 'node')
-  assert('backend is server', report.setup.backend === 'server')
-  assert('dist is build', report.setup.dist === 'build')
+  assert('backend is ./server', report.setup.backend === './server')
+  assert('dist is ./build', report.setup.dist === './build')
   assert('logging is stdout', report.setup.logging === 'stdout')
   assert('trace is header', report.setup.trace === 'header')
   assert('callable is false', report.setup.callable === false)
@@ -264,6 +287,8 @@ function run() {
   testDuplicateStorageQuiet()
   testUnsupportedPeerFires()
   testUnsupportedPeerQuiet()
+  testUnreadablePeerRangeIsCouldNotCheck()
+  testDuplicateStorageNamesWhoOwnsEachCopy()
   testEmbeddedMapsWithoutReleaseFires()
   testEmbeddedMapsWithoutReleaseQuiet()
   testFirebaseSetupSummary()
