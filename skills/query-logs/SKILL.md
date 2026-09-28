@@ -8,6 +8,20 @@ The `firebase_functions_logs` MCP tool reads from:
 - **Production**: Google Cloud Logging (default)
 - **Development**: Local JSONL file when `DEV_LOG_FILE` env var is set in the MCP server
 
+## Missing or odd logs? Check the setup first
+
+Before reading logs to explain why something is missing — no entries at all, stacks that
+stay minified, no attachments — run the setup check. Most of those failures are silent
+misconfigurations, and doctor reads them straight off disk:
+
+```
+npx fsl doctor --json
+```
+
+`findings` lists anything wrong, each with an `id`, `level` and `fix`; `setup` says how
+logging, trace ids and Storage will behave. An empty `findings` means the setup is not
+the problem, and the answer is in the logs.
+
 ## Queryable Labels
 
 All entries written by firebase-structured-logger include these labels:

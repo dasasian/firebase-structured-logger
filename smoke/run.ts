@@ -25,6 +25,7 @@ import { GoogleAuth } from 'google-auth-library'
 import { Storage } from '@google-cloud/storage'
 import { ulid } from 'ulid'
 import type { EncodedSourceMap } from '@jridgewell/trace-mapping'
+import { runDoctor } from '../src/tools/doctor.js'
 
 // --- config ---------------------------------------------------------------
 
@@ -321,9 +322,30 @@ async function listEntriesRest(filter: string): Promise<SmokeEntry[]> {
 
 // --- the run --------------------------------------------------------------
 
+/**
+ * fsl doctor against the smoke project — a real Firebase layout, with the package
+ * installed by `smoke:deploy`. The fake projects in tests/doctor.ts cover each finding;
+ * this checks doctor reads a real firebase.json and node_modules the way it describes.
+ * Here, not in npm test: it needs the maintainer's smoke install.
+ */
+function doctorLeg(): void {
+  console.log('  --- fsl doctor on the smoke project ---')
+  const report = runDoctor({ projectRoot: HERE })
+  assert('it recognises the Firebase layout', report.setup.kind === 'firebase', `got: ${report.setup.kind}`)
+  assert('the callable is available', report.setup.callable)
+  assert('logging goes through firebase-functions', report.setup.logging === 'firebase-functions', `got: ${report.setup.logging}`)
+  const errors = report.findings.filter((f) => f.level === 'error')
+  assert('no errors', errors.length === 0, JSON.stringify(errors))
+  for (const warning of report.findings.filter((f) => f.level === 'warning')) {
+    console.log(`  (warning ${warning.id}: ${warning.message})`)
+  }
+}
+
 async function main(): Promise<void> {
   console.log(`\nSmoke run ${RUN_ID}`)
   console.log(`  project ${PROJECT}  ·  release ${RELEASE_ID}\n`)
+
+  doctorLeg()
 
   // 1. Put a source map in Storage under a release that has no embedded copy,
   //    so symbolication has to use the Storage path.

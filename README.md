@@ -70,12 +70,19 @@ cd functions && npm install @dasasian/firebase-structured-logger
 npm install @dasasian/firebase-structured-logger
 ```
 
-Ships ESM with three entry points — `/client`, `/functions`, `/tools` — plus the `fsl` CLI. `firebase`, `firebase-admin`, and `firebase-functions` are optional peer dependencies (bring your own versions). None of them is needed to load the package; each only switches on the part that uses it — see [Without Firebase](#without-firebase).
+Ships CommonJS with TypeScript types — works from `require` and from `import`, in Node and in any bundler — with three entry points, `/client`, `/functions` and `/tools`, plus the `fsl` CLI. `firebase`, `firebase-admin`, and `firebase-functions` are optional peer dependencies (bring your own versions). None of them is needed to load the package; each only switches on the part that uses it — see [Without Firebase](#without-firebase).
 
 Installing next to **firebase-admin 13** in one command can leave two copies of
 `@google-cloud/storage` (8 for this package, 7 for firebase-admin). Both work; run
 `npm dedupe` once and npm keeps the one they share. firebase-admin 14.5 and later use
 the same Storage as this package, so there is nothing to do.
+
+### Upgrading from 0.x
+
+Nothing breaks. Eight names were renamed for the 1.0 API — `minLogLevel` became
+`minSeverity`, `bucketName` became `bucket`, and so on — and each old name still works in
+1.x, with a one-time console warning naming its replacement. They are removed in 2.0.
+The full list is in [Renamed in 1.0](#client). Run `npx fsl doctor` after upgrading.
 
 ## Setup
 
