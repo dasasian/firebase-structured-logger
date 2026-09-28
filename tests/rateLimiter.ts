@@ -184,6 +184,31 @@ function testErrorReserve() {
  * The reserve is "ERROR and above" by rank (SEVERITY_ORDER), so every level
  * less severe than ERROR is refused at the line — not just WARNING.
  */
+/**
+ * The count refills continuously, so it is almost never a whole number. A reserve
+ * check of "available <= reserve" lets a warning through at 1.0001 with a reserve
+ * of 1, and that warning spends the reserve. Found as a CI-only flake: on a fast
+ * machine the calls land in one millisecond and the count stays exactly 1.
+ */
+function testFractionalRechargeDoesNotBreachTheReserve() {
+  console.log('\nTest: a part-recharged log does not let a warning into the reserve')
+  reset()
+  configureRateLimiter({ burstLimit: 3, reservedForErrors: 1, rechargeSecondsPerLog: 60, duplicateLimit: 99 })
+
+  const t0 = 1_700_000_000_000
+  withFrozenTime(t0, () => {
+    assert('INFO 1 allowed', allow({ severity: 'INFO' }).allowed)
+    assert('INFO 2 allowed — at the reserve line now', allow({ severity: 'INFO' }).allowed)
+  })
+  // One second later: a sixtieth of a log has recharged, so the count is ~1.017.
+  withFrozenTime(t0 + 1_000, () => {
+    const warning = allow({ severity: 'WARNING' })
+    assert('a WARNING is still refused at the reserve', !warning.allowed && warning.reason === 'reserve',
+      JSON.stringify(warning))
+    assert('an ERROR can spend the reserve', allow({ severity: 'ERROR' }).allowed)
+  })
+}
+
 function testReserveIsByRank() {
   console.log('\nTest: at the reserve line, ERROR is allowed and every less severe level refused')
   reset()
@@ -621,6 +646,7 @@ function run() {
   testReloadDoesNotResetTheBudget()
   testErrorReserve()
   testReserveIsByRank()
+  testFractionalRechargeDoesNotBreachTheReserve()
   testSignatureSurvivesColonsAndPipes()
   testDuplicateSuppression()
   testUnsignedLogsAreNeverSuppressedAsDuplicates()

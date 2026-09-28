@@ -405,7 +405,12 @@ export function allow(options: AllowOptions): RateLimitDecision {
   }
   // "ERROR and above" as a rank, not the literal string 'ERROR' — so the check
   // stays right if a more severe level is ever added to SEVERITY_ORDER.
-  if (state.available <= reserveThreshold && SEVERITY_ORDER[options.severity] > SEVERITY_ORDER.ERROR) {
+  // Would spending one dip into the reserve? Asked that way, not as
+  // "available <= reserve": the count refills continuously and is almost never
+  // whole, so at 1.02 with a reserve of 1 the old check let a warning through
+  // and it spent the reserve. Found as a CI-only flake — on a fast machine the
+  // calls share one millisecond and the count stays exactly 1.
+  if (state.available - 1 < reserveThreshold && SEVERITY_ORDER[options.severity] > SEVERITY_ORDER.ERROR) {
     writeState(state)
     return { allowed: false, reason: 'reserve' }
   }

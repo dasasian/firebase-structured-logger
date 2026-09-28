@@ -7,6 +7,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Warnings could spend the error reserve.** The log limit recharges continuously, so its count is almost never a whole number, and the reserve check `available <= reserve` let a warning through at, say, 1.02 with a reserve of 1 — spending the room kept for the next crash. It now asks whether spending one log would dip into the reserve. Found as a CI-only test flake: on a fast machine the calls share one millisecond and the count stays whole.
+
 ### Changed
 
 - **Built with TypeScript 6** (was 5.9), with `module`/`moduleResolution: node16`. The published JavaScript is byte-identical and the `.d.ts` unchanged; a consumer on TypeScript 5.9, or resolving with `node16` or `bundler`, compiles against it as before.
