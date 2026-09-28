@@ -25,6 +25,12 @@ All entries written by firebase-structured-logger include these labels:
 | `functionName` | Cloud Function name (server-side logs only) |
 | `logId` | ULID — unique per log entry, used to locate attachments in GCS |
 | `hasAttachments` | `'true'` when attachments were uploaded alongside this entry |
+| `repeatKey` | Client-side id carried by each full copy of an error that repeats |
+| `repeatOf` | On a repeat summary: the `repeatKey` of the full copies it counts |
+| `repeatCount` | On a repeat summary: how many further occurrences it stands for |
+| `firstSeen`, `lastSeen` | On a repeat summary: the window those occurrences fell in |
+| `sentLate` | `'true'` on a summary sent by a later visit than the one it counts |
+| `truncated` | `'true'` when the entry was shortened to fit Cloud Logging's line limit |
 
 App-specific labels are defined in each app's `AppLabels` type.
 
@@ -67,6 +73,35 @@ labels.releaseId="<hash>"
 ```
 severity=ERROR timestamp>="<ISO8601>"
 ```
+
+## How often did it really happen?
+
+**Do not count entries.** A client sends an error in full only 3 times; after that it
+counts the repeats and sends one `WARNING` summary per hour (and when the tab is hidden,
+or on the user's next visit). Counting ERROR entries gives at most 3 per user, per
+release, per hour — Cloud Error Reporting shows the same capped number.
+
+The true count is the full copies plus the sum of `repeatCount`:
+
+```
+labels.repeatKey="<key>" OR labels.repeatOf="<key>"
+```
+
+Take `repeatKey` from any full copy. Every entry this returns is one occurrence, except
+summaries: each summary is `labels.repeatCount` occurrences, between `labels.firstSeen`
+and `labels.lastSeen`. A summary is timestamped at `lastSeen`, and `sentLate="true"`
+means it arrived on a later visit — it still belongs at its own time.
+
+A summary has no stack and no breadcrumbs. For those, read one of the full copies.
+
+## Shortened entries
+
+Cloud Functions and Cloud Run cut a log line at 102,400 bytes, so the library shortens
+any entry over 90 KiB before writing it: breadcrumb data, then other context, then the
+tail of the stack. Such an entry carries `labels.truncated="true"`, and when Storage is
+configured `labels.hasAttachments="true"` — the whole original entry is saved as
+`logAttachments/{logId}/fsl-overflow.json`. Read that file (see below) whenever the
+context or breadcrumbs you need are missing from a truncated entry.
 
 ## Retrieving Attachments
 

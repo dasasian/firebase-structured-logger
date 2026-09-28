@@ -787,6 +787,9 @@ Narrow it when you need to:
 | `labels.screen="checkout"` | one screen |
 | `labels.feedback="true"` | user-reported issues |
 | `labels.hasAttachments="true"` | entries with files in GCS |
+| `labels.truncated="true"` | entries shortened to fit — the full copy is `fsl-overflow.json` |
+| `labels.repeatKey="<key>" OR labels.repeatOf="<key>"` | one repeating error: its full copies and its summaries |
+| `labels.sentLate="true"` | repeat summaries sent on a later visit |
 
 Locally, the emulator's JSONL answers the same questions. Point
 **[firebase-mcp-server](https://github.com/dasasian/firebase-mcp-server)** at either and ask

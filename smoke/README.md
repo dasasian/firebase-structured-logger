@@ -63,6 +63,24 @@ repository and runs Cloud Build, both inside the free tier at this size. A deplo
 can fail once with "Resource readiness deadline exceeded" and no container logs —
 that is on Google's side; deploying again worked.
 
+## The big-entry and repeat-summary legs
+
+**A 300 KB entry** goes through the callable. Cloud Functions and Cloud Run cut a log
+line at 102,400 bytes, and past that the entry arrives as broken text with no severity
+or labels — measured with a throwaway experiment, 99 KB whole and 100 KB broken, on both.
+The leg asserts the entry arrives as JSON, marked `truncated`, with its stack resolved
+and the whole original in the bucket as `fsl-overflow.json`.
+
+**A repeat summary stamped two hours back**, and a plain WARNING carrying the same stamp.
+The summary must be filed at its own time and the plain entry at the server's. This is
+the leg that found both of these, after the unit suites had passed:
+
+- An RFC 3339 string under `timestamp` is ignored. Cloud Logging's agent reads a
+  `{ seconds, nanos }` object, a `timestampSeconds`/`timestampNanos` pair, or a `time`
+  string — nothing else.
+- An entry whose body is only `message` is filed as `textPayload`, so a
+  `jsonPayload.message` filter never finds it. Give every entry a second field.
+
 ## What the deployed fixture covers
 
 `functions/sourcemaps/current/` ships an embedded map for release
