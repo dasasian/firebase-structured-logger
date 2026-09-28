@@ -24,3 +24,6 @@ jobs:
       - run: npm run build
       - run: npm run typecheck
       - run: npm test
+      # The packed tarball, installed with no optional peers, under both Storage
+      # majors the package accepts. Needs the npm registry and nothing else.
+      - run: npm run smoke:install

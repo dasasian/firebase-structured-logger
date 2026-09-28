@@ -61,6 +61,24 @@ const PROBES: Record<string, string> = {
   'probe.mjs': `import fsl from '@dasasian/firebase-structured-logger/functions'\n${PROBE_BODY}`,
 }
 
+const STORAGE_PROBE = `
+const fsl = require('@dasasian/firebase-structured-logger/functions')
+fsl.initLogger({ appId: 'install-smoke', minSeverity: 'DEBUG' })
+fsl.configureAttachments({ bucket: 'install-smoke-bucket' })
+const handler = fsl.createHttpLogHandler({ authorize: 'unauthenticated' })
+const res = { statusCode: 0, setHeader() {}, end() {} }
+handler({
+  method: 'POST',
+  headers: {},
+  body: {
+    message: 'storage smoke', severity: 'ERROR', labels: { appId: 'install-smoke' },
+    attachments: { note: Buffer.from('hi').toString('base64') },
+  },
+}, res)
+// The upload is async and fails on the closed port; give it time to say so.
+setTimeout(() => {}, 5000)
+`
+
 interface ProbeResult {
   status: number
   createClientLogFunctionError: string | null
@@ -123,6 +141,38 @@ function run() {
       assert(
         'serviceContext names the app and release',
         entry.serviceContext?.service === 'install-smoke' && entry.serviceContext.version === 'r1',
+      )
+    }
+
+    // Both Storage majors, really used. The package accepts `^7.19.0 || ^8.1.0` so
+    // that npm reuses whichever copy the user's firebase-admin already brought
+    // (13.x → 7, 14.5+ → 8) instead of installing a second. So each major has to
+    // work, not merely load: with a bucket named and no firebase-admin, an
+    // attachment goes through @google-cloud/storage (step 2 of the Storage chain).
+    // The emulator host is a closed local port, so the upload fails fast and its
+    // warning proves the request was built — nothing reaches real Storage.
+    for (const major of ['7', '8']) {
+      console.log(`\nTest: with @google-cloud/storage ${major}, an attachment goes through it`)
+      npm(['install', '--no-audit', '--no-fund', `@google-cloud/storage@${major}`], work)
+      const installed = JSON.parse(
+        fs.readFileSync(path.join(work, 'node_modules', '@google-cloud', 'storage', 'package.json'), 'utf-8'),
+      ) as { version: string }
+      assert(`Storage ${major}.x is the one installed`, installed.version.startsWith(`${major}.`), installed.version)
+      const nested = path.join(work, 'node_modules', '@dasasian', 'firebase-structured-logger', 'node_modules', '@google-cloud', 'storage')
+      assert('there is one copy, not a second one under the package', !fs.existsSync(nested))
+
+      fs.writeFileSync(path.join(work, 'storage.cjs'), STORAGE_PROBE)
+      const out = spawnSync('node', ['storage.cjs'], {
+        cwd: work,
+        encoding: 'utf-8',
+        env: { ...process.env, STORAGE_EMULATOR_HOST: 'http://127.0.0.1:9' },
+        timeout: 60_000,
+      })
+      assert('it exits cleanly', out.status === 0, out.stderr.slice(0, 500))
+      assert(
+        'the upload was built by Storage and aimed at the attachment path',
+        out.stderr.includes('Log attachment upload failed') && out.stderr.includes('logAttachments'),
+        out.stderr.slice(0, 600),
       )
     }
   } finally {

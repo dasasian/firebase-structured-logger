@@ -13,6 +13,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`@google-cloud/storage` is accepted as `^7.19.0 || ^8.1.0`** (was `^7.0.0`). firebase-admin 14.5 brings Storage 8 and 13.x brings 7; with the old range a project on the newest firebase-admin installed two copies. Now npm reuses the one already there. Both majors are exercised by `npm run smoke:install`, which CI now runs.
 - **Built with TypeScript 6** (was 5.9), with `module`/`moduleResolution: node16`. The published JavaScript is byte-identical and the `.d.ts` unchanged; a consumer on TypeScript 5.9, or resolving with `node16` or `bundler`, compiles against it as before.
 
 ### Deprecated

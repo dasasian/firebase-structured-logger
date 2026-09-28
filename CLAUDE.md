@@ -151,6 +151,17 @@ and correctly so: requests are concurrent, so each gets its own writer via
 `configureX`/`init`. **A new configure/init function needs a case in that
 file** — its absence is what let both bugs ship.
 
+## Shared SDKs — one copy in the user's tree
+
+`@google-cloud/storage` is a real dependency, and users almost always have a second
+route to it: `firebase-admin` brings it as an optional dependency (13.x → `^7`, 14.5+ →
+`^8`). If our range and theirs do not overlap, npm installs two copies. So the range is
+`^7.19.0 || ^8.1.0`, wide on purpose, the way `firebase-functions` accepts four majors
+of `firebase-admin`: npm reuses whichever copy is already there. Widening a range is
+not a breaking change. `npm run smoke:install` installs each major and pushes an
+attachment through it, so both keep working rather than merely loading. Keep the
+range covering every major a supported `firebase-admin` uses.
+
 ## Optional peers — never at module load
 
 `firebase`, `firebase-functions` and `firebase-admin` are optional peers, and the package
