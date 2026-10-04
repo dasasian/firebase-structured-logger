@@ -206,6 +206,13 @@ function testHashRouting() {
   assert('a #/ fragment is read as the path', getCurrentRoute()?.path === '/orders/1042', JSON.stringify(getCurrentRoute()))
   assert('and matched against the id rule', getCurrentRoute()?.route === '/orders/:id')
 
+  history.pushState({}, '', '#/orders/1042?token=x')
+  assert(
+    'the query string is stripped from a hash-routed path too',
+    getCurrentRoute()?.path === '/orders/1042',
+    JSON.stringify(getCurrentRoute()),
+  )
+
   history.pushState({}, '', '#section-3')
   assert(
     'a non-route fragment is dropped — the pathname is used instead',
