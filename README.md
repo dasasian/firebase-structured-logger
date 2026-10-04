@@ -513,7 +513,7 @@ logger.error(err, { orderId })
 |---|---|---|
 | `appId`, `releaseId` | client | your `initLogger` config |
 | `screen` | client | tracked as the user moves |
-| `route`, `path`, `routeSource` | client | with `navigation: true` — the route pattern, the real path, and where the pattern came from |
+| `route`, `path`, `routeSource` | client | with `enableNavigation()` — the route pattern, the real path, and where the pattern came from |
 | `userId` | client | `setUser`, held for the session |
 | `platform` | client | user agent — `ios` / `android` / `macos` / `web` |
 | `browser` | client | user agent |
@@ -633,18 +633,22 @@ current screen, so `labels.screen` stays correct without a second call.
 ### Navigation, automatically
 
 ```ts
-initLogger({ appId, releaseId, logFunction, navigation: true })
+import { enableNavigation } from '@dasasian/firebase-structured-logger/client/navigation'
+
+enableNavigation()
 
 // or name routes the way your router does
-initLogger({ appId, releaseId, logFunction, navigation: {
+enableNavigation({
   routeFor: (path) => router.match(path)?.name,   // undefined falls back to the id rule
-} })
+})
 ```
 
-Off by default — it wraps `history.pushState` and `replaceState`, the only way to notice a
-single-page app changing route, and nothing in your app should be wrapped without asking.
-On, it records the first page and every route change after it, back and forward included,
-as a `nav` breadcrumb, and every entry carries three labels:
+Its own entry point, so an app that never imports it ships none of it, whatever its
+bundler — and the import says plainly that it wraps `history.pushState` and
+`replaceState`, the only way to notice a single-page app changing route. Call it once,
+before or after `initLogger`. It records the current page at once and every route change
+after it, back and forward included, as a `nav` breadcrumb, and every entry carries three
+labels:
 
 | Label | Example | Means |
 |---|---|---|
@@ -667,8 +671,8 @@ path, `#section-3` or `#access_token=…` is dropped. If your paths themselves c
 personal data (`/users/jane@example.com`), clean them or switch `path` off:
 
 ```ts
-navigation: { cleanPath: (path) => path.replace(/[^/]+@[^/]+/g, ':email') }
-navigation: { path: false }
+enableNavigation({ cleanPath: (path) => path.replace(/[^/]+@[^/]+/g, ':email') })
+enableNavigation({ path: false })
 ```
 
 ## User feedback
@@ -911,8 +915,8 @@ Narrow it when you need to:
 | `labels.functionName:*` | server entries only |
 | `labels.releaseId="<sha>"` | one build |
 | `labels.screen="checkout"` | one screen |
-| `labels.route="/orders/:id/items"` | one route, every id (with `navigation`) |
-| `labels.path="/orders/1042/items"` | one real page — that order, that user (with `navigation`) |
+| `labels.route="/orders/:id/items"` | one route, every id (with `enableNavigation`) |
+| `labels.path="/orders/1042/items"` | one real page — that order, that user (with `enableNavigation`) |
 | `labels.feedback="true"` | user-reported issues |
 | `labels.hasAttachments="true"` | entries with files in GCS |
 | `labels.truncated="true"` | entries shortened to fit — the full copy is `fsl-overflow.json` |
@@ -948,7 +952,13 @@ logger.clearUser()
 logger.setScreen(screen)
 logger.addBreadcrumb(type, name, data?)
 
-initLogger({ …, navigation?: true | { routeFor?, cleanPath?, path? } })   // see "Navigation, automatically"
+```
+
+Optional helpers are separate entry points, so an app ships only what it imports:
+
+```ts
+import { enableNavigation } from '@dasasian/firebase-structured-logger/client/navigation'
+enableNavigation({ routeFor?, cleanPath?, path? })   // see "Navigation, automatically"
 ```
 
 Also exported: `initLogger`, `getClientLogger`, `setupGlobalErrorHandler`, `handleReactError`,

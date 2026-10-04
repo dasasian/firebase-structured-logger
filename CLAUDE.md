@@ -205,11 +205,25 @@ installs in `smoke/`. Doctor's tests build small fake projects in temp folders r
 than pointing at `smoke/functions` or `smoke/cloudrun`, which depend on the maintainer's
 private smoke setup. Only `npm run smoke` needs a real project.
 
+## Optional client helpers are separate entry points
+
+Navigation, and the helpers after it (#51 timing, #52 marked actions, #53 network), each
+ship as their own subpath — `/client/navigation`, not an `initLogger` option. A bundler
+cannot drop code behind a runtime option, and this package is CommonJS, which bundlers
+barely trim at all; a separate file that is never imported costs nothing. The core
+`/client` must not import a helper — `tests/` bundles `/client` and asserts none of the
+helper's code is in it. A helper hands data to the core through a small setter in a core
+module (as `screen` does through `breadcrumbs.ts`), never the other way round.
+
+Dynamic `import()` was considered and rejected: in a CommonJS build it compiles to
+`require`, so nothing splits, and a late load misses the route changes made before it
+arrives.
+
 ## Wrapping browser APIs
 
 Navigation tracking wraps `history.pushState` and `replaceState` — browsers send no
 event when a single-page app changes route, so there is no other way to see it. That is
-patching someone else's page, so it is opt-in (`navigation: true`), and the wrapper must
+patching someone else's page, so it is opt-in (`enableNavigation()`), and the wrapper must
 call the original with the same arguments and `this` and return its result, wrap once
 however often `initLogger` runs, and leave alone any wrapper another tool installed
 before or after it. Prefer observing to wrapping wherever the browser offers it
