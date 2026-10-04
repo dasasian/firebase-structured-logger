@@ -30,7 +30,10 @@ All entries written by firebase-structured-logger include these labels:
 |-------|-------------|
 | `appId` | Application identifier (e.g. `acme`, `store`) |
 | `userId` | Firebase Auth UID |
-| `screen` | Current screen name |
+| `screen` | Current screen name (falls back to `route` when the app never set one) |
+| `route` | Route pattern, e.g. `/orders/:id/items` — group by this (apps using `enableNavigation`) |
+| `path` | Real path, e.g. `/orders/1042/items` — one specific page or record; query string never stored |
+| `routeSource` | `router` (the app named the route) or `pattern` (ids replaced by rule) |
 | `releaseId` | Git short hash or explicit release ID |
 | `platform` | `ios`, `android`, `macos`, `windows`, `web` |
 | `browser` | `chrome`, `firefox`, `safari`, `edge` |

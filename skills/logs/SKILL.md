@@ -170,6 +170,16 @@ bc.nav(screen: string): void                                   // on navigation
 bc.error(type: string, data?: Record<string, unknown>): void   // on errors
 ```
 
+Import `enableNavigation` from `firebase-structured-logger/client/navigation`:
+```ts
+enableNavigation(options?: { routeFor?: (path: string) => string | undefined; cleanPath?: (path: string) => string; path?: false }): void
+```
+- Call once at startup. Every route change becomes a `nav` breadcrumb, and every entry
+  gets `route` (the pattern, `/orders/:id`), `path` (the real path) and `routeSource`.
+- When an app has called it, do not flag a missing `bc.nav` on route changes — it is
+  automatic. Suggest it for a single-page app that hand-writes `bc.nav` everywhere.
+- A separate import on purpose: apps that do not use it ship none of it.
+
 Import `sendFeedback` from `firebase-structured-logger/client`:
 ```ts
 sendFeedback(text: string, extras?: { labels?: Partial<AppLabels>; attachments?: Record<string, Blob | File | string> }): void
