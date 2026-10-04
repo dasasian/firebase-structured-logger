@@ -675,6 +675,77 @@ enableNavigation({ cleanPath: (path) => path.replace(/[^/]+@[^/]+/g, ':email') }
 enableNavigation({ path: false })
 ```
 
+## Timing: when something is too slow
+
+Some failures never throw. A loading screen waits on eight pieces, one of them takes 30
+seconds, and the logs say nothing — because nothing failed. Traces report exactly that
+case, and only that case: something took longer than you said it should, or never
+finished. A trace that finishes in time sends nothing at all.
+
+```ts
+import { trace, startTrace } from '@dasasian/firebase-structured-logger/client/timing'
+
+await trace('app_boot', async (boot) => {
+  const user = await boot.step('sign-in', () => signIn())
+  await Promise.all([
+    boot.step('products', () => loadProducts(user)),
+    boot.step('places', () => loadPlaces(user)),
+  ])
+})
+
+// A flow that spans functions — a screen that starts on mount and ends when its data is in
+const open = startTrace('order_open')
+await open.step('order', () => loadOrder(id))
+open.end()
+```
+
+Your code holds names only. The limits live in one place, set once at startup:
+
+```ts
+import { configureTraces } from '@dasasian/firebase-structured-logger/client/timing'
+
+configureTraces({
+  app_boot:   { warnAfterMs: 8000, steps: { products: 3000 } },
+  order_open: { warnAfterMs: 2000 },
+})
+```
+
+A trace with no limits configured is timed but never reported. Limits are read when a run
+starts, so configure before the first one.
+
+**What gets sent.** One `WARNING` per run, the moment the first limit is crossed — the
+trace's, or a step's own — while it is still running, so a step that never finishes is
+reported too. Nothing more is sent for that run afterwards.
+
+```
+WARNING  app_boot slow: products passed 3000 ms, still waiting
+         labels.trace="app_boot"  labels.run="<id>"  labels.slow="step"  labels.step="products"
+         timing: { elapsedMs: 3000, limitMs: 3000,
+                   steps: { sign-in: 610, places: 410 }, waiting: ["products"] }
+```
+
+`labels.slow` is `"trace"` or `"step"`. Durations are in milliseconds, always in `timing`.
+`labels.run` tells two overlapping runs of the same trace apart.
+
+**What is never judged.** A browser pauses pages it is not showing: a hidden tab, a phone
+switching apps, a laptop going to sleep. Time spent paused is not your app being slow, so
+a run that was hidden at any point, or that was paused — a one-second check that arrives
+five or more seconds late — is not reported. Laptop sleep often fires no event at all,
+which is why the late check exists.
+
+**Underneath** each step is a standard `performance.mark` and `performance.measure`, so
+it shows in the browser's Performance panel and in other tools that read them. Ours are
+cleared when the run ends. A `step` after `end()`, or a second `end()`, is ignored.
+
+**On the server**, `trace` and `startTrace` come from `/functions`, with the same entry. A
+server run is judged when a step or the trace ends — there is no timer, because Cloud
+Functions and Cloud Run can throttle the CPU once a response is sent. A request that hangs
+outright is ended by the platform's timeout, which logs it. Inside `withLogging`, the entry
+carries that request's labels like any other.
+
+Traces explain the slow case; they do not measure what is normal. There are no
+percentiles here and no sampling — if you need those, that is a monitoring tool's job.
+
 ## User feedback
 
 ```ts
@@ -922,6 +993,7 @@ Narrow it when you need to:
 | `labels.truncated="true"` | entries shortened to fit — the full copy is `fsl-overflow.json` |
 | `labels.repeatKey="<key>" OR labels.repeatOf="<key>"` | one repeating error: its full copies and its summaries |
 | `labels.sentLate="true"` | repeat summaries sent on a later visit |
+| `labels.trace="app_boot"` | slow runs of one trace — `labels.slow` says whether the trace or a step was late |
 
 Locally, the emulator's JSONL answers the same questions. Point
 **[firebase-mcp-server](https://github.com/dasasian/firebase-mcp-server)** at either and ask
@@ -959,6 +1031,9 @@ Optional helpers are separate entry points, so an app ships only what it imports
 ```ts
 import { enableNavigation } from '@dasasian/firebase-structured-logger/client/navigation'
 enableNavigation({ routeFor?, cleanPath?, path? })   // see "Navigation, automatically"
+
+import { trace, startTrace, configureTraces } from '@dasasian/firebase-structured-logger/client/timing'
+configureTraces({ name: { warnAfterMs?, steps?: { step: ms } } })   // see "Timing"
 ```
 
 Also exported: `initLogger`, `getClientLogger`, `setupGlobalErrorHandler`, `handleReactError`,
@@ -993,6 +1068,8 @@ getLogger()                       // the current request's writer, or an anonymo
 logError / logWarn / logInfo / logDebug (message, labels?, context?, attachments?)
 
 configureAttachments({ bucket?, prefix? })    // once, at module load — see Attachments
+configureTraces({ name: { warnAfterMs?, steps? } })   // once — see "Timing"
+trace(name, async (t) => { await t.step(name, fn) })   // or startTrace(name) … .end()
 
 // Receiving client logs. All three take the same source-map config:
 //   { bucket?, sourceMaps?: { bucket?, prefix? } }

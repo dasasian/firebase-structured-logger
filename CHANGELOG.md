@@ -7,6 +7,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Timing traces** — `trace(name, fn)` / `startTrace(name)` with `.step()`, from `/client/timing` and `/functions`, and one `configureTraces({...})` holding every limit. A run that crosses a limit sends one `WARNING`, while it is still running, with the steps done and still waiting; a run in time sends nothing. Browser runs that were hidden or paused (a laptop sleeping, a frozen tab) are not judged. Steps are standard `performance.measure` entries underneath.
+
 ## [1.1.0] — 2026-10-04
 
 Navigation, automatically. One import, and every route change in a single-page app

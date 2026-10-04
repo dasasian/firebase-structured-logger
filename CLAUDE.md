@@ -219,6 +219,16 @@ Dynamic `import()` was considered and rejected: in a CommonJS build it compiles 
 `require`, so nothing splits, and a late load misses the route changes made before it
 arrives.
 
+## Traces report misbehaviour, nothing else
+
+Timing traces (`/client/timing`, `/functions`) exist to explain the slow case. A run that
+finishes within its limits sends nothing — no entry, no breadcrumb, no console line —
+and there is no sampling or percentile story, on purpose: measuring what is normal is a
+monitoring tool's job. A run that was hidden or paused is never judged, because a
+browser pausing a page is not the app being slow; the late-tick watchdog exists because
+laptop sleep often fires no event. The server judges only when a step or trace ends: no
+timers, since the CPU can be throttled after a response.
+
 ## Wrapping browser APIs
 
 Navigation tracking wraps `history.pushState` and `replaceState` — browsers send no
