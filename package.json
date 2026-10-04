@@ -64,7 +64,7 @@
     }
   },
   "bin": {
-    "fsl": "./dist/tools/index.js"
+    "fsl": "dist/tools/index.js"
   },
   "files": [
     "dist",
