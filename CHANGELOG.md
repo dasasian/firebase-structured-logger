@@ -7,6 +7,13 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-10-04
+
+Navigation, automatically. One import, and every route change in a single-page app
+becomes a breadcrumb, and every entry says which route and which real page it came
+from. It is its own entry point, so an app that does not import it ships none of it —
+the first of the optional helpers built that way.
+
 ### Added
 
 - **Navigation, automatically** — `enableNavigation()` from the new `/client/navigation` entry point records every route change as a breadcrumb and labels each entry with `route` (the pattern, `/orders/:id/items`), `path` (the real path) and `routeSource`. `screen` keeps its meaning and falls back to `route` when unset. An app that does not import it ships none of it; the query string and non-route fragments never leave the browser; `routeFor`, `cleanPath` and `path: false` for apps that need them.
@@ -258,7 +265,8 @@ The README is reorganised around what you get rather than how the machine is bui
 - **Emulator mode** — under `FUNCTIONS_EMULATOR=true`, entries are written to a local `dev.jsonl` with rotation instead of Cloud Logging, so local development needs no live credentials.
 - **`fsl` CLI** — source map upload to Storage, deploy packing, and skill installation.
 
-[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/dasasian/firebase-structured-logger/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.7.0...v0.8.0
