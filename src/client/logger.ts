@@ -9,6 +9,7 @@ import {
   getCurrentScreen,
   setCurrentScreen,
   clearBreadcrumbs,
+  getCurrentRoute,
 } from './breadcrumbs'
 import {
   allow,
@@ -253,10 +254,20 @@ export class Logger<
   ): Promise<boolean> {
     if (!bypassVolumeControls && SEVERITY_ORDER[severity] > this.minLevel) return false
 
+    // Set only by enableNavigation() (@dasasian/firebase-structured-logger/client/navigation),
+    // through the setter it calls in breadcrumbs.ts — undefined for an app that never
+    // imports that entry point.
+    const nav = getCurrentRoute()
+
     const allLabels: LogPayload['labels'] = {
       appId: this.config.appId,
       releaseId: this.config.releaseId,
-      screen: getCurrentScreen(),
+      // Falls back to the route pattern so an app that never calls setScreen/bc.nav
+      // still gets a useful screen label once navigation is enabled.
+      screen: getCurrentScreen() ?? nav?.route,
+      route: nav?.route,
+      path: nav?.path,
+      routeSource: nav?.routeSource,
       userId: this.userId,
       platform: PLATFORM,
       browser: BROWSER,

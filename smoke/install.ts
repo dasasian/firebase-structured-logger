@@ -62,6 +62,24 @@ const PROBES: Record<string, string> = {
   'probe.mjs': `import fsl from '@dasasian/firebase-structured-logger/functions'\n${PROBE_BODY}`,
 }
 
+// /client/navigation (#27): no browser here, so this only proves the subpath
+// resolves from the packed tarball and loads without touching `window` —
+// enableNavigation() itself must still run (and no-op) in plain Node.
+const NAV_PROBES: Record<string, string> = {
+  'nav-probe.cjs': `
+const nav = require('@dasasian/firebase-structured-logger/client/navigation')
+if (typeof nav.enableNavigation !== 'function') throw new Error('enableNavigation missing')
+nav.enableNavigation()
+process.stdout.write('ok\\n')
+`,
+  'nav-probe.mjs': `
+import * as nav from '@dasasian/firebase-structured-logger/client/navigation'
+if (typeof nav.enableNavigation !== 'function') throw new Error('enableNavigation missing')
+nav.enableNavigation()
+process.stdout.write('ok\\n')
+`,
+}
+
 /** Every installed copy of @google-cloud/storage under `dir`, by version. */
 function storageCopies(dir: string): string[] {
   return findPackageCopies(dir, '@google-cloud/storage').map((c) => c.version)
@@ -148,6 +166,14 @@ function run() {
         'serviceContext names the app and release',
         entry.serviceContext?.service === 'install-smoke' && entry.serviceContext.version === 'r1',
       )
+    }
+
+    for (const [file, source] of Object.entries(NAV_PROBES)) {
+      console.log(`\nTest: ${file} resolves /client/navigation and runs enableNavigation() without error`)
+      fs.writeFileSync(path.join(work, file), source)
+      const out = spawnSync('node', [file], { cwd: work, encoding: 'utf-8' })
+      assert('it exits cleanly', out.status === 0, out.stderr.slice(0, 500))
+      assert('it ran to completion', out.stdout.includes('ok'), out.stdout + out.stderr.slice(0, 500))
     }
 
     // Both Storage majors, really used. The package accepts `^7.19.0 || ^8.1.0` so

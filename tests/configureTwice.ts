@@ -23,6 +23,8 @@ if (process.env.FUNCTIONS_EMULATOR !== 'true') {
 
 import { initializeApp } from 'firebase-admin/app'
 import { configureRateLimiter, allow, resetRateLimiter } from '../src/client/rateLimiter.js'
+import { enableNavigation } from '../src/client/navigation.js'
+import { getCurrentRoute } from '../src/client/breadcrumbs.js'
 import {
   configureAttachments,
   configureSourceMapBucket,
@@ -108,10 +110,35 @@ function testConfigureAttachmentsTwice() {
   assert('reset returns to the fallback bucket', getAttachmentBucket()?.name === 'maps-bucket')
 }
 
+/**
+ * enableNavigation — a second call replaces the options (session-wide, like
+ * breadcrumbs and the screen) but must not wrap history.pushState/replaceState a
+ * second time. #27.
+ */
+function testEnableNavigationTwice() {
+  console.log('\nTest: enableNavigation — second call replaces options, does not rewrap')
+
+  enableNavigation()
+  history.pushState({}, '', '/orders/1')
+  assert('the id rule applies by default', getCurrentRoute()?.route === '/orders/:id', JSON.stringify(getCurrentRoute()))
+
+  enableNavigation({ routeFor: () => 'Named' })
+  history.pushState({}, '', '/orders/2')
+  assert('the second call\'s options take effect', getCurrentRoute()?.route === 'Named', JSON.stringify(getCurrentRoute()))
+
+  const FSL_WRAPPED = Symbol.for('fsl.wrappedHistoryMethod')
+  const wrapped = history.pushState as unknown as Record<symbol, boolean>
+  history.pushState({}, '', '/orders/3')
+  const stillSameWrapper = history.pushState === (wrapped as unknown)
+  assert('pushState is not re-wrapped by the second call', stillSameWrapper)
+  assert('the one wrapper installed is fsl\'s own', wrapped[FSL_WRAPPED] === true)
+}
+
 function run() {
   testConfigureRateLimiterTwice()
   testConfigureSourceMapBucketTwice()
   testConfigureAttachmentsTwice()
+  testEnableNavigationTwice()
   reportResults()
 }
 

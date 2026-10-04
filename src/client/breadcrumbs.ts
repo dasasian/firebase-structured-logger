@@ -1,4 +1,4 @@
-import type { BreadcrumbEntry } from '../shared/types'
+import type { BreadcrumbEntry, NavigationLabels } from '../shared/types'
 
 /**
  * How many breadcrumbs are retained — and therefore how many are sent.
@@ -26,6 +26,25 @@ export function setCurrentScreen(screen: string): void {
 
 export function getCurrentScreen(): string | undefined {
   return currentScreen
+}
+
+let currentRoute: NavigationLabels | undefined
+
+/**
+ * Called by `enableNavigation()` (`client/navigation.ts`) on the current page and on
+ * every route change after it — never by the core itself. Mirrors `setCurrentScreen`:
+ * the one-way setter a helper hands data through, rather than the core reaching out to
+ * the helper. Adds a `nav` breadcrumb named after the real path, or the route pattern
+ * when `path` was omitted (`enableNavigation({ path: false })`).
+ */
+export function setCurrentRoute(labels: NavigationLabels): void {
+  currentRoute = labels
+  addBreadcrumb('nav', labels.path ?? labels.route, labels.path !== undefined ? { route: labels.route } : undefined)
+}
+
+/** The current page's navigation labels, or `undefined` when `enableNavigation()` was never called. */
+export function getCurrentRoute(): NavigationLabels | undefined {
+  return currentRoute
 }
 
 /**

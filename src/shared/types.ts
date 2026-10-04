@@ -9,6 +9,24 @@ export interface BaseLabels {
   releaseId?: string
   errorType?: string
   errorCategory?: string
+  /** The route pattern, e.g. `/orders/:id/items`. Set by `enableNavigation()`. */
+  route?: string
+  /** The real path, e.g. `/orders/1042/items`. Omitted when `enableNavigation({ path: false })`. */
+  path?: string
+  /** Whether `route` came from `routeFor` or the id rule. Set by `enableNavigation()`. */
+  routeSource?: 'router' | 'pattern'
+}
+
+/**
+ * What `enableNavigation()` (`@dasasian/firebase-structured-logger/client/navigation`)
+ * hands to the core logger for the current page, through `setCurrentRoute` in
+ * `client/breadcrumbs.ts`. `path` is absent exactly when `enableNavigation` was
+ * given `{ path: false }`.
+ */
+export interface NavigationLabels {
+  route: string
+  path?: string
+  routeSource: 'router' | 'pattern'
 }
 
 export interface ErrorPayload {
