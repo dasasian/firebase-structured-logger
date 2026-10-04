@@ -513,6 +513,7 @@ logger.error(err, { orderId })
 |---|---|---|
 | `appId`, `releaseId` | client | your `initLogger` config |
 | `screen` | client | tracked as the user moves |
+| `route`, `path`, `routeSource` | client | with `navigation: true` — the route pattern, the real path, and where the pattern came from |
 | `userId` | client | `setUser`, held for the session |
 | `platform` | client | user agent — `ios` / `android` / `macos` / `web` |
 | `browser` | client | user agent |
@@ -628,6 +629,47 @@ current screen, so `labels.screen` stays correct without a second call.
 
 > Record the step, not the data. Breadcrumb `data` is written to your logs verbatim — keep
 > PII, tokens and card numbers out of it, the same as you would for any label.
+
+### Navigation, automatically
+
+```ts
+initLogger({ appId, releaseId, logFunction, navigation: true })
+
+// or name routes the way your router does
+initLogger({ appId, releaseId, logFunction, navigation: {
+  routeFor: (path) => router.match(path)?.name,   // undefined falls back to the id rule
+} })
+```
+
+Off by default — it wraps `history.pushState` and `replaceState`, the only way to notice a
+single-page app changing route, and nothing in your app should be wrapped without asking.
+On, it records the first page and every route change after it, back and forward included,
+as a `nav` breadcrumb, and every entry carries three labels:
+
+| Label | Example | Means |
+|---|---|---|
+| `route` | `/orders/:id/items` | the pattern — for grouping and counting |
+| `path` | `/orders/1042/items` | the real path — for "what went wrong for order 1042?" |
+| `routeSource` | `router` or `pattern` | whether `route` came from your `routeFor`, or from the id rule |
+
+`screen` keeps its meaning — the name you give with `bc.nav` or `setScreen` — and falls
+back to `route` when you never set one, so an app that does nothing still gets a useful
+screen.
+
+**The id rule**, when there is no `routeFor` or it returns `undefined`: a path segment that
+is all digits, a UUID, a long hex string or a ULID becomes `:id`. Anything else is kept as
+written, so a slug like `/blog/my-post` stays as it is — no rule tells a slug from a page
+name reliably, which is what `routeFor` is for.
+
+**What never leaves the browser:** the query string, always — it is where tokens and
+emails usually ride. The fragment too, unless it is a route: `#/orders/1042` is read as the
+path, `#section-3` or `#access_token=…` is dropped. If your paths themselves can hold
+personal data (`/users/jane@example.com`), clean them or switch `path` off:
+
+```ts
+navigation: { cleanPath: (path) => path.replace(/[^/]+@[^/]+/g, ':email') }
+navigation: { path: false }
+```
 
 ## User feedback
 
@@ -869,6 +911,8 @@ Narrow it when you need to:
 | `labels.functionName:*` | server entries only |
 | `labels.releaseId="<sha>"` | one build |
 | `labels.screen="checkout"` | one screen |
+| `labels.route="/orders/:id/items"` | one route, every id (with `navigation`) |
+| `labels.path="/orders/1042/items"` | one real page — that order, that user (with `navigation`) |
 | `labels.feedback="true"` | user-reported issues |
 | `labels.hasAttachments="true"` | entries with files in GCS |
 | `labels.truncated="true"` | entries shortened to fit — the full copy is `fsl-overflow.json` |
@@ -903,6 +947,8 @@ logger.setUser(uid, extraLabels?)
 logger.clearUser()
 logger.setScreen(screen)
 logger.addBreadcrumb(type, name, data?)
+
+initLogger({ …, navigation?: true | { routeFor?, cleanPath?, path? } })   // see "Navigation, automatically"
 ```
 
 Also exported: `initLogger`, `getClientLogger`, `setupGlobalErrorHandler`, `handleReactError`,

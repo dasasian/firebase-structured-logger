@@ -7,6 +7,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Navigation, automatically** — `initLogger({ navigation: true })` records every route change as a breadcrumb and labels each entry with `route` (the pattern, `/orders/:id/items`), `path` (the real path) and `routeSource`. `screen` keeps its meaning and falls back to `route` when unset. Off by default; the query string and non-route fragments never leave the browser; `routeFor`, `cleanPath` and `path: false` for apps that need them.
+
 ## [1.0.0] — 2026-09-28
 
 The API is stable. From here, a breaking change means 2.0. Before freezing it, every

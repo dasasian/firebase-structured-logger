@@ -205,6 +205,16 @@ installs in `smoke/`. Doctor's tests build small fake projects in temp folders r
 than pointing at `smoke/functions` or `smoke/cloudrun`, which depend on the maintainer's
 private smoke setup. Only `npm run smoke` needs a real project.
 
+## Wrapping browser APIs
+
+Navigation tracking wraps `history.pushState` and `replaceState` — browsers send no
+event when a single-page app changes route, so there is no other way to see it. That is
+patching someone else's page, so it is opt-in (`navigation: true`), and the wrapper must
+call the original with the same arguments and `this` and return its result, wrap once
+however often `initLogger` runs, and leave alone any wrapper another tool installed
+before or after it. Prefer observing to wrapping wherever the browser offers it
+(`popstate`, `PerformanceObserver`); a wrapper is the exception that needs a reason.
+
 ## Releasing
 
 A library → **npm only** (no registry, no `server.json`, no tag-triggered publish workflow).
