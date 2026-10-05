@@ -7,9 +7,20 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-10-05
+
+Timing traces. Some failures never throw: a loading screen waits on eight pieces, one of
+them takes thirty seconds, and the logs say nothing. A trace reports exactly that — a
+step or a whole flow that ran past its limit, or never finished — and nothing when it
+ran in time. Your code names the steps; the limits live in one setup call.
+
 ### Added
 
 - **Timing traces** — `trace(name, fn)` / `startTrace(name)` with `.step()`, from `/client/timing` and `/functions`, and one `configureTraces({...})` holding every limit. A run that crosses a limit sends one `WARNING`, while it is still running, with the steps done and still waiting; a run in time sends nothing. Browser runs that were hidden or paused (a laptop sleeping, a frozen tab) are not judged. Steps are standard `performance.measure` entries underneath.
+
+### Fixed
+
+- **`npm publish` no longer rewrites `bin`.** It was declared as `./dist/tools/index.js`, which npm normalised with a warning on every publish.
 
 ## [1.1.0] — 2026-10-04
 
@@ -269,7 +280,8 @@ The README is reorganised around what you get rather than how the machine is bui
 - **Emulator mode** — under `FUNCTIONS_EMULATOR=true`, entries are written to a local `dev.jsonl` with rotation instead of Cloud Logging, so local development needs no live credentials.
 - **`fsl` CLI** — source map upload to Storage, deploy packing, and skill installation.
 
-[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/dasasian/firebase-structured-logger/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/dasasian/firebase-structured-logger/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.8.0...v0.9.0

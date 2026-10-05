@@ -34,6 +34,10 @@ All entries written by firebase-structured-logger include these labels:
 | `route` | Route pattern, e.g. `/orders/:id/items` — group by this (apps using `enableNavigation`) |
 | `path` | Real path, e.g. `/orders/1042/items` — one specific page or record; query string never stored |
 | `routeSource` | `router` (the app named the route) or `pattern` (ids replaced by rule) |
+| `trace` | On a slow-trace WARNING: the trace's name, e.g. `app_boot` |
+| `run` | On a slow-trace WARNING: tells overlapping runs of one trace apart |
+| `slow` | `trace` (the whole run passed its limit) or `step` (one step passed its own) |
+| `step` | When `slow="step"`: the step that was late. `jsonPayload.timing` has every step's ms and what was still waiting |
 | `releaseId` | Git short hash or explicit release ID |
 | `platform` | `ios`, `android`, `macos`, `windows`, `web` |
 | `browser` | `chrome`, `firefox`, `safari`, `edge` |
