@@ -7,7 +7,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [1.2.0] — 2026-10-05
+## [1.2.0] — 2026-10-04
 
 Timing traces. Some failures never throw: a loading screen waits on eight pieces, one of
 them takes thirty seconds, and the logs say nothing. A trace reports exactly that — a
