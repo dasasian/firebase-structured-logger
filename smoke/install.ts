@@ -80,6 +80,32 @@ process.stdout.write('ok\\n')
 `,
 }
 
+// /client/timing (#51): no browser here, so this only proves the subpath resolves
+// from the packed tarball and loads with no window/document touched at module
+// load — trace()/startTrace()/configureTraces() still run (and no-op, since
+// Node's global `performance` has no `document` for the hidden check) in plain Node.
+const TIMING_PROBES: Record<string, string> = {
+  'timing-probe.cjs': `
+const timing = require('@dasasian/firebase-structured-logger/client/timing')
+if (typeof timing.trace !== 'function') throw new Error('trace missing')
+if (typeof timing.startTrace !== 'function') throw new Error('startTrace missing')
+if (typeof timing.configureTraces !== 'function') throw new Error('configureTraces missing')
+timing.configureTraces({})
+timing.trace('install-smoke', async (t) => { await t.step('work', async () => {}) }).then(() => {
+  process.stdout.write('ok\\n')
+})
+`,
+  'timing-probe.mjs': `
+import * as timing from '@dasasian/firebase-structured-logger/client/timing'
+if (typeof timing.trace !== 'function') throw new Error('trace missing')
+if (typeof timing.startTrace !== 'function') throw new Error('startTrace missing')
+if (typeof timing.configureTraces !== 'function') throw new Error('configureTraces missing')
+timing.configureTraces({})
+await timing.trace('install-smoke', async (t) => { await t.step('work', async () => {}) })
+process.stdout.write('ok\\n')
+`,
+}
+
 /** Every installed copy of @google-cloud/storage under `dir`, by version. */
 function storageCopies(dir: string): string[] {
   return findPackageCopies(dir, '@google-cloud/storage').map((c) => c.version)
@@ -170,6 +196,14 @@ function run() {
 
     for (const [file, source] of Object.entries(NAV_PROBES)) {
       console.log(`\nTest: ${file} resolves /client/navigation and runs enableNavigation() without error`)
+      fs.writeFileSync(path.join(work, file), source)
+      const out = spawnSync('node', [file], { cwd: work, encoding: 'utf-8' })
+      assert('it exits cleanly', out.status === 0, out.stderr.slice(0, 500))
+      assert('it ran to completion', out.stdout.includes('ok'), out.stdout + out.stderr.slice(0, 500))
+    }
+
+    for (const [file, source] of Object.entries(TIMING_PROBES)) {
+      console.log(`\nTest: ${file} resolves /client/timing and runs trace() without error`)
       fs.writeFileSync(path.join(work, file), source)
       const out = spawnSync('node', [file], { cwd: work, encoding: 'utf-8' })
       assert('it exits cleanly', out.status === 0, out.stderr.slice(0, 500))

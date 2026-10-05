@@ -47,6 +47,9 @@ const EXPECTED: Record<string, string[]> = {
     'configureAttachments',
     'createHttpLogHandler',
     'withLogging',
+    'trace',
+    'startTrace',
+    'configureTraces',
   ],
 }
 

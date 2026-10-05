@@ -51,6 +51,120 @@ for (const key of [
   globals[key] = (win as unknown as Record<string, unknown>)[key]
 }
 
+/**
+ * `performance` is deliberately NOT one of the globals copied from jsdom above.
+ * jsdom (30.x) implements `performance.now()` but none of the User Timing API —
+ * `mark`, `measure`, `getEntriesByType`, `clearMarks`, `clearMeasures` are all
+ * absent, and jsdom's own `now()` is itself implemented in terms of the global
+ * `performance` — shadowing it with jsdom's copy turns that into infinite
+ * recursion. Node's own global `performance` already supports every one of
+ * those five (verified against this repo's Node floor), so `client/timing`
+ * calls them directly with no feature-detection, and the bare `performance`
+ * identifier a client-side suite reads resolves to Node's real one untouched.
+ *
+ * A fully fake `setTimeout`/`setInterval`/`clearTimeout`/`clearInterval`/`Date.now`/
+ * `performance.now`, so `client/timing`'s watchdog (a 1 s `setInterval`) and limits
+ * are tested with no real waiting. Install around the tests that need it and
+ * uninstall after — real timers are restored exactly as they were.
+ *
+ * `advanceFakeTime` fires every timer whose turn has come, in order, as real time
+ * passing would — a 1 s interval advanced by 3000 ms fires three times, on time.
+ * `setFakeNow` + `fireDueTimers` is the other case: a laptop sleeping skips ticks
+ * outright rather than queuing them, so that pair jumps the clock without firing
+ * anything, then fires whatever is due exactly once — the "5 s late" tick the
+ * watchdog's own lateness check is for.
+ */
+interface FakeTimer {
+  id: number
+  at: number
+  interval?: number
+  cb: () => void
+}
+
+let fakeNow = 0
+let fakeTimers: FakeTimer[] = []
+let nextFakeTimerId = 1
+let realSetTimeout: typeof setTimeout | undefined
+let realClearTimeout: typeof clearTimeout | undefined
+let realSetInterval: typeof setInterval | undefined
+let realClearInterval: typeof clearInterval | undefined
+let realDateNow: (() => number) | undefined
+let realPerformanceNow: (() => number) | undefined
+
+function scheduleFakeTimer(cb: () => void, ms: number, interval?: number): number {
+  const id = nextFakeTimerId++
+  fakeTimers.push({ id, at: fakeNow + ms, interval, cb })
+  return id
+}
+
+function clearFakeTimer(id: number): void {
+  fakeTimers = fakeTimers.filter((t) => t.id !== id)
+}
+
+export function installFakeClock(start = 0): void {
+  fakeNow = start
+  fakeTimers = []
+  realSetTimeout = globalThis.setTimeout
+  realClearTimeout = globalThis.clearTimeout
+  realSetInterval = globalThis.setInterval
+  realClearInterval = globalThis.clearInterval
+  realDateNow = Date.now
+  realPerformanceNow = performance.now.bind(performance)
+
+  globalThis.setTimeout = ((cb: () => void, ms = 0) => scheduleFakeTimer(cb, ms)) as unknown as typeof setTimeout
+  globalThis.clearTimeout = (id: unknown) => clearFakeTimer(id as number)
+  globalThis.setInterval = ((cb: () => void, ms = 0) => scheduleFakeTimer(cb, ms, ms)) as unknown as typeof setInterval
+  globalThis.clearInterval = (id: unknown) => clearFakeTimer(id as number)
+  win.setTimeout = globalThis.setTimeout as unknown as typeof win.setTimeout
+  win.clearTimeout = globalThis.clearTimeout as unknown as typeof win.clearTimeout
+  win.setInterval = globalThis.setInterval as unknown as typeof win.setInterval
+  win.clearInterval = globalThis.clearInterval as unknown as typeof win.clearInterval
+  performance.now = () => fakeNow
+  Date.now = () => fakeNow
+}
+
+export function uninstallFakeClock(): void {
+  if (realSetTimeout) globalThis.setTimeout = realSetTimeout
+  if (realClearTimeout) globalThis.clearTimeout = realClearTimeout
+  if (realSetInterval) globalThis.setInterval = realSetInterval
+  if (realClearInterval) globalThis.clearInterval = realClearInterval
+  if (realDateNow) Date.now = realDateNow
+  if (realPerformanceNow) performance.now = realPerformanceNow
+  win.setTimeout = globalThis.setTimeout as unknown as typeof win.setTimeout
+  win.clearTimeout = globalThis.clearTimeout as unknown as typeof win.clearTimeout
+  win.setInterval = globalThis.setInterval as unknown as typeof win.setInterval
+  win.clearInterval = globalThis.clearInterval as unknown as typeof win.clearInterval
+  fakeTimers = []
+}
+
+/** Advances the fake clock by `ms`, firing every timer whose turn comes in order. */
+export function advanceFakeTime(ms: number): void {
+  const target = fakeNow + ms
+  for (;;) {
+    const due = fakeTimers.filter((t) => t.at <= target).sort((a, b) => a.at - b.at)[0]
+    if (!due) break
+    fakeNow = due.at
+    if (due.interval !== undefined) due.at = fakeNow + due.interval
+    else clearFakeTimer(due.id)
+    due.cb()
+  }
+  fakeNow = target
+}
+
+/** Jumps the fake clock forward with no timer firing — a frozen tab or a sleeping laptop. */
+export function setFakeNow(ms: number): void {
+  fakeNow = ms
+}
+
+/** Fires every timer currently due, each exactly once — the single tick a resume gets. */
+export function fireDueTimers(): void {
+  for (const timer of [...fakeTimers].filter((t) => t.at <= fakeNow).sort((a, b) => a.at - b.at)) {
+    if (timer.interval !== undefined) timer.at = fakeNow + timer.interval
+    else clearFakeTimer(timer.id)
+    timer.cb()
+  }
+}
+
 export { win as jsdomWindow }
 
 /** Dispatch a real `ErrorEvent`, as the browser does for an uncaught error. */

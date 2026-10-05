@@ -14,6 +14,7 @@
  * Run: FUNCTIONS_EMULATOR=true npx tsx tests/configureTwice.ts
  */
 
+import fs from 'fs'
 import '../tests/browserStubs.js'
 
 if (process.env.FUNCTIONS_EMULATOR !== 'true') {
@@ -21,10 +22,16 @@ if (process.env.FUNCTIONS_EMULATOR !== 'true') {
   process.exit(1)
 }
 
+const LOG_DIR = './test-configuretwice-output'
+
 import { initializeApp } from 'firebase-admin/app'
 import { configureRateLimiter, allow, resetRateLimiter } from '../src/client/rateLimiter.js'
 import { enableNavigation } from '../src/client/navigation.js'
 import { getCurrentRoute } from '../src/client/breadcrumbs.js'
+import { initLogger as initClientLogger } from '../src/client/logger.js'
+import { configureTraces as configureClientTraces, startTrace as startClientTrace } from '../src/client/timing.js'
+import { initLogger as initFunctionsLogger } from '../src/functions/logger.js'
+import { configureTraces as configureServerTraces, startTrace as startServerTrace } from '../src/functions/trace.js'
 import {
   configureAttachments,
   configureSourceMapBucket,
@@ -33,9 +40,13 @@ import {
   getBucket,
   resetAttachmentConfig,
 } from '../src/functions/sourceMapCache.js'
-import { assert, reportResults } from './testHelpers.js'
+import { assert, reportResults, readLastEntry, clearLog } from './testHelpers.js'
+import { installFakeClock, uninstallFakeClock, advanceFakeTime } from './browserStubs.js'
+import type { LogPayload } from '../src/shared/types.js'
 
 initializeApp({ projectId: 'demo-project' })
+fs.mkdirSync(LOG_DIR, { recursive: true })
+initFunctionsLogger({ appId: 'cfg-twice', logLocalDir: LOG_DIR })
 
 function testConfigureRateLimiterTwice() {
   console.log('\nTest: configureRateLimiter — second call merges into the first')
@@ -134,11 +145,58 @@ function testEnableNavigationTwice() {
   assert('the one wrapper installed is fsl\'s own', wrapped[FSL_WRAPPED] === true)
 }
 
-function run() {
+/**
+ * client/timing's configureTraces — a second call replaces the limits
+ * wholesale (README: "configureTraces holds every limit"), same as
+ * enableNavigation's options. #51.
+ */
+async function testConfigureClientTracesTwiceReplaces() {
+  console.log('\nTest: client configureTraces — second call replaces the limits')
+  installFakeClock()
+  try {
+    resetRateLimiter()
+    configureClientTraces({ cfg_demo: { warnAfterMs: 100_000 } })
+    configureClientTraces({ cfg_demo: { warnAfterMs: 10 } })
+
+    const sent: LogPayload[] = []
+    initClientLogger({ appId: 'cfg-test', releaseId: 'r1', logFunction: async (d) => void sent.push(d) })
+
+    const t = startClientTrace('cfg_demo')
+    advanceFakeTime(1000)
+    assert(
+      'the newer, smaller limit is in force',
+      sent.some((e) => e.labels.trace === 'cfg_demo'),
+      JSON.stringify(sent),
+    )
+    t.end()
+  } finally {
+    uninstallFakeClock()
+  }
+}
+
+async function testConfigureServerTracesTwiceReplaces() {
+  console.log('\nTest: functions configureTraces — second call replaces the limits')
+  clearLog(LOG_DIR)
+  configureServerTraces({ cfg_demo_server: { warnAfterMs: 100_000 } })
+  configureServerTraces({ cfg_demo_server: { warnAfterMs: 1 } })
+
+  const t = startServerTrace('cfg_demo_server')
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  t.end()
+
+  const entry = readLastEntry(LOG_DIR)
+  assert('the newer, smaller limit is in force', entry !== undefined, JSON.stringify(entry))
+  assert('it is the reconfigured trace', (entry?.labels as Record<string, string>)?.trace === 'cfg_demo_server')
+}
+
+async function run() {
   testConfigureRateLimiterTwice()
   testConfigureSourceMapBucketTwice()
   testConfigureAttachmentsTwice()
   testEnableNavigationTwice()
+  await testConfigureClientTracesTwiceReplaces()
+  await testConfigureServerTracesTwiceReplaces()
+  fs.rmSync(LOG_DIR, { recursive: true, force: true })
   reportResults()
 }
 
