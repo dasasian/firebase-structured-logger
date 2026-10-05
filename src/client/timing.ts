@@ -1,8 +1,11 @@
-import { ulid } from 'ulid'
 import { getClientLogger } from './logger'
 import { TraceRun, traceMessage, traceLabels, traceContext, type TraceConfig, type TraceReport } from '../shared/trace'
 
 export type { TraceConfig, TraceLimits } from '../shared/trace'
+
+function newPageLocalRunId(): string {
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+}
 
 /**
  * `@dasasian/firebase-structured-logger/client/timing` — its own entry point
@@ -124,7 +127,7 @@ function endRun(run: TraceRun, active: ActiveRun): void {
 }
 
 function startRun(name: string): Trace {
-  const run = new TraceRun(name, config[name], now, ulid())
+  const run = new TraceRun(name, config[name], now, newPageLocalRunId())
   const active: ActiveRun = { run, disqualified: false, marks: [], measures: [] }
 
   if (config[name]) {
