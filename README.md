@@ -640,7 +640,7 @@ Where the user is has one way in for each kind of place:
 
 | What changed | Record it with | Gives |
 |---|---|---|
-| a page, and the URL changed | `enableNavigation()` — automatic | one `nav` breadcrumb; `screen`, `route` and `path` labels |
+| a page, and the URL changed | `enableNavigation()`, or a router adapter — automatic | one `nav` breadcrumb; `screen`, `route` and `path` labels |
 | a page, but the URL did not | `navigatedTo('Checkout')` | the same breadcrumb and labels |
 | something inside or on top of a page | markup (`data-fsl-view`, planned in #58) | a `view` label |
 
@@ -678,9 +678,45 @@ enableNavigation({
 ```
 
 It must be synchronous — it runs inside your router's own `pushState` — and if it throws,
-that page gets `defaultLabelsFor(path)` and the console says so once. Router adapters for
-React Router and Vue Router are planned: each is a ready-made `labelsFor` built from the
-router's own routes and names.
+that page gets `defaultLabelsFor(path)` and the console says so once.
+
+**With React Router or Vue Router — an adapter.** Your router already knows each page's
+pattern and name, so the adapter asks it instead of guessing from the path. It listens to
+the router's own events and does not wrap `history`; `labelsFor` does not apply to it.
+
+```ts
+// Vue Router 4
+import { enableVueRouterNavigation } from '@dasasian/firebase-structured-logger/client/navigation/vue-router'
+enableVueRouterNavigation(router)
+
+// React Router 6.4+ or 7, data router (createBrowserRouter and friends)
+import { enableReactRouterNavigation } from '@dasasian/firebase-structured-logger/client/navigation/react-router'
+enableReactRouterNavigation(router)
+```
+
+| Label | Vue Router | React Router |
+|---|---|---|
+| `route` | the full pattern of the deepest match, `/orders/:id/items` | the same, joined from each match's `path`, without the `basename` |
+| `screen` | the `name` of the deepest matched route that has one | `handle.screen` of the deepest match that has one |
+| `path` | `to.path` — never the query or hash | `location.pathname` |
+
+No name anywhere in the match → `screen` is the route. Vue names that are symbols are
+skipped. One page change is one breadcrumb: a React Router redirect records only the page
+it ends on, and a Vue navigation that was blocked or cancelled records nothing.
+
+One option, `adjust`, takes the router's labels and returns the ones to log — for
+cleaning personal data out of a path:
+
+```ts
+enableVueRouterNavigation(router, {
+  adjust: (labels) => ({ ...labels, path: labels.path?.replace(/[^/]+@[^/]+/g, ':email') }),
+})
+```
+
+Each adapter returns a function that stops it. Calling an adapter again stops the first
+one. If you call both an adapter and `enableNavigation()`, the adapter wins and the
+console says so once. Neither router is a dependency of this package: the adapter only
+reads the router you pass in.
 
 **Without URL routing** — screens that switch without the address changing — call
 `navigatedTo(screen, { route?, path? })` on each change. It records the same breadcrumb and
@@ -692,7 +728,7 @@ labels as automatic navigation.
 { type: "nav", name: "OrderItems", data: { route: "/orders/:id/items", path: "/orders/1042/items" } }
 ```
 
-`name` is the screen, or the route when there is none; `data.path` is absent when your
+`name` is the screen, else the route, else the path; `data.path` is absent when your
 `labelsFor` leaves `path` out.
 
 **What never leaves the browser:** the query string, always — it is where tokens and
@@ -1073,6 +1109,10 @@ Optional helpers are separate entry points, so an app ships only what it imports
 import { enableNavigation, navigatedTo, defaultLabelsFor } from '@dasasian/firebase-structured-logger/client/navigation'
 enableNavigation({ labelsFor?: (path) => ({ route?, screen?, path? }) })   // see "Navigation, automatically"
 navigatedTo(screen, { route?, path? })                                      // a page change with no URL change
+
+import { enableVueRouterNavigation } from '@dasasian/firebase-structured-logger/client/navigation/vue-router'
+import { enableReactRouterNavigation } from '@dasasian/firebase-structured-logger/client/navigation/react-router'
+const stop = enableVueRouterNavigation(router, { adjust?: (labels) => labels })      // the same for React Router
 
 import { trace, startTrace, configureTraces } from '@dasasian/firebase-structured-logger/client/timing'
 configureTraces({ name: { warnAfterMs?, steps?: { step: ms } } })   // see "Timing"

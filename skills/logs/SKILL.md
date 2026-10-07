@@ -180,6 +180,11 @@ defaultLabelsFor(path: string): { route: string; screen: string; path: string }
 - `labelsFor` names routes the app's own way; it must be synchronous. Flag the deprecated
   `routeFor`, `cleanPath` and `path: false` options — `labelsFor` replaces all three.
 - Suggest `navigatedTo` only for apps whose screens change without the URL changing.
+- An app on Vue Router 4 or a React Router data router (6.4+, 7) should use the adapter
+  instead: `enableVueRouterNavigation(router)` from `/client/navigation/vue-router`, or
+  `enableReactRouterNavigation(router)` from `/client/navigation/react-router`. It takes
+  names from the router (Vue route `name`, React `handle.screen`). Flag a `labelsFor` that
+  re-lists the app's routes by hand in such an app.
 - A separate import on purpose: apps that do not use it ship none of it.
 
 Import `sendFeedback` from `firebase-structured-logger/client`:

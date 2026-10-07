@@ -212,8 +212,22 @@ A page with a URL change is navigation (`enableNavigation`); a page without one 
 label and never a breadcrumb; what the user did is `bc.action` or markup
 (`data-fsl-action`, #52). Each produces one breadcrumb or label, never two for the same
 event — that is why `bc.nav` and `setScreen` are ignored once navigation is on.
-`labelsFor` is the single customisation point: router adapters are a ready-made
-`labelsFor`, not a second mechanism.
+`labelsFor` customises the default `history` wrapper only. A router adapter
+(`/client/navigation/vue-router`, `/client/navigation/react-router`) is a second source
+of the same event, not a `labelsFor`: it listens to the router instead of wrapping
+`history`, because the router knows the pattern and name and `pushState` does not. Its
+one option, `adjust`, edits the router's answer. Only one source runs — the adapter wins
+over `enableNavigation()` with one warning, and a second adapter call stops the first.
+
+The adapters type the router structurally and have no peer dependency: they read
+`router.subscribe` / `state.matches` (React Router data router, 6.4+ and 7) and
+`afterEach` / `currentRoute` (Vue Router 4). The rules that keep one change one crumb:
+React records only when `location.key` changes, so a redirect collapses to its final
+page, and strips `basename` from `route`; Vue skips a navigation with a `failure` and
+anything before the first real match (`START_LOCATION`), and uses `to.path`, never
+`fullPath`. Tests drive real routers in memory — `createMemoryRouter`, and
+`createRouter` with `createMemoryHistory` — with both React Router majors installed
+through npm aliases.
 
 ## Optional client helpers are separate entry points
 
