@@ -1,13 +1,8 @@
-import { setAdapterActive } from '../navigation'
+import { setAdapterActive, setNavigationEnabled } from '../breadcrumbs'
 import type { NavigationLabels } from '../../shared/types'
 
 type Stop = () => void
 
-/**
- * The one router adapter running at a time, across Vue Router and React Router —
- * a second adapter call stops whichever one is active, the way `enableNavigation()`
- * replaces its own options rather than stacking (CLAUDE.md, module-scoped state).
- */
 let activeStop: Stop | undefined
 
 /**
@@ -18,6 +13,7 @@ let activeStop: Stop | undefined
 export function registerAdapterStop(stop: Stop): void {
   const previous = activeStop
   activeStop = stop
+  setNavigationEnabled(true)
   setAdapterActive(true)
   previous?.()
 }

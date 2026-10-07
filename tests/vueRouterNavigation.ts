@@ -15,7 +15,7 @@ import { createRouter, createMemoryHistory, type Router } from 'vue-router'
 import { assert, reportResults } from './testHelpers.js'
 import { enableVueRouterNavigation } from '../src/client/navigation/vue-router.js'
 import { enableNavigation } from '../src/client/navigation.js'
-import { getCurrentRoute, getLastBreadcrumbs } from '../src/client/breadcrumbs.js'
+import { getCurrentRoute, getLastBreadcrumbs, bc } from '../src/client/breadcrumbs.js'
 
 function crumbCount(): number {
   return getLastBreadcrumbs(1000).length
@@ -243,7 +243,43 @@ async function testStopGivesNoMoreCrumbs() {
   assert('no crumb was added after stop()', crumbCount() === before, `got ${crumbCount() - before}`)
 }
 
+async function testAdapterDisablesLegacyBcNav() {
+  console.log('\nTest: with only the adapter on, bc.nav/setScreen are ignored — one crumb per change, not two')
+  const router = makeRouter()
+  const stop = enableVueRouterNavigation(router)
+
+  const before = crumbCount()
+  const warnings = await captureWarningsAsync(async () => {
+    bc.nav('IgnoredScreen')
+    await router.push('/orders/40/items')
+  })
+
+  assert('exactly one crumb for the one navigation', crumbCount() === before + 1, `got ${crumbCount() - before}`)
+  assert('bc.nav still warns once, even though it is ignored', warnings.some((w) => w.includes('"bc.nav"')), JSON.stringify(warnings))
+
+  stop()
+}
+
+async function testAdapterStopDoesNotReenableLegacyBcNav() {
+  console.log('\nTest: stop() leaves bc.nav/setScreen ignored — navigation being on never turns back off')
+  const router = makeRouter()
+  const stop = enableVueRouterNavigation(router)
+  await router.push('/orders/41/items')
+  await router.isReady()
+  stop()
+
+  const before = crumbCount()
+  bc.nav('StillIgnored')
+  assert('bc.nav still adds no crumb after stop()', crumbCount() === before, `got ${crumbCount() - before}`)
+}
+
+async function runTestsThatRequireEnableNavigationNeverHavingRunYet(): Promise<void> {
+  await testAdapterDisablesLegacyBcNav()
+  await testAdapterStopDoesNotReenableLegacyBcNav()
+}
+
 async function run() {
+  await runTestsThatRequireEnableNavigationNeverHavingRunYet()
   await testFirstRealMatchGivesOneCrumbWithTheRightLabels()
   await testNestedRouteWalksUpToTheDeepestNamedAncestor()
   await testNestedRouteWithNoNameAnywhereFallsBackToTheRoute()

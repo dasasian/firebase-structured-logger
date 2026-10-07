@@ -20,6 +20,8 @@
 
 import '../tests/browserStubs.js'
 import * as path from 'path'
+import * as fs from 'fs'
+import { execFileSync } from 'child_process'
 import { build } from 'esbuild'
 import { assert, reportResults } from './testHelpers.js'
 import { routePattern, enableNavigation, defaultLabelsFor, navigatedTo } from '../src/client/navigation.js'
@@ -465,6 +467,38 @@ async function testVueRouterAdapterIsNotInTheNavigationOrCoreBundle() {
   }
 }
 
+/**
+ * esbuild bundling TS source still tree-shakes the import graph, however the output
+ * is formatted — so the two tests above only prove there is no static import edge at
+ * all. This repo publishes CommonJS, which a consumer's bundler cannot tree-shake
+ * across a `require()` boundary, so the test that matters is against the real built
+ * output. `tsc` runs here, not conditionally, to rule out a stale `dist/` from an
+ * earlier build passing this test for the wrong reason.
+ */
+async function testBuiltCommonJsAdapterNeverRequiresTheHistoryWrapper() {
+  console.log('\nTest: the built dist/client/navigation/vue-router.js never pulls in the history wrapper or id rule')
+  execFileSync('npx', ['tsc'], { cwd: process.cwd(), stdio: 'pipe' })
+  const entry = path.join(process.cwd(), 'dist', 'client', 'navigation', 'vue-router.js')
+  assert('the build produced dist/client/navigation/vue-router.js', fs.existsSync(entry), entry)
+
+  const result = await build({
+    entryPoints: [entry],
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    write: false,
+    minify: true,
+    logLevel: 'silent',
+  })
+  const code = result.outputFiles[0].text
+  assert('no pushState', !code.includes('pushState'), 'found pushState')
+  assert('no replaceState', !code.includes('replaceState'), 'found replaceState')
+  assert('no wrapHistoryMethod', !code.includes('wrapHistoryMethod'), 'found wrapHistoryMethod')
+  assert('no fsl.wrappedHistoryMethod marker', !code.includes('fsl.wrappedHistoryMethod'), 'found fsl.wrappedHistoryMethod')
+  assert('no routePattern (the id rule)', !code.includes('routePattern'), 'found routePattern')
+  console.log(`  dist/client/navigation/vue-router.js, bundled + minified: ${code.length} bytes`)
+}
+
 async function run() {
   testIdRule()
   testDefaultLabelsFor()
@@ -488,6 +522,7 @@ async function run() {
   testGetCurrentScreenIsUnaffectedByNavigation()
   await testNavigationCodeIsNotInTheCoreBundle()
   await testVueRouterAdapterIsNotInTheNavigationOrCoreBundle()
+  await testBuiltCommonJsAdapterNeverRequiresTheHistoryWrapper()
   reportResults()
 }
 

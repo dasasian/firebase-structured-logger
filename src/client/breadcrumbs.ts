@@ -32,6 +32,34 @@ export function setNavigationEnabled(enabled: boolean): void {
 
 let navigationEnabled = false
 
+let adapterActive = false
+let historyWrapperWired = false
+let adapterWinsWarned = false
+
+function warnAdapterWins(): void {
+  if (adapterWinsWarned) return
+  adapterWinsWarned = true
+  console.warn(
+    '[fsl] a router adapter and enableNavigation() are both active — the adapter wins, and the history wrapper stops recording.',
+  )
+}
+
+/** Called by a router adapter's own registration/`stop()` — never by the core itself. */
+export function setAdapterActive(active: boolean): void {
+  if (active && historyWrapperWired) warnAdapterWins()
+  adapterActive = active
+}
+
+export function isAdapterActive(): boolean {
+  return adapterActive
+}
+
+/** Called once, by `enableNavigation()`, the first time it wraps `history`. */
+export function noteHistoryWrapperWired(): void {
+  if (adapterActive) warnAdapterWins()
+  historyWrapperWired = true
+}
+
 function recordScreenChange(screen: string): void {
   if (navigationEnabled) return
   currentScreen = screen
