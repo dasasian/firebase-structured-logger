@@ -34,14 +34,22 @@ function valueImportOf(peer: string): RegExp {
 }
 
 function sourceFiles(): string[] {
-  return SOURCE_DIRS.flatMap((d) => {
-    const dir = path.join(process.cwd(), 'src', d)
-    if (!fs.existsSync(dir)) return []
-    return fs
-      .readdirSync(dir, { recursive: true, encoding: 'utf-8' })
-      .filter((f) => f.endsWith('.ts'))
-      .map((f) => path.join(dir, f))
-  })
+  const srcDir = path.join(process.cwd(), 'src')
+  const topLevel = fs
+    .readdirSync(srcDir, { encoding: 'utf-8' })
+    .filter((f) => f.endsWith('.ts'))
+    .map((f) => path.join(srcDir, f))
+
+  return topLevel.concat(
+    SOURCE_DIRS.flatMap((d) => {
+      const dir = path.join(srcDir, d)
+      if (!fs.existsSync(dir)) return []
+      return fs
+        .readdirSync(dir, { recursive: true, encoding: 'utf-8' })
+        .filter((f) => f.endsWith('.ts'))
+        .map((f) => path.join(dir, f))
+    }),
+  )
 }
 
 function run() {

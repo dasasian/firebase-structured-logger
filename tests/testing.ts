@@ -21,6 +21,8 @@ import { assert, reportResults } from './testHelpers.js'
 import { captureEntries, resetSession } from '../src/testing.js'
 import { initLogger } from '../src/client/logger.js'
 import { enableReactRouterNavigation } from '../src/client/navigation/react-router.js'
+import { getCurrentRoute, getLastBreadcrumbs } from '../src/client/breadcrumbs.js'
+import { flushDueSummaries } from '../src/client/rateLimiter.js'
 import type { LogPayload } from '../src/shared/types.js'
 
 const routes = [
@@ -152,6 +154,97 @@ async function testTwoCapturesAreIndependent() {
   assert('clearing a does not touch b', b.entries.length === 1, JSON.stringify(b.entries))
 }
 
+async function testResetSessionEmptiesTrailAndCurrentRoute() {
+  console.log('\nTest: resetSession() empties the breadcrumb trail and the current route')
+  resetSession()
+  const router = createMemoryRouter(routes, { initialEntries: ['/settings/team'] })
+  const stop = enableReactRouterNavigation(router)
+  assert('the route is set before reset', getCurrentRoute() !== undefined, String(getCurrentRoute()))
+  assert('the trail is non-empty before reset', getLastBreadcrumbs(1000).length > 0)
+
+  resetSession()
+
+  assert('the trail is empty after reset', getLastBreadcrumbs(1000).length === 0, `got ${getLastBreadcrumbs(1000).length}`)
+  assert('the current route is undefined after reset', getCurrentRoute() === undefined, JSON.stringify(getCurrentRoute()))
+
+  stop()
+}
+
+async function testResetSessionRestoresFullBudget() {
+  console.log('\nTest: resetSession() restores a full rate-limit budget')
+  const globals = globalThis as Record<string, unknown>
+  globals.sessionStorage = new MemoryStorage()
+  globals.localStorage = new MemoryStorage()
+
+  try {
+    resetSession()
+    const capture = captureEntries()
+    const logger = initLogger({ appId: 'test', releaseId: 'r1', logFunction: capture.logFunction })
+
+    const realWarn = console.warn
+    console.warn = () => {}
+    try {
+      // ERROR logs do not touch the reserve check, so all 50 of the default
+      // burstLimit go to spending the budget itself.
+      for (let i = 0; i < 50; i++) logger.error(new Error(`err-${i}`))
+      logger.error(new Error('blocked'))
+    } finally {
+      console.warn = realWarn
+    }
+    assert(
+      'the budget is exhausted before reset',
+      capture.entries.find((e) => e.message === 'blocked') === undefined,
+      JSON.stringify(capture.entries.map((e) => e.message)),
+    )
+
+    capture.clear()
+    resetSession()
+    await logger.info('after-reset')
+
+    assert(
+      'a log after resetSession() is captured',
+      capture.entries.some((e) => e.message === 'after-reset'),
+      JSON.stringify(capture.entries),
+    )
+  } finally {
+    delete globals.sessionStorage
+    delete globals.localStorage
+  }
+}
+
+async function testResetSessionClearsPendingSummaries() {
+  console.log('\nTest: resetSession() clears the pending repeat-summary queue')
+  const globals = globalThis as Record<string, unknown>
+  globals.sessionStorage = new MemoryStorage()
+  globals.localStorage = new MemoryStorage()
+
+  try {
+    resetSession()
+    const capture = captureEntries()
+    const logger = initLogger({ appId: 'test', releaseId: 'r1', logFunction: capture.logFunction })
+
+    const realWarn = console.warn
+    console.warn = () => {}
+    try {
+      // duplicateLimit defaults to 3: the first 3 are full copies, the 4th is only
+      // counted — enough for flushDueSummaries to have a repeat to queue.
+      for (let i = 0; i < 4; i++) logger.error(new Error('flaky'))
+      flushDueSummaries(true)
+    } finally {
+      console.warn = realWarn
+    }
+
+    resetSession()
+    capture.clear()
+    logger.sendPendingSummaries()
+
+    assert('no repeat summary is captured after reset', capture.entries.length === 0, JSON.stringify(capture.entries))
+  } finally {
+    delete globals.sessionStorage
+    delete globals.localStorage
+  }
+}
+
 // --- Not in the core bundle ---
 
 async function testTestingCodeIsNotInAnyClientBundle() {
@@ -235,6 +328,9 @@ async function run() {
   await testSixtyProbesWithResetBetweenAreAllCaptured()
   await testRateLimiterDroppedEntryIsAbsentNotUndefined()
   await testTwoCapturesAreIndependent()
+  await testResetSessionEmptiesTrailAndCurrentRoute()
+  await testResetSessionRestoresFullBudget()
+  await testResetSessionClearsPendingSummaries()
   await testTestingCodeIsNotInAnyClientBundle()
   testNoClientSourceImportsTesting()
   reportResults()
