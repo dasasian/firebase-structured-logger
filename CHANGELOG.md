@@ -7,6 +7,20 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`labelsFor` and `defaultLabelsFor`** on `/client/navigation`: one function names a page's `route`, `screen` and `path`, and its answer is used exactly as returned. It replaces `routeFor`, `cleanPath` and `path: false`.
+- **`navigatedTo(screen, { route?, path? })`** for apps whose screens change without the URL changing — the same breadcrumb and labels as automatic navigation.
+- **`bc.handledError`** — the clearer name for an error your code handled and did not log.
+
+### Changed
+
+- **One structured `nav` breadcrumb per page change:** `name` is the screen (or the route), `data` holds `route` and `path`. In 1.1–1.2 the name was the path. With navigation on, `bc.nav` and `setScreen` no longer add a second breadcrumb for the same change.
+
+### Deprecated
+
+- `enableNavigation({ routeFor })`, `({ cleanPath })`, `({ path: false })` → `labelsFor`; the `routeSource` label; `bc.nav` and `setScreen` → navigation or `navigatedTo`; `bc.error` → `bc.handledError`. Each warns once where code can, and is removed in 2.0 (#56).
+
 ## [1.2.0] — 2026-10-04
 
 Timing traces. Some failures never throw: a loading screen waits on eight pieces, one of

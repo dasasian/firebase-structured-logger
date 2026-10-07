@@ -205,6 +205,16 @@ installs in `smoke/`. Doctor's tests build small fake projects in temp folders r
 than pointing at `smoke/functions` or `smoke/cloudrun`, which depend on the maintainer's
 private smoke setup. Only `npm run smoke` needs a real project.
 
+## Where the user is — one way in for each kind of place
+
+A page with a URL change is navigation (`enableNavigation`); a page without one is
+`navigatedTo`; anything inside or on top of a page is markup (`data-fsl-view`, #58), a
+label and never a breadcrumb; what the user did is `bc.action` or markup
+(`data-fsl-action`, #52). Each produces one breadcrumb or label, never two for the same
+event — that is why `bc.nav` and `setScreen` are ignored once navigation is on.
+`labelsFor` is the single customisation point: router adapters are a ready-made
+`labelsFor`, not a second mechanism.
+
 ## Optional client helpers are separate entry points
 
 Navigation, and the helpers after it (#51 timing, #52 marked actions, #53 network), each

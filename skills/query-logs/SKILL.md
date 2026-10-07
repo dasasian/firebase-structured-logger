@@ -33,7 +33,7 @@ All entries written by firebase-structured-logger include these labels:
 | `screen` | Current screen name (falls back to `route` when the app never set one) |
 | `route` | Route pattern, e.g. `/orders/:id/items` — group by this (apps using `enableNavigation`) |
 | `path` | Real path, e.g. `/orders/1042/items` — one specific page or record; query string never stored |
-| `routeSource` | `router` (the app named the route) or `pattern` (ids replaced by rule) |
+| `routeSource` | **Deprecated, removed in 2.0.** `pattern` when the default id rule made the route |
 | `trace` | On a slow-trace WARNING: the trace's name, e.g. `app_boot` |
 | `run` | On a slow-trace WARNING: tells overlapping runs of one trace apart |
 | `slow` | `trace` (the whole run passed its limit) or `step` (one step passed its own) |

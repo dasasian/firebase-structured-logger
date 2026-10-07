@@ -58,23 +58,22 @@ Using the Explore agent's output, check the target file against the rules below.
 Breadcrumbs reconstruct what the user was doing before an error — a session timeline, not just a wrapper around service calls. They belong primarily in components and screens, not service files.
 
 UX-layer breadcrumbs to check for (flag if missing):
-- Screen/route changes → `bc.nav('ScreenName')`
-- Modal open/close → `bc.action('open_item_modal', { itemId })`
-- Tab switches → `bc.action('switch_tab', { tab })`
+- Page changes → `enableNavigation()` once at startup (or `navigatedTo('ScreenName')` when the URL does not change). Flag hand-written `bc.nav` / `setScreen` — deprecated, and ignored once navigation is on
+- Opening a modal or switching a tab → `bc.action('open_item_modal', { itemId })`, `bc.action('switch_tab', { tab })` — the step the user took
 - Explicit user decisions → `bc.action('merge_chosen')`, `bc.action('discard_changes')`
 - Scan/camera events → `bc.action('barcode_scanned', { barcode })`
 
 Service-layer breadcrumbs (secondary — useful but not sufficient on their own):
 - Before a Firestore/API call → `bc.action('save_item', { itemId })`
-- On error → `bc.error('save_failed', { itemId })`
+- An error the code handled and did not log (a retry that worked) → `bc.handledError('save_failed', { itemId })`. An error that is logged needs no breadcrumb — flag `bc.handledError` next to a `logger.error` for the same failure as redundant
 
 **A component file with no UX-layer breadcrumbs is almost certainly missing them. A service file with only service-layer breadcrumbs may be fine.**
 
 API:
 - `bc.action(name: string, data?)` — user-initiated operations and decisions
 - `bc.state(name: string, data?)` — significant state changes
-- `bc.nav(screen: string)` — screen/route changes
-- `bc.error(type: string, data?)` — when an error occurs
+- `bc.handledError(type: string, data?)` — an error handled and not logged (`bc.error` is its deprecated old name)
+- Page changes are not a `bc.*` call — see navigation below
 
 **Label completeness**
 - For each function, check which `AppLabels` fields are in scope as variables
@@ -166,18 +165,21 @@ Import `bc` from `firebase-structured-logger/client`:
 ```ts
 bc.action(name: string, data?: Record<string, unknown>): void  // before operations
 bc.state(name: string, data?: Record<string, unknown>): void   // on state changes
-bc.nav(screen: string): void                                   // on navigation
-bc.error(type: string, data?: Record<string, unknown>): void   // on errors
+bc.handledError(type: string, data?: Record<string, unknown>): void   // an error handled, not logged
 ```
+`bc.nav` and `bc.error` are deprecated in 1.3 and removed in 2.0 — flag them.
 
 Import `enableNavigation` from `firebase-structured-logger/client/navigation`:
 ```ts
-enableNavigation(options?: { routeFor?: (path: string) => string | undefined; cleanPath?: (path: string) => string; path?: false }): void
+enableNavigation(options?: { labelsFor?: (path: string) => { route?: string; screen?: string; path?: string } }): void
+navigatedTo(screen: string, labels?: { route?: string; path?: string }): void
+defaultLabelsFor(path: string): { route: string; screen: string; path: string }
 ```
-- Call once at startup. Every route change becomes a `nav` breadcrumb, and every entry
-  gets `route` (the pattern, `/orders/:id`), `path` (the real path) and `routeSource`.
-- When an app has called it, do not flag a missing `bc.nav` on route changes — it is
-  automatic. Suggest it for a single-page app that hand-writes `bc.nav` everywhere.
+- Call `enableNavigation` once at startup. Every page change becomes one `nav` breadcrumb, and
+  every entry gets `route` (the pattern, `/orders/:id`), `path` (the real path) and `screen`.
+- `labelsFor` names routes the app's own way; it must be synchronous. Flag the deprecated
+  `routeFor`, `cleanPath` and `path: false` options — `labelsFor` replaces all three.
+- Suggest `navigatedTo` only for apps whose screens change without the URL changing.
 - A separate import on purpose: apps that do not use it ship none of it.
 
 Import `sendFeedback` from `firebase-structured-logger/client`:

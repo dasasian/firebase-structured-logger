@@ -513,7 +513,7 @@ logger.error(err, { orderId })
 |---|---|---|
 | `appId`, `releaseId` | client | your `initLogger` config |
 | `screen` | client | tracked as the user moves |
-| `route`, `path`, `routeSource` | client | with `enableNavigation()` — the route pattern, the real path, and where the pattern came from |
+| `route`, `path` | client | with navigation on — the route pattern and the real path (`routeSource` too, deprecated) |
 | `userId` | client | `setUser`, held for the session |
 | `platform` | client | user agent — `ios` / `android` / `macos` / `web` |
 | `browser` | client | user agent |
@@ -578,8 +578,9 @@ export const logger = initLogger<MyAppLabels>({ /* … */ })
 
 logger.setUser(uid, { organizationId })   // on sign in — rides every log until cleared
 logger.clearUser()                        // on sign out
-logger.setScreen('checkout')              // on navigation
 ```
+
+The screen comes from navigation — see "Navigation, automatically".
 
 **Backend** — scoped to the request:
 
@@ -604,10 +605,9 @@ from [setup](#logging-from-your-cloud-functions) is the same thing without that.
 ```ts
 import { bc } from '@dasasian/firebase-structured-logger/client'
 
-bc.nav('Checkout')                              // also sets labels.screen
 bc.action('apply_discount', { code: 'SAVE10' })
 bc.state('total_recalculated', { total: 42.00 })
-bc.error('ValidationError', { field: 'price' })
+bc.handledError('draft_save_failed', { attempt: 1 })   // an error you handled and did not log
 ```
 
 A stack trace tells you where the code broke. It cannot tell you what the person did to
@@ -615,65 +615,106 @@ get there, which is usually the part you need to reproduce it. Breadcrumbs are t
 a rolling record of the last steps, attached automatically to every error and every piece
 of feedback, with no correlation work on your side.
 
-Drop a `bc.action` before anything that can fail and a `bc.nav` on every screen change, and
-`total is wrong` arrives as `navigate_Checkout · apply_discount · total_recalculated ·
-tap_place_order`.
+Turn on navigation, drop a `bc.action` before anything that can fail, and `total is wrong`
+arrives as `Checkout · apply_discount · total_recalculated · tap_place_order`.
 
 The trail is capped at **50 entries** and **5 minutes** — old enough to cover the steps that
 led here, short enough that it stays the current attempt rather than the whole session, and
 bounded so a long-lived tab cannot grow it without limit. It lives in memory only, so it
 never touches storage and never leaves the device except attached to a log you send.
 
-Breadcrumbs are session-global by design: one user, one path. `bc.nav()` also sets the
-current screen, so `labels.screen` stays correct without a second call.
+Breadcrumbs are session-global by design: one user, one path.
+
+**Errors and breadcrumbs.** An error you log is already in the logs, in time order with
+everything else the user did — it needs no breadcrumb too. `bc.handledError` is for the
+other kind: an error your code handled and chose not to log, like a save that failed and
+then worked on retry. It costs nothing unless something else goes wrong, and then the
+trail shows it as a clue. (`bc.error`, its old name, warns once and is removed in 2.0.)
 
 > Record the step, not the data. Breadcrumb `data` is written to your logs verbatim — keep
 > PII, tokens and card numbers out of it, the same as you would for any label.
 
 ### Navigation, automatically
 
+Where the user is has one way in for each kind of place:
+
+| What changed | Record it with | Gives |
+|---|---|---|
+| a page, and the URL changed | `enableNavigation()` — automatic | one `nav` breadcrumb; `screen`, `route` and `path` labels |
+| a page, but the URL did not | `navigatedTo('Checkout')` | the same breadcrumb and labels |
+| something inside or on top of a page | markup (`data-fsl-view`, planned in #58) | a `view` label |
+
 ```ts
-import { enableNavigation } from '@dasasian/firebase-structured-logger/client/navigation'
+import { enableNavigation, navigatedTo, defaultLabelsFor } from '@dasasian/firebase-structured-logger/client/navigation'
 
 enableNavigation()
-
-// or name routes the way your router does
-enableNavigation({
-  routeFor: (path) => router.match(path)?.name,   // undefined falls back to the id rule
-})
 ```
 
 Its own entry point, so an app that never imports it ships none of it, whatever its
 bundler — and the import says plainly that it wraps `history.pushState` and
 `replaceState`, the only way to notice a single-page app changing route. Call it once,
-before or after `initLogger`. It records the current page at once and every route change
-after it, back and forward included, as a `nav` breadcrumb, and every entry carries three
-labels:
+before or after `initLogger`. It records the current page at once and every page change
+after it, back and forward included, and every entry carries:
 
 | Label | Example | Means |
 |---|---|---|
 | `route` | `/orders/:id/items` | the pattern — for grouping and counting |
 | `path` | `/orders/1042/items` | the real path — for "what went wrong for order 1042?" |
-| `routeSource` | `router` or `pattern` | whether `route` came from your `routeFor`, or from the id rule |
+| `screen` | `OrderItems`, or the route when there is no name | the page's name |
+| `routeSource` | `pattern` | **deprecated, removed in 2.0** — set only by the default labels |
 
-`screen` keeps its meaning — the name you give with `bc.nav` or `setScreen` — and falls
-back to `route` when you never set one, so an app that does nothing still gets a useful
-screen.
+**The default — the id rule.** A path segment that is all digits, a UUID, a long hex
+string or a ULID becomes `:id`; anything else is kept as written, so a slug like
+`/blog/my-post` stays as it is. `screen` is the route.
 
-**The id rule**, when there is no `routeFor` or it returns `undefined`: a path segment that
-is all digits, a UUID, a long hex string or a ULID becomes `:id`. Anything else is kept as
-written, so a slug like `/blog/my-post` stays as it is — no rule tells a slug from a page
-name reliably, which is what `routeFor` is for.
+**Your own labels — `labelsFor`.** One function: it gets the real path and returns the
+labels for it. Whatever it returns is used exactly as returned, and a field it leaves out
+is not logged.
+
+```ts
+enableNavigation({
+  labelsFor: (path) => ({ ...defaultLabelsFor(path), screen: path.startsWith('/admin') ? 'Admin' : undefined }),
+})
+```
+
+It must be synchronous — it runs inside your router's own `pushState` — and if it throws,
+that page gets `defaultLabelsFor(path)` and the console says so once. Router adapters for
+React Router and Vue Router are planned: each is a ready-made `labelsFor` built from the
+router's own routes and names.
+
+**Without URL routing** — screens that switch without the address changing — call
+`navigatedTo(screen, { route?, path? })` on each change. It records the same breadcrumb and
+labels as automatic navigation.
+
+**One breadcrumb per page change**, structured so it reads without parsing:
+
+```
+{ type: "nav", name: "OrderItems", data: { route: "/orders/:id/items", path: "/orders/1042/items" } }
+```
+
+`name` is the screen, or the route when there is none; `data.path` is absent when your
+`labelsFor` leaves `path` out.
 
 **What never leaves the browser:** the query string, always — it is where tokens and
 emails usually ride. The fragment too, unless it is a route: `#/orders/1042` is read as the
-path, `#section-3` or `#access_token=…` is dropped. If your paths themselves can hold
-personal data (`/users/jane@example.com`), clean them or switch `path` off:
+path, `#section-3` or `#access_token=…` is dropped. `labelsFor` receives the path already
+stripped. If your paths themselves can hold personal data, clean them there:
 
 ```ts
-enableNavigation({ cleanPath: (path) => path.replace(/[^/]+@[^/]+/g, ':email') })
-enableNavigation({ path: false })
+enableNavigation({
+  labelsFor: (path) => {
+    const labels = defaultLabelsFor(path)
+    return { ...labels, path: labels.path?.replace(/[^/]+@[^/]+/g, ':email') }
+  },
+})
 ```
+
+**With navigation on, `bc.nav` and `setScreen` are ignored** — they would record the same
+page change twice — and the console says so once.
+
+**Deprecated in 1.3, removed in 2.0:** `routeFor`, `cleanPath` and `path: false` (each
+warns once; use `labelsFor`), the `routeSource` label, and `bc.nav` / `setScreen` (use
+`enableNavigation`, or `navigatedTo` without URL routing).
 
 ## Timing: when something is too slow
 
@@ -1021,7 +1062,7 @@ logger.debug(message, labels?, context?, attachments?) // suppressed in producti
 
 logger.setUser(uid, extraLabels?)
 logger.clearUser()
-logger.setScreen(screen)
+logger.setScreen(screen)                  // deprecated in 1.3 — use navigation
 logger.addBreadcrumb(type, name, data?)
 
 ```
@@ -1029,8 +1070,9 @@ logger.addBreadcrumb(type, name, data?)
 Optional helpers are separate entry points, so an app ships only what it imports:
 
 ```ts
-import { enableNavigation } from '@dasasian/firebase-structured-logger/client/navigation'
-enableNavigation({ routeFor?, cleanPath?, path? })   // see "Navigation, automatically"
+import { enableNavigation, navigatedTo, defaultLabelsFor } from '@dasasian/firebase-structured-logger/client/navigation'
+enableNavigation({ labelsFor?: (path) => ({ route?, screen?, path? }) })   // see "Navigation, automatically"
+navigatedTo(screen, { route?, path? })                                      // a page change with no URL change
 
 import { trace, startTrace, configureTraces } from '@dasasian/firebase-structured-logger/client/timing'
 configureTraces({ name: { warnAfterMs?, steps?: { step: ms } } })   // see "Timing"
@@ -1052,6 +1094,16 @@ and are removed in 2.0:
 | type `ClientLogRequest` | type `LogRequest` |
 | `triggerTestLog()` | `sendTestLog()` |
 | `fsl upload-sourcemaps --functions=<dir>` | `--backend=<dir>` (it is not only for Cloud Functions) |
+
+**Deprecated in 1.3.** Still working in 1.x, each with a one-time console warning where
+code can warn; removed in 2.0:
+
+| Old | New |
+|---|---|
+| `enableNavigation({ routeFor })`, `({ cleanPath })`, `({ path: false })` | `enableNavigation({ labelsFor })` |
+| label `routeSource` | none — `labelsFor`'s answer is final |
+| `bc.nav(screen)`, `logger.setScreen(screen)` | `enableNavigation()`, or `navigatedTo(screen)` without URL routing |
+| `bc.error(type, data?)` | `bc.handledError(type, data?)` — only for errors you handled and did not log |
 
 `Logger` is exported as a **type only** — the client logger is a session singleton, so
 annotate with `Logger<MyAppLabels>` and construct with `initLogger()`. A second instance
