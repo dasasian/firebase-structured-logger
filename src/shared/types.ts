@@ -13,6 +13,8 @@ export interface BaseLabels {
   route?: string
   /** The real path, e.g. `/orders/1042/items`. Set by `enableNavigation()` or `navigatedTo()`. */
   path?: string
+  /** The visible marks, joined with ` › `, e.g. `payment › Attachment`. Set by `enableViews()`. */
+  view?: string
   /**
    * Whether `route` came from the deprecated `routeFor` or the id rule.
    * @deprecated Removed in 2.0 — a `labelsFor` answer is final and carries no source.

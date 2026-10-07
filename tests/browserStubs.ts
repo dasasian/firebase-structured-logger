@@ -47,8 +47,52 @@ for (const key of [
   'ErrorEvent',
   'PromiseRejectionEvent',
   'CustomEvent',
+  'Element',
 ] as const) {
   globals[key] = (win as unknown as Record<string, unknown>)[key]
+}
+
+/**
+ * jsdom has no `checkVisibility` and no layout — `getClientRects()` always
+ * returns empty regardless of display (verified against jsdom 30). `/client/views`
+ * needs both to differ by the same rule, so both stubs read one thing: inline
+ * `display`/`visibility`/`opacity` on the element or an ancestor. Installed at
+ * import time, before `client/views` or anything that calls `checkVisibility`.
+ */
+function visibleByInlineStyle(el: Element): boolean {
+  let node: Element | null = el
+  while (node) {
+    const style = (node as HTMLElement).style
+    if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false
+    node = node.parentElement
+  }
+  return true
+}
+
+type CheckVisibilityOptions = { opacityProperty?: boolean; visibilityProperty?: boolean }
+
+win.Element.prototype.checkVisibility = function (this: Element, _options?: CheckVisibilityOptions): boolean {
+  return visibleByInlineStyle(this)
+} as (options?: CheckVisibilityOptions) => boolean
+
+const nonEmptyRects = [{}] as unknown as ReturnType<Element['getClientRects']>
+const emptyRects = [] as unknown as ReturnType<Element['getClientRects']>
+
+win.Element.prototype.getClientRects = function (this: Element): ReturnType<Element['getClientRects']> {
+  return visibleByInlineStyle(this) ? nonEmptyRects : emptyRects
+}
+
+/**
+ * Removes the `checkVisibility` stub for one test, so `/client/views` falls
+ * through to the `getClientRects` stub above — same rule, different path.
+ * Returns a function that restores it.
+ */
+export function removeCheckVisibilityStub(): () => void {
+  const original = win.Element.prototype.checkVisibility
+  delete (win.Element.prototype as { checkVisibility?: unknown }).checkVisibility
+  return () => {
+    win.Element.prototype.checkVisibility = original
+  }
 }
 
 /**

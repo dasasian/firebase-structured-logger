@@ -104,6 +104,22 @@ export function getCurrentRoute(): NavigationLabels | undefined {
   return currentRoute
 }
 
+let viewReader: (() => string | undefined) | undefined
+
+/**
+ * Set by `enableViews()` (`client/views.ts`), never by the core itself — the
+ * setter a helper hands data through, mirroring `setCurrentRoute`. A later call
+ * replaces the reader rather than adding a second one.
+ */
+export function setViewReader(reader: () => string | undefined): void {
+  viewReader = reader
+}
+
+/** What was on screen right now, or `undefined` when `enableViews()` was never called. */
+export function getActiveView(): string | undefined {
+  return viewReader?.()
+}
+
 /**
  * The screen to label an entry with right now — navigation's, when it has one,
  * else the legacy `setScreen`/`bc.nav` value. Written once so the label and the

@@ -516,6 +516,45 @@ async function testBuiltCommonJsAdaptersNeverRequireTheHistoryWrapper() {
   console.log(`  dist/client/navigation/react-router.js, bundled + minified: ${reactCode.length} bytes`)
 }
 
+/**
+ * Views (#58) is its own entry point too — the core must not import it. Checked
+ * against both the TS source (tree-shaking across an import graph) and the
+ * built CommonJS dist (what a consumer's bundler actually sees, and cannot
+ * tree-shake across a `require()` boundary).
+ */
+async function testViewsCodeIsNotInTheCoreOrNavigationBundles() {
+  console.log('\nTest: /client and /client/navigation* contain none of the views code')
+  for (const entry of ['./src/client/index', './src/client/navigation', './src/client/navigation/vue-router', './src/client/navigation/react-router']) {
+    const result = await build({
+      stdin: {
+        contents: `export * from '${entry}'`,
+        resolveDir: path.join(process.cwd()),
+        loader: 'ts',
+      },
+      bundle: true,
+      format: 'esm',
+      platform: 'browser',
+      write: false,
+      logLevel: 'silent',
+    })
+    const code = result.outputFiles[0].text
+    assert(`${entry}: enableViews is absent`, !code.includes('enableViews'), `found enableViews in ${entry}`)
+    assert(`${entry}: the data-fsl-view attribute is absent`, !code.includes('data-fsl-view'), `found data-fsl-view in ${entry}`)
+  }
+
+  execFileSync('npx', ['tsc'], { cwd: process.cwd(), stdio: 'pipe' })
+  const coreEntry = path.join(process.cwd(), 'dist', 'client', 'index.js')
+  const navEntry = path.join(process.cwd(), 'dist', 'client', 'navigation.js')
+  assert('the build produced dist/client/index.js', fs.existsSync(coreEntry), coreEntry)
+  assert('the build produced dist/client/navigation.js', fs.existsSync(navEntry), navEntry)
+
+  for (const [name, entry] of [['dist/client/index.js', coreEntry], ['dist/client/navigation.js', navEntry]] as const) {
+    const code = await buildMinifiedCjs(entry)
+    assert(`${name}: enableViews is absent`, !code.includes('enableViews'), `found enableViews in ${name}`)
+    assert(`${name}: the data-fsl-view attribute is absent`, !code.includes('data-fsl-view'), `found data-fsl-view in ${name}`)
+  }
+}
+
 async function run() {
   testIdRule()
   testDefaultLabelsFor()
@@ -540,6 +579,7 @@ async function run() {
   await testNavigationCodeIsNotInTheCoreBundle()
   await testRouterAdaptersAreNotInTheNavigationOrCoreBundle()
   await testBuiltCommonJsAdaptersNeverRequireTheHistoryWrapper()
+  await testViewsCodeIsNotInTheCoreOrNavigationBundles()
   reportResults()
 }
 

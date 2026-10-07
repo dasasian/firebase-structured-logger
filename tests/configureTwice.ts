@@ -31,7 +31,8 @@ import { configureRateLimiter, allow, resetRateLimiter } from '../src/client/rat
 import { enableNavigation } from '../src/client/navigation.js'
 import { enableVueRouterNavigation } from '../src/client/navigation/vue-router.js'
 import { enableReactRouterNavigation } from '../src/client/navigation/react-router.js'
-import { getCurrentRoute } from '../src/client/breadcrumbs.js'
+import { enableViews } from '../src/client/views.js'
+import { getCurrentRoute, getActiveView } from '../src/client/breadcrumbs.js'
 import { initLogger as initClientLogger } from '../src/client/logger.js'
 import { configureTraces as configureClientTraces, startTrace as startClientTrace } from '../src/client/timing.js'
 import { initLogger as initFunctionsLogger } from '../src/functions/logger.js'
@@ -45,7 +46,7 @@ import {
   resetAttachmentConfig,
 } from '../src/functions/sourceMapCache.js'
 import { assert, reportResults, readLastEntry, clearLog } from './testHelpers.js'
-import { installFakeClock, uninstallFakeClock, advanceFakeTime } from './browserStubs.js'
+import { installFakeClock, uninstallFakeClock, advanceFakeTime, jsdomWindow } from './browserStubs.js'
 import type { LogPayload } from '../src/shared/types.js'
 
 initializeApp({ projectId: 'demo-project' })
@@ -241,6 +242,24 @@ async function testConfigureServerTracesTwiceReplaces() {
   assert('it is the reconfigured trace', (entry?.labels as Record<string, string>)?.trace === 'cfg_demo_server')
 }
 
+/**
+ * enableViews — a second call registers no second reader: setViewReader
+ * replaces, it does not stack, so one visible mark reads as itself, not
+ * doubled. #58.
+ */
+function testEnableViewsTwiceNoSecondReader() {
+  console.log('\nTest: enableViews — second call registers no second reader')
+  const mark = jsdomWindow.document.createElement('div')
+  mark.setAttribute('data-fsl-view', 'Checkout')
+  jsdomWindow.document.body.appendChild(mark)
+
+  enableViews()
+  enableViews()
+  assert('the view reads once, not doubled', getActiveView() === 'Checkout', String(getActiveView()))
+
+  jsdomWindow.document.body.removeChild(mark)
+}
+
 async function run() {
   testConfigureRateLimiterTwice()
   testConfigureSourceMapBucketTwice()
@@ -250,6 +269,7 @@ async function run() {
   await testEnableReactRouterNavigationTwiceStopsTheFirst()
   await testConfigureClientTracesTwiceReplaces()
   await testConfigureServerTracesTwiceReplaces()
+  testEnableViewsTwiceNoSecondReader()
   fs.rmSync(LOG_DIR, { recursive: true, force: true })
   reportResults()
 }
