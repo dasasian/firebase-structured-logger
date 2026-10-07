@@ -386,6 +386,7 @@ Setup: Firebase — functions in ./functions, web build in ./dist
 | `could-not-check` | error | doctor could not read something it needed — including "run `npm install` first" |
 | `duplicate-storage` | warning | two copies of `@google-cloud/storage`; fix with `npm dedupe` |
 | `unsupported-peer` | warning | an installed peer (`firebase-admin`, `firebase-functions`, `firebase`) is outside the supported range |
+| `logs-inside-functions-source` | warning | local log files sit inside the Functions source folder and `firebase.json` → `ignore` does not cover them — the emulator restarts on every entry, and a deploy uploads them |
 | `embedded-maps-without-release` | warning | maps are embedded without a `.release` marker, so an older release can resolve against the wrong map |
 
 **Exit code:** `0` when there are no errors, `1` when there is one. `--strict` also fails on
@@ -435,27 +436,29 @@ Add a `serve` script to `functions/package.json`:
 Then tell the logger where to write, in your functions entry point:
 
 ```ts
-initLogger({ appId: 'my-app', logLocalDir: 'logs' })
+initLogger({ appId: 'my-app', logLocalDir: '../.fsl-logs' })
 ```
 
-`logLocalDir` is yours to choose — it is resolved against the emulator's working directory,
-which is `functions/`. `functions/logs` is the convention used throughout this README, not a
-requirement; anywhere writable works, including a path outside the project.
+`logLocalDir` is resolved against the emulator's working directory, `functions/`, so
+`'../.fsl-logs'` is `.fsl-logs/` at the repo root.
+
+**Keep it outside the Functions source folder.** The emulator watches that folder, so a log
+file inside it restarts the emulator on every entry — and each restart rotates the file,
+so entries are deleted within seconds. A deploy also uploads that folder, dev logs
+included. `fsl doctor` warns about it (`logs-inside-functions-source`).
 
 Point **[firebase-mcp-server](https://github.com/dasasian/firebase-mcp-server)** at that file
 to query your dev logs from Claude exactly as you would query Cloud Logging.
 
 ### Keep the logs out of git
 
+Add one line to `.gitignore`:
+
 ```
-functions/logs/*.jsonl
+.fsl-logs/
 ```
 
-Track the directory, not the files:
-
-```bash
-mkdir -p functions/logs && touch functions/logs/.gitkeep
-```
+The logger creates the folder on its first entry.
 
 ### Rotation
 
@@ -467,6 +470,49 @@ Entries go to `{logLocalDir}/dev.jsonl`. Each emulator start rotates the current
 | `logLocalDir` | — | Directory for local log files |
 | `logMaxRecordsPerFile` | 2000 | Records per file before rotation |
 | `logMaxRotatedFiles` | 5 | Rotated files to keep |
+
+## Testing what your app logs
+
+`/testing` holds two helpers for your own tests. Only test files import it, so your app
+ships none of it, and neither needs a DOM.
+
+```ts
+import { initLogger } from '@dasasian/firebase-structured-logger/client'
+import { enableReactRouterNavigation } from '@dasasian/firebase-structured-logger/client/navigation/react-router'
+import { captureEntries, resetSession } from '@dasasian/firebase-structured-logger/testing'
+
+const capture = captureEntries()
+const logger = initLogger({ appId: 'test', logFunction: capture.logFunction })
+
+beforeEach(() => {
+  resetSession()
+  capture.clear()
+})
+
+test('team settings is its own screen', async () => {
+  const router = createMemoryRouter(routes, { initialEntries: ['/settings/team'] })
+  enableReactRouterNavigation(router)
+  await logger.info('probe')
+
+  const entry = capture.entries.findLast((e) => e.message === 'probe')
+  expect(entry?.labels.screen).toBe('SettingsTeam')
+  expect(entry?.jsonPayload.breadcrumbs.filter((b) => b.type === 'nav')).toHaveLength(1)
+})
+```
+
+- **`captureEntries()`** returns `{ logFunction, entries, clear() }`. Each entry is
+  exactly what your log function would receive — after label cleaning, size limits and
+  the rate limiter — so the test checks what ships.
+- **`await` the log call.** Its promise ends after the entry reaches `logFunction`.
+- **Find your entry by its message,** not by position. The logger sends entries of its
+  own (repeat summaries, trace warnings), and an entry the rate limiter dropped is simply
+  missing — `findLast` gives `undefined` and the test fails, never quietly reads the
+  previous one.
+- **`resetSession()`** starts a fresh session, as a new browser tab would: an empty
+  breadcrumb trail, no current page, a full rate-limit budget and no repeat counts. Call
+  it before each test — the trail holds 50 crumbs and the budget 50 entries, and both
+  carry over between tests otherwise.
+- A test of views (`data-fsl-view`) needs a DOM environment, such as jsdom.
 
 ## Grouping, without a second product
 
@@ -514,6 +560,7 @@ logger.error(err, { orderId })
 | `appId`, `releaseId` | client | your `initLogger` config |
 | `screen` | client | tracked as the user moves |
 | `route`, `path` | client | with navigation on — the route pattern and the real path (`routeSource` too, deprecated) |
+| `view` | client | with views on — the marked tabs, steps and dialogs visible |
 | `userId` | client | `setUser`, held for the session |
 | `platform` | client | user agent — `ios` / `android` / `macos` / `web` |
 | `browser` | client | user agent |
@@ -1164,6 +1211,10 @@ enableViews()                                                    // see "Views: 
 
 import { trace, startTrace, configureTraces } from '@dasasian/firebase-structured-logger/client/timing'
 configureTraces({ name: { warnAfterMs?, steps?: { step: ms } } })   // see "Timing"
+
+import { captureEntries, resetSession } from '@dasasian/firebase-structured-logger/testing'
+const capture = captureEntries()     // { logFunction, entries, clear() } — see "Testing what your app logs"
+resetSession()                       // a fresh session: trail, page, budget, repeat counts
 ```
 
 Also exported: `initLogger`, `getClientLogger`, `setupGlobalErrorHandler`, `handleReactError`,

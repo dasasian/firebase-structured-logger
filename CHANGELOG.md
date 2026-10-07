@@ -12,6 +12,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`labelsFor` and `defaultLabelsFor`** on `/client/navigation`: one function names a page's `route`, `screen` and `path`, and its answer is used exactly as returned. It replaces `routeFor`, `cleanPath` and `path: false`.
 - **`navigatedTo(screen, { route?, path? })`** for apps whose screens change without the URL changing — the same breadcrumb and labels as automatic navigation.
 - **`bc.handledError`** — the clearer name for an error your code handled and did not log.
+- **`/testing`:** `captureEntries()` keeps every entry the logger sends, for your own tests, and `resetSession()` starts each test with an empty trail and a full budget.
+- **`fsl doctor` warns `logs-inside-functions-source`** when local log files sit inside the Functions source folder.
 - **Views:** `enableViews()` from `/client/views`, and `data-fsl-view="name"` in your markup. Every browser entry carries a `view` label naming the marked tabs, steps and dialogs visible when it was written, joined with ` › `.
 - **Router adapters:** `enableVueRouterNavigation(router)` from `/client/navigation/vue-router` and `enableReactRouterNavigation(router)` from `/client/navigation/react-router`. They take `route` and `screen` from the router's own patterns and names instead of guessing from the path. One option, `adjust`, edits the labels. Neither router is a dependency.
 
@@ -19,6 +21,11 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **One structured `nav` breadcrumb per page change:** `name` is the screen (or the route), `data` holds `route` and `path`. In 1.1–1.2 the name was the path. With navigation on, `bc.nav` and `setScreen` no longer add a second breadcrumb for the same change.
 - **With navigation on, the `screen` label comes from navigation, not `setScreen`.** An app that called both now sees navigation's screen on every entry, and repeat counting groups errors by that screen too.
+
+### Fixed
+
+- **React Router: a redirect on first load records one breadcrumb,** for the page it ends on. It recorded the starting page too.
+- **The README's local log folder is now `.fsl-logs/` at the repo root.** Inside `functions/`, every entry restarted the emulator, which rotated the file and deleted entries within seconds.
 
 ### Deprecated
 

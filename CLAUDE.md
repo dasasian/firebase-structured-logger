@@ -222,8 +222,10 @@ over `enableNavigation()` with one warning, and a second adapter call stops the 
 The adapters type the router structurally and have no peer dependency: they read
 `router.subscribe` / `state.matches` (React Router data router, 6.4+ and 7) and
 `afterEach` / `currentRoute` (Vue Router 4). The rules that keep one change one crumb:
-React records only when `location.key` changes, so a redirect collapses to its final
-page; `route` is joined from the route configs, so it never holds the `basename`, while
+React records the first page only once `router.state.initialized` is true — before
+that, matches exist but loaders have not run, so a first-load redirect would record a
+page nobody saw — and after that only when `location.key` changes, so a redirect
+collapses to its final page; `route` is joined from the route configs, so it never holds the `basename`, while
 `path` (`location.pathname`) does; Vue skips a navigation with a `failure` and
 anything before the first real match (`START_LOCATION`), and uses `to.path`, never
 `fullPath`. Tests drive real routers in memory — `createMemoryRouter`, and
@@ -241,6 +243,15 @@ visibility is `checkVisibility()` with `getClientRects()` as the fallback. Repea
 summaries skip it: they are sent later, and the view at send time is not where the
 errors happened. jsdom has no layout, so tests stub `checkVisibility` in
 `tests/browserStubs.ts`.
+
+## `/testing` is for apps' tests, and asserts what ships
+
+`captureEntries()` is a `logFunction` that keeps what the logger sends — the real
+output, after cleaning, size limits and the rate limiter — not a getter of internal
+state; a getter would let an app's test pass while the sent entry is wrong.
+`resetSession()` is separate from `capture.clear()` on purpose: one resets the
+logger's session state, the other the test's list. No core module imports
+`/testing`, and nothing in it may need a DOM.
 
 ## Optional client helpers are separate entry points
 
