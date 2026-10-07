@@ -440,6 +440,29 @@ async function testNavigationCodeIsNotInTheCoreBundle() {
   assert('the id rule is absent', !code.includes('routePattern'), 'found routePattern in the core bundle')
   assert('the pushState wrapper is absent', !code.includes('pushState'), 'found pushState in the core bundle')
   assert('the history wrapper marker is absent', !code.includes('fsl.wrappedHistoryMethod'), 'found the wrapper symbol in the core bundle')
+  assert('the Vue Router adapter is absent', !code.includes('enableVueRouterNavigation'), 'found enableVueRouterNavigation in the core bundle')
+}
+
+async function testVueRouterAdapterIsNotInTheNavigationOrCoreBundle() {
+  console.log('\nTest: esbuild bundles of src/client/navigation.ts and src/client/index.ts contain none of the Vue Router adapter')
+  for (const entry of ['./src/client/navigation', './src/client/index']) {
+    const result = await build({
+      stdin: {
+        contents: `export * from '${entry}'`,
+        resolveDir: path.join(process.cwd()),
+        loader: 'ts',
+      },
+      bundle: true,
+      format: 'esm',
+      platform: 'browser',
+      write: false,
+      logLevel: 'silent',
+    })
+    const code = result.outputFiles[0].text
+    assert(`${entry}: the Vue Router adapter is absent`, !code.includes('enableVueRouterNavigation'), `found enableVueRouterNavigation in ${entry}`)
+    assert(`${entry}: no vue-router import`, !code.includes('vue-router'), `found a vue-router reference in ${entry}`)
+    assert(`${entry}: the adapter's afterEach wiring is absent`, !code.includes('registerAdapterStop'), `found registerAdapterStop in ${entry}`)
+  }
 }
 
 async function run() {
@@ -464,6 +487,7 @@ async function run() {
   testNavigatedToWithNoExtrasOmitsRouteAndPath()
   testGetCurrentScreenIsUnaffectedByNavigation()
   await testNavigationCodeIsNotInTheCoreBundle()
+  await testVueRouterAdapterIsNotInTheNavigationOrCoreBundle()
   reportResults()
 }
 

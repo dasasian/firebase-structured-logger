@@ -21,6 +21,7 @@ import * as path from 'path'
 import { assert, reportResults } from './testHelpers.js'
 import * as client from '../src/client/index.js'
 import * as functions from '../src/functions/index.js'
+import * as vueRouterNavigation from '../src/client/navigation/vue-router.js'
 
 const EXPECTED: Record<string, string[]> = {
   client: [
@@ -51,6 +52,7 @@ const EXPECTED: Record<string, string[]> = {
     'startTrace',
     'configureTraces',
   ],
+  'client/navigation/vue-router': ['enableVueRouterNavigation'],
 }
 
 function checkSurface(name: string, mod: object) {
@@ -88,6 +90,7 @@ function testDoctorCommandSurface() {
 function run() {
   checkSurface('client', client)
   checkSurface('functions', functions)
+  checkSurface('client/navigation/vue-router', vueRouterNavigation)
   testClientLoggerIsNotConstructible()
   testDoctorCommandSurface()
   reportResults()

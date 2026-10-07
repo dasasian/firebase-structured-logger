@@ -25,8 +25,10 @@ if (process.env.FUNCTIONS_EMULATOR !== 'true') {
 const LOG_DIR = './test-configuretwice-output'
 
 import { initializeApp } from 'firebase-admin/app'
+import { createRouter, createMemoryHistory } from 'vue-router'
 import { configureRateLimiter, allow, resetRateLimiter } from '../src/client/rateLimiter.js'
 import { enableNavigation } from '../src/client/navigation.js'
+import { enableVueRouterNavigation } from '../src/client/navigation/vue-router.js'
 import { getCurrentRoute } from '../src/client/breadcrumbs.js'
 import { initLogger as initClientLogger } from '../src/client/logger.js'
 import { configureTraces as configureClientTraces, startTrace as startClientTrace } from '../src/client/timing.js'
@@ -146,6 +148,36 @@ function testEnableNavigationTwice() {
 }
 
 /**
+ * enableVueRouterNavigation — a second call stops the first adapter rather than
+ * stacking two listeners (the same "second call replaces" shape as enableNavigation
+ * and every other configure/init entry point here). #61.
+ */
+async function testEnableVueRouterNavigationTwiceStopsTheFirst() {
+  console.log('\nTest: enableVueRouterNavigation — second call stops the first adapter')
+  const routerA = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/', name: 'HomeA', component: {} },
+      { path: '/orders/:id', name: 'OrderA', component: {} },
+    ],
+  })
+  await routerA.push('/')
+  await routerA.isReady()
+  enableVueRouterNavigation(routerA)
+
+  const routerB = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/', name: 'HomeB', component: {} }],
+  })
+  await routerB.push('/')
+  await routerB.isReady()
+  enableVueRouterNavigation(routerB)
+
+  await routerA.push('/orders/5')
+  assert('the first adapter no longer records once the second starts', getCurrentRoute()?.screen !== 'OrderA', JSON.stringify(getCurrentRoute()))
+}
+
+/**
  * client/timing's configureTraces — a second call replaces the limits
  * wholesale (README: "configureTraces holds every limit"), same as
  * enableNavigation's options. #51.
@@ -194,6 +226,7 @@ async function run() {
   testConfigureSourceMapBucketTwice()
   testConfigureAttachmentsTwice()
   testEnableNavigationTwice()
+  await testEnableVueRouterNavigationTwiceStopsTheFirst()
   await testConfigureClientTracesTwiceReplaces()
   await testConfigureServerTracesTwiceReplaces()
   fs.rmSync(LOG_DIR, { recursive: true, force: true })

@@ -88,6 +88,27 @@ function legacyLabelsFor(path: string): NavigationLabels {
 let options: NavigationOptions = {}
 let wired = false
 let labelsForThrew = false
+let adapterActive = false
+let adapterWinsWarned = false
+
+function warnAdapterWins(): void {
+  if (adapterWinsWarned) return
+  adapterWinsWarned = true
+  console.warn(
+    '[fsl] a router adapter and enableNavigation() are both active — the adapter wins, and the history.pushState/replaceState wrapper stops recording.',
+  )
+}
+
+/**
+ * Set by a router adapter (`client/navigation/vue-router.ts`, and the React Router
+ * adapter after it) through `registerAdapterStop`/`clearAdapterStop` — never by the
+ * core. While true, `enableNavigation()`'s `history` wrapper stays wrapped but stops
+ * recording: only one source of navigation runs at a time, and the adapter wins.
+ */
+export function setAdapterActive(active: boolean): void {
+  if (active && wired) warnAdapterWins()
+  adapterActive = active
+}
 
 function resolveLabelsFor(path: string): NavigationLabels {
   if (options.labelsFor) {
@@ -108,6 +129,7 @@ function resolveLabelsFor(path: string): NavigationLabels {
 }
 
 function recordNavigation(): void {
+  if (adapterActive) return
   setCurrentRoute(resolveLabelsFor(realPath(location)))
 }
 
@@ -166,6 +188,7 @@ export function enableNavigation(newOptions: NavigationOptions = {}): void {
   if (newOptions.routeFor !== undefined) warnDeprecated('routeFor', 'labelsFor')
   if (newOptions.cleanPath !== undefined) warnDeprecated('cleanPath', 'labelsFor')
   if (newOptions.path === false) warnDeprecated('path: false', 'labelsFor')
+  if (adapterActive) warnAdapterWins()
   if (typeof window === 'undefined') return
   if (wired) return
   wired = true
