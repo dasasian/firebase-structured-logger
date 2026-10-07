@@ -24,6 +24,7 @@ import * as functions from '../src/functions/index.js'
 import * as vueRouterNavigation from '../src/client/navigation/vue-router.js'
 import * as reactRouterNavigation from '../src/client/navigation/react-router.js'
 import * as views from '../src/client/views.js'
+import * as testing from '../src/testing.js'
 
 const EXPECTED: Record<string, string[]> = {
   client: [
@@ -57,6 +58,7 @@ const EXPECTED: Record<string, string[]> = {
   'client/navigation/vue-router': ['enableVueRouterNavigation'],
   'client/navigation/react-router': ['enableReactRouterNavigation'],
   'client/views': ['enableViews'],
+  testing: ['captureEntries', 'resetSession'],
 }
 
 function checkSurface(name: string, mod: object) {
@@ -97,6 +99,7 @@ function run() {
   checkSurface('client/navigation/vue-router', vueRouterNavigation)
   checkSurface('client/navigation/react-router', reactRouterNavigation)
   checkSurface('client/views', views)
+  checkSurface('testing', testing)
   testClientLoggerIsNotConstructible()
   testDoctorCommandSurface()
   reportResults()

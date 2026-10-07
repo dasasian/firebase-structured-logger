@@ -7,7 +7,8 @@
     "moduleResolution": "Bundler",
     "noEmit": true,
     "rootDir": ".",
-    "types": ["node"]
+    "types": ["node"],
+    "lib": ["ES2023", "DOM"]
   },
   "include": ["src/**/*", "tests/**/*", "smoke/**/*"],
   "exclude": ["node_modules", "dist", "smoke/functions", "smoke/node_modules"]

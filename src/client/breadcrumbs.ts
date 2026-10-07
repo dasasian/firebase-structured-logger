@@ -170,6 +170,19 @@ export function clearBreadcrumbs(): void {
 }
 
 /**
+ * The full session reset `/testing`'s `resetSession()` needs: the trail and legacy
+ * screen (`clearBreadcrumbs()`, also used by `Logger.clearUser()`), plus the current
+ * route/screen navigation recorded (`getCurrentRoute()`) — "no current page", as a
+ * new browser tab would have. Deliberately NOT `clearBreadcrumbs()` itself: logging a
+ * user out does not mean they left the page they were on, so `clearUser()` must not
+ * blank the current route too.
+ */
+export function resetBreadcrumbSession(): void {
+  clearBreadcrumbs()
+  currentRoute = undefined
+}
+
+/**
  * One way in for each kind of breadcrumb (CLAUDE.md, "Where the user is"). `nav` and
  * `error` are deprecated — `enableNavigation()`/`navigatedTo()` and `handledError`
  * replace them — and each still works, warning once.

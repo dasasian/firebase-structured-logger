@@ -33,6 +33,7 @@ import { enableVueRouterNavigation } from '../src/client/navigation/vue-router.j
 import { enableReactRouterNavigation } from '../src/client/navigation/react-router.js'
 import { enableViews } from '../src/client/views.js'
 import { getCurrentRoute, getActiveView } from '../src/client/breadcrumbs.js'
+import { captureEntries } from '../src/testing.js'
 import { initLogger as initClientLogger } from '../src/client/logger.js'
 import { configureTraces as configureClientTraces, startTrace as startClientTrace } from '../src/client/timing.js'
 import { initLogger as initFunctionsLogger } from '../src/functions/logger.js'
@@ -260,6 +261,26 @@ function testEnableViewsTwiceNoSecondReader() {
   jsdomWindow.document.body.removeChild(mark)
 }
 
+/**
+ * captureEntries() — "called twice" means two separate test files (or two tests in
+ * one file) each getting their own capture, never one capture leaking into the
+ * other's `entries`. #64.
+ */
+async function testCaptureEntriesTwiceGivesIndependentCaptures() {
+  console.log('\nTest: captureEntries() — a second call gives an independent capture, not a shared one')
+  const a = captureEntries()
+  const b = captureEntries()
+
+  await a.logFunction({ message: 'from-a', severity: 'INFO', labels: { appId: 'cfg-test' } })
+  await b.logFunction({ message: 'from-b', severity: 'INFO', labels: { appId: 'cfg-test' } })
+
+  assert('a holds only its own entry', a.entries.length === 1 && a.entries[0]?.message === 'from-a', JSON.stringify(a.entries))
+  assert('b holds only its own entry', b.entries.length === 1 && b.entries[0]?.message === 'from-b', JSON.stringify(b.entries))
+
+  a.clear()
+  assert('clearing a does not touch b', b.entries.length === 1, JSON.stringify(b.entries))
+}
+
 async function run() {
   testConfigureRateLimiterTwice()
   testConfigureSourceMapBucketTwice()
@@ -270,6 +291,7 @@ async function run() {
   await testConfigureClientTracesTwiceReplaces()
   await testConfigureServerTracesTwiceReplaces()
   testEnableViewsTwiceNoSecondReader()
+  await testCaptureEntriesTwiceGivesIndependentCaptures()
   fs.rmSync(LOG_DIR, { recursive: true, force: true })
   reportResults()
 }

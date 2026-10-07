@@ -540,3 +540,20 @@ export function resetRateLimiter(): void {
   }
   bootId = generateId()
 }
+
+/**
+ * Empties the pending-summary queue. Deliberately separate from
+ * `resetRateLimiter()`, which leaves it on purpose — the queue lives in
+ * `localStorage` precisely so it survives a tab closing, and `resetRateLimiter`
+ * simulates exactly that (see `tests/rateLimiter.ts`,
+ * "a summary written in one visit is sent by the next"). `/testing`'s
+ * `resetSession()` needs a true blank slate instead, as if this origin's
+ * `localStorage` had never seen a summary.
+ */
+export function clearPendingSummaries(): void {
+  try {
+    localStorage.removeItem(SUMMARY_STORAGE_KEY)
+  } catch {
+    // Silently fail
+  }
+}

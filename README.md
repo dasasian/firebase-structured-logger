@@ -508,10 +508,12 @@ test('team settings is its own screen', async () => {
   own (repeat summaries, trace warnings), and an entry the rate limiter dropped is simply
   missing — `findLast` gives `undefined` and the test fails, never quietly reads the
   previous one.
-- **`resetSession()`** starts a fresh session, as a new browser tab would: an empty
-  breadcrumb trail, no current page, a full rate-limit budget and no repeat counts. Call
-  it before each test — the trail holds 50 crumbs and the budget 50 entries, and both
-  carry over between tests otherwise.
+- **`resetSession()`** empties the breadcrumb trail, clears the current page, restores a
+  full rate-limit budget, and empties both the duplicate counts and the pending
+  repeat-summary queue. Call it before each test — the trail holds 50 crumbs and the
+  budget 50 entries, and both carry over between tests otherwise. It leaves
+  configuration alone: `enableNavigation()`/a router adapter stay wired, and
+  `enableViews()`'s reader stays registered, exactly as a real new tab would keep them.
 - A test of views (`data-fsl-view`) needs a DOM environment, such as jsdom.
 
 ## Grouping, without a second product
