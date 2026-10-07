@@ -169,14 +169,7 @@ export function clearBreadcrumbs(): void {
   currentScreen = undefined
 }
 
-/**
- * The full session reset `/testing`'s `resetSession()` needs: the trail and legacy
- * screen (`clearBreadcrumbs()`, also used by `Logger.clearUser()`), plus the current
- * route/screen navigation recorded (`getCurrentRoute()`) — "no current page", as a
- * new browser tab would have. Deliberately NOT `clearBreadcrumbs()` itself: logging a
- * user out does not mean they left the page they were on, so `clearUser()` must not
- * blank the current route too.
- */
+/** Clears the trail, the legacy screen, and the current route. */
 export function resetBreadcrumbSession(): void {
   clearBreadcrumbs()
   currentRoute = undefined
