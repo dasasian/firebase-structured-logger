@@ -642,7 +642,7 @@ Where the user is has one way in for each kind of place:
 |---|---|---|
 | a page, and the URL changed | `enableNavigation()`, or a router adapter — automatic | one `nav` breadcrumb; `screen`, `route` and `path` labels |
 | a page, but the URL did not | `navigatedTo('Checkout')` | the same breadcrumb and labels |
-| something inside or on top of a page | markup (`data-fsl-view`, planned in #58) | a `view` label |
+| something inside or on top of a page | `enableViews()` and markup, `data-fsl-view` | a `view` label |
 
 ```ts
 import { enableNavigation, navigatedTo, defaultLabelsFor } from '@dasasian/firebase-structured-logger/client/navigation'
@@ -751,6 +751,51 @@ page change twice — and the console says so once.
 **Deprecated in 1.3, removed in 2.0:** `routeFor`, `cleanPath` and `path: false` (each
 warns once; use `labelsFor`), the `routeSource` label, and `bc.nav` / `setScreen` (use
 `enableNavigation`, or `navigatedTo` without URL routing).
+
+### Views: what was on screen
+
+A page is navigation. A tab, a checkout step or a dialog inside it is a view. Mark the
+ones that matter in your markup, and turn views on once at startup:
+
+```ts
+import { enableViews } from '@dasasian/firebase-structured-logger/client/views'
+
+enableViews()
+```
+
+```html
+<section data-fsl-view="payment">…</section>
+<div class="modal" data-fsl-view="Attachment">…</div>
+```
+
+An entry written while both are visible carries `view: "payment › Attachment"`. With
+nothing marked visible, there is no `view` label.
+
+- **Read when the entry is written.** The logger finds the visible marks at that moment,
+  in page order, and joins their names with ` › `. There are no open or close calls to
+  make and nothing to keep in sync: a closed dialog is simply not visible any more.
+- **Visible means what the browser says:** `checkVisibility()`, counting
+  `display: none`, `visibility: hidden` and `opacity: 0` on the mark or any parent.
+  Browsers without it (Safari before 17.4) count only `display: none`.
+- **Page order.** A modal rendered at the end of `<body>` (a React portal, a Vue
+  `<Teleport>`) comes after the page, so it reads `payment › Attachment`. If an order
+  reads wrong, move the mark.
+- **A label, never a breadcrumb.** A view is where the user is, not a step they took.
+  The click that opened the dialog is `bc.action`.
+- **What was on screen when the entry was written,** not when the trouble started. An
+  error that surfaces after a request finishes carries whatever is open then.
+- **Not part of the repeat count.** The same error in two dialogs on one screen is
+  counted as one error. Repeat summaries carry no `view`.
+- **Names are fixed words, never values.** `data-fsl-view="order"`, not
+  `"order-1042"`. The logger never reads the page's text, so a fixed name never carries
+  personal data. Mark places, not items: a mark on every row of a list gives
+  `row › row › row …`.
+- **Browser entries only.** Entries your Cloud Functions write never carry `view`; follow
+  the trace id to the browser entry. Browser entries sent through your log function keep
+  it.
+- **Not inside shadow DOM** — marks inside a web component's shadow root are not found.
+
+Calling `enableViews()` again does nothing more.
 
 ## Timing: when something is too slow
 
@@ -1113,6 +1158,9 @@ navigatedTo(screen, { route?, path? })                                      // a
 import { enableVueRouterNavigation } from '@dasasian/firebase-structured-logger/client/navigation/vue-router'
 import { enableReactRouterNavigation } from '@dasasian/firebase-structured-logger/client/navigation/react-router'
 const stop = enableVueRouterNavigation(router, { adjust?: (labels) => labels })      // the same for React Router
+
+import { enableViews } from '@dasasian/firebase-structured-logger/client/views'
+enableViews()                                                    // see "Views: what was on screen"
 
 import { trace, startTrace, configureTraces } from '@dasasian/firebase-structured-logger/client/timing'
 configureTraces({ name: { warnAfterMs?, steps?: { step: ms } } })   // see "Timing"

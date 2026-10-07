@@ -12,6 +12,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`labelsFor` and `defaultLabelsFor`** on `/client/navigation`: one function names a page's `route`, `screen` and `path`, and its answer is used exactly as returned. It replaces `routeFor`, `cleanPath` and `path: false`.
 - **`navigatedTo(screen, { route?, path? })`** for apps whose screens change without the URL changing — the same breadcrumb and labels as automatic navigation.
 - **`bc.handledError`** — the clearer name for an error your code handled and did not log.
+- **Views:** `enableViews()` from `/client/views`, and `data-fsl-view="name"` in your markup. Every browser entry carries a `view` label naming the marked tabs, steps and dialogs visible when it was written, joined with ` › `.
 - **Router adapters:** `enableVueRouterNavigation(router)` from `/client/navigation/vue-router` and `enableReactRouterNavigation(router)` from `/client/navigation/react-router`. They take `route` and `screen` from the router's own patterns and names instead of guessing from the path. One option, `adjust`, edits the labels. Neither router is a dependency.
 
 ### Changed

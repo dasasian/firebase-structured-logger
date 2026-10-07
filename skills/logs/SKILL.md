@@ -60,6 +60,7 @@ Breadcrumbs reconstruct what the user was doing before an error — a session ti
 UX-layer breadcrumbs to check for (flag if missing):
 - Page changes → `enableNavigation()` once at startup (or `navigatedTo('ScreenName')` when the URL does not change). Flag hand-written `bc.nav` / `setScreen` — deprecated, and ignored once navigation is on
 - Opening a modal or switching a tab → `bc.action('open_item_modal', { itemId })`, `bc.action('switch_tab', { tab })` — the step the user took
+- Dialogs, tabs and steps that matter → `data-fsl-view="Name"` on their root element, with `enableViews()` once at startup. Flag a name built from a value (`order-${id}`) and a mark on list items
 - Explicit user decisions → `bc.action('merge_chosen')`, `bc.action('discard_changes')`
 - Scan/camera events → `bc.action('barcode_scanned', { barcode })`
 

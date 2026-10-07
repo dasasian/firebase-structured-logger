@@ -208,8 +208,8 @@ private smoke setup. Only `npm run smoke` needs a real project.
 ## Where the user is — one way in for each kind of place
 
 A page with a URL change is navigation (`enableNavigation`); a page without one is
-`navigatedTo`; anything inside or on top of a page is markup (`data-fsl-view`, #58), a
-label and never a breadcrumb; what the user did is `bc.action` or markup
+`navigatedTo`; anything inside or on top of a page is a view (`enableViews()` and
+`data-fsl-view` markup), a label and never a breadcrumb; what the user did is `bc.action` or markup
 (`data-fsl-action`, #52). Each produces one breadcrumb or label, never two for the same
 event — that is why `bc.nav` and `setScreen` are ignored once navigation is on.
 `labelsFor` customises the default `history` wrapper only. A router adapter
@@ -230,9 +230,21 @@ anything before the first real match (`START_LOCATION`), and uses `to.path`, nev
 `createRouter` with `createMemoryHistory` — with both React Router majors installed
 through npm aliases.
 
+## Views are read when an entry is written
+
+`/client/views` keeps no state about what is open: no listeners, no observers, no
+open/close calls. When an entry is built, the core asks the reader that
+`enableViews()` registered through `setViewReader()` in `breadcrumbs.ts` — a named
+setter, not a general "extra labels" hook, so a later helper cannot silently replace it.
+The reader joins the names of visible `[data-fsl-view]` marks in page order;
+visibility is `checkVisibility()` with `getClientRects()` as the fallback. Repeat
+summaries skip it: they are sent later, and the view at send time is not where the
+errors happened. jsdom has no layout, so tests stub `checkVisibility` in
+`tests/browserStubs.ts`.
+
 ## Optional client helpers are separate entry points
 
-Navigation, and the helpers after it (#51 timing, #52 marked actions, #53 network), each
+Navigation, and the helpers after it (#51 timing, #58 views, #52 marked actions, #53 network), each
 ship as their own subpath — `/client/navigation`, not an `initLogger` option. A bundler
 cannot drop code behind a runtime option, and this package is CommonJS, which bundlers
 barely trim at all; a separate file that is never imported costs nothing. The core
