@@ -341,16 +341,6 @@ const FIREBASE_TOOLS_ALWAYS_IGNORED = ['firebase-debug.log', 'firebase-debug.*.l
 /** firebase-tools' default `functions.ignore`, used only when `ignore` is absent. */
 const FIREBASE_TOOLS_DEFAULT_IGNORE = ['node_modules', '.git']
 
-/**
- * Mirrors how firebase-tools decides whether a file in a Functions source folder is
- * ignored (same semantics for the emulator's watcher and for `deploy`'s upload):
- * `minimatch(fullPath, pattern, { matchBase: true, dot: true })` against each pattern
- * in `functions.ignore`, or `FIREBASE_TOOLS_DEFAULT_IGNORE` when `ignore` is absent —
- * either way with `FIREBASE_TOOLS_ALWAYS_IGNORED` appended. Source: firebase-tools'
- * `packageSource` in `src/deploy/functions/prepareFunctionsUpload.ts` (the ignore list
- * and its defaults) and `readdirRecursive` in `src/fsAsync.ts` (the minimatch call and
- * its options).
- */
 function isIgnoredByFirebaseTools(filePath: string, configuredIgnore: string[] | undefined): boolean {
   const patterns = [...(configuredIgnore ?? FIREBASE_TOOLS_DEFAULT_IGNORE), ...FIREBASE_TOOLS_ALWAYS_IGNORED]
   return patterns.some((pattern) => minimatch(filePath, pattern, { matchBase: true, dot: true }))
