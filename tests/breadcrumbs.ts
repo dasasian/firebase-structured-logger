@@ -10,6 +10,7 @@ import {
   clearBreadcrumbs,
   setCurrentScreen,
   getCurrentScreen,
+  setNavigationEnabled,
   bc,
 } from '../src/client/breadcrumbs.js'
 import { assert, reportResults } from './testHelpers.js'
@@ -201,6 +202,37 @@ function testShorthandHelpers() {
   assert('bc.nav also sets the screen', getCurrentScreen() === 'Settings')
 }
 
+// --- bc.handledError and bc.nav/setScreen with navigation on ---
+
+function testHandledErrorRecordsAnErrorCrumb() {
+  console.log('\nTest: bc.handledError adds an error crumb, the same as bc.error')
+  clearBreadcrumbs()
+
+  bc.handledError('draft_save_failed', { attempt: 1 })
+
+  const [entry] = getLastBreadcrumbs(10)
+  assert('an error breadcrumb was added', entry.type === 'error')
+  assert('it names the error type', entry.name === 'draft_save_failed')
+  assert('data is kept', (entry.data as { attempt: number })?.attempt === 1)
+}
+
+function testBcNavAndSetScreenAreIgnoredWithNavigationOn() {
+  console.log('\nTest: with navigation on, bc.nav and setScreen change no label and add no crumb')
+  clearBreadcrumbs()
+  setNavigationEnabled(true)
+  try {
+    bc.nav('ShouldBeIgnored')
+    assert('bc.nav added no breadcrumb', getLastBreadcrumbs(10).length === 0)
+    assert('bc.nav set no screen', getCurrentScreen() === undefined)
+
+    setCurrentScreen('AlsoIgnored')
+    assert('setScreen added no breadcrumb', getLastBreadcrumbs(10).length === 0)
+    assert('setScreen set no screen', getCurrentScreen() === undefined)
+  } finally {
+    setNavigationEnabled(false)
+  }
+}
+
 // --- Runner ---
 
 function run() {
@@ -215,6 +247,8 @@ function run() {
   testScreenTracking()
   testClearResetsEverything()
   testShorthandHelpers()
+  testHandledErrorRecordsAnErrorCrumb()
+  testBcNavAndSetScreenAreIgnoredWithNavigationOn()
 
   reportResults()
 }

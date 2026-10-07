@@ -1,4 +1,5 @@
 import type { BreadcrumbEntry, NavigationLabels } from '../shared/types'
+import { warnDeprecated } from '../shared/deprecate'
 
 /**
  * How many breadcrumbs are retained — and therefore how many are sent.
@@ -19,9 +20,33 @@ const MAX_AGE_MS = 5 * 60 * 1000 // 5 minutes
 let currentScreen: string | undefined
 let breadcrumbs: BreadcrumbEntry[] = []
 
-export function setCurrentScreen(screen: string): void {
+/**
+ * Set by `enableNavigation()` and `navigatedTo()` (`client/navigation.ts`), never by
+ * the core itself — the setter a helper hands data through, mirroring `setCurrentRoute`.
+ * Once true, the legacy `bc.nav`/`setScreen` path is ignored: one page change must give
+ * exactly one `nav` breadcrumb, never two for the same event.
+ */
+export function setNavigationEnabled(enabled: boolean): void {
+  navigationEnabled = enabled
+}
+
+let navigationEnabled = false
+
+function recordScreenChange(screen: string): void {
+  if (navigationEnabled) return
   currentScreen = screen
   addBreadcrumb('nav', `navigate_${screen}`)
+}
+
+/** @deprecated Use `enableNavigation()`, or `navigatedTo()` without URL routing. */
+export function setCurrentScreen(screen: string): void {
+  warnDeprecated('setScreen', 'enableNavigation(), or navigatedTo() without URL routing')
+  recordScreenChange(screen)
+}
+
+function legacyNav(screen: string): void {
+  warnDeprecated('bc.nav', 'enableNavigation(), or navigatedTo() without URL routing')
+  recordScreenChange(screen)
 }
 
 export function getCurrentScreen(): string | undefined {
@@ -31,18 +56,22 @@ export function getCurrentScreen(): string | undefined {
 let currentRoute: NavigationLabels | undefined
 
 /**
- * Called by `enableNavigation()` (`client/navigation.ts`) on the current page and on
- * every route change after it — never by the core itself. Mirrors `setCurrentScreen`:
- * the one-way setter a helper hands data through, rather than the core reaching out to
- * the helper. Adds a `nav` breadcrumb named after the real path, or the route pattern
- * when `path` was omitted (`enableNavigation({ path: false })`).
+ * Called by `enableNavigation()` and `navigatedTo()` (`client/navigation.ts`) on every
+ * page change — never by the core itself. Mirrors `setNavigationEnabled`: the one-way
+ * setter a helper hands data through, rather than the core reaching out to the helper.
+ * Adds one `nav` breadcrumb named after `labels.screen`, falling back to `labels.route`
+ * when there is no screen name; `labels` itself is stored exactly as given, so a field
+ * left out of it stays absent from the entry labels built from `getCurrentRoute()`.
  */
 export function setCurrentRoute(labels: NavigationLabels): void {
   currentRoute = labels
-  addBreadcrumb('nav', labels.path ?? labels.route, labels.path !== undefined ? { route: labels.route } : undefined)
+  const data: Record<string, unknown> = {}
+  if (labels.route !== undefined) data.route = labels.route
+  if (labels.path !== undefined) data.path = labels.path
+  addBreadcrumb('nav', labels.screen ?? labels.route ?? '', Object.keys(data).length > 0 ? data : undefined)
 }
 
-/** The current page's navigation labels, or `undefined` when `enableNavigation()` was never called. */
+/** The current page's navigation labels, or `undefined` when navigation was never turned on. */
 export function getCurrentRoute(): NavigationLabels | undefined {
   return currentRoute
 }
@@ -91,9 +120,21 @@ export function clearBreadcrumbs(): void {
   currentScreen = undefined
 }
 
+/**
+ * One way in for each kind of breadcrumb (CLAUDE.md, "Where the user is"). `nav` and
+ * `error` are deprecated — `enableNavigation()`/`navigatedTo()` and `handledError`
+ * replace them — and each still works, warning once.
+ */
 export const bc = {
   action: (name: string, data?: Record<string, unknown>) => addBreadcrumb('action', name, data),
-  state:  (name: string, data?: Record<string, unknown>) => addBreadcrumb('state', name, data),
-  nav:    (screen: string) => setCurrentScreen(screen),
-  error:  (type: string, data?: Record<string, unknown>) => addBreadcrumb('error', type, data),
+  state: (name: string, data?: Record<string, unknown>) => addBreadcrumb('state', name, data),
+  /** @deprecated Use `enableNavigation()`, or `navigatedTo()` without URL routing. */
+  nav: (screen: string) => legacyNav(screen),
+  /** @deprecated Use `bc.handledError` — only for an error your code handled and did not log. */
+  error: (type: string, data?: Record<string, unknown>) => {
+    warnDeprecated('bc.error', 'bc.handledError')
+    addBreadcrumb('error', type, data)
+  },
+  /** An error your code handled and chose not to log — a clue if something else goes wrong. */
+  handledError: (type: string, data?: Record<string, unknown>) => addBreadcrumb('error', type, data),
 }

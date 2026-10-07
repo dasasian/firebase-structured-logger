@@ -1,4 +1,5 @@
-import { setCurrentRoute } from './breadcrumbs'
+import { setCurrentRoute, setNavigationEnabled } from './breadcrumbs'
+import { warnDeprecated } from '../shared/deprecate'
 import type { NavigationLabels } from '../shared/types'
 
 /**
@@ -8,14 +9,23 @@ import type { NavigationLabels } from '../shared/types'
  * once, before or after `initLogger`. See README, "Navigation, automatically".
  */
 export interface NavigationOptions {
-  /** Names the route the way your router does. Returning `undefined` falls back to the id rule. */
+  /**
+   * The single customisation point. Receives the real path, already stripped of its
+   * query string and any non-route fragment, and returns the labels for that page —
+   * used exactly as returned; a field left out is not logged. Must be synchronous: it
+   * runs inside your router's own `pushState`. If it throws, that page gets
+   * `defaultLabelsFor(path)` and the console warns once, however often it throws.
+   */
+  labelsFor?: (path: string) => NavigationLabels
+  /** @deprecated Use `labelsFor`. Names the route the way your router does. Returning `undefined` falls back to the id rule. */
   routeFor?: (path: string) => string | undefined
   /**
-   * Runs on the real path before it is stored and before `routeFor`/the id rule sees it —
-   * for paths that can themselves hold personal data, e.g. `/users/jane@example.com`.
+   * @deprecated Use `labelsFor`. Runs on the real path before it is stored and before
+   * `routeFor`/the id rule sees it — for paths that can themselves hold personal data,
+   * e.g. `/users/jane@example.com`.
    */
   cleanPath?: (path: string) => string
-  /** `false` omits the `path` label, and keeps the real path out of breadcrumbs too. */
+  /** @deprecated Use `labelsFor`. `false` omits the `path` label, and keeps the real path out of breadcrumbs too. */
   path?: false
 }
 
@@ -57,10 +67,17 @@ function realPath(location: LocationLike): string {
   return raw.split('?')[0] ?? raw
 }
 
-let options: NavigationOptions = {}
-let wired = false
+/**
+ * The labels `enableNavigation()` gives when no `labelsFor` is passed: the id-rule
+ * `route`, `screen` equal to `route`, the stripped `path`, and the deprecated
+ * `routeSource: 'pattern'`.
+ */
+export function defaultLabelsFor(path: string): NavigationLabels {
+  const route = routePattern(path)
+  return { route, screen: route, path, routeSource: 'pattern' }
+}
 
-function labelsFor(path: string): NavigationLabels {
+function legacyLabelsFor(path: string): NavigationLabels {
   const cleaned = options.cleanPath ? options.cleanPath(path) : path
   const fromRouter = options.routeFor?.(cleaned)
   const route = fromRouter ?? routePattern(cleaned)
@@ -68,8 +85,43 @@ function labelsFor(path: string): NavigationLabels {
   return options.path === false ? { route, routeSource } : { route, path: cleaned, routeSource }
 }
 
+let options: NavigationOptions = {}
+let wired = false
+let labelsForThrew = false
+
+function resolveLabelsFor(path: string): NavigationLabels {
+  if (options.labelsFor) {
+    try {
+      return options.labelsFor(path)
+    } catch (err) {
+      if (!labelsForThrew) {
+        labelsForThrew = true
+        console.warn('[fsl] labelsFor threw — using the default labels for this page:', err instanceof Error ? err.message : err)
+      }
+      return defaultLabelsFor(path)
+    }
+  }
+  if (options.routeFor !== undefined || options.cleanPath !== undefined || options.path === false) {
+    return legacyLabelsFor(path)
+  }
+  return defaultLabelsFor(path)
+}
+
 function recordNavigation(): void {
-  setCurrentRoute(labelsFor(realPath(location)))
+  setCurrentRoute(resolveLabelsFor(realPath(location)))
+}
+
+/**
+ * The same breadcrumb and labels as automatic navigation (`enableNavigation()`), for a
+ * screen that changes without the URL changing. Counts as navigation being on, the same
+ * as `enableNavigation()` — the legacy `bc.nav`/`setScreen` path is ignored from then on.
+ */
+export function navigatedTo(screen: string, extra: { route?: string; path?: string } = {}): void {
+  setNavigationEnabled(true)
+  const labels: NavigationLabels = { screen }
+  if (extra.route !== undefined) labels.route = extra.route
+  if (extra.path !== undefined) labels.path = extra.path
+  setCurrentRoute(labels)
 }
 
 // A Symbol.for registration, not a module-local Symbol — a second copy of this module
@@ -109,6 +161,11 @@ function wrapHistoryMethod(name: HistoryMethodName): void {
  */
 export function enableNavigation(newOptions: NavigationOptions = {}): void {
   options = newOptions
+  labelsForThrew = false
+  setNavigationEnabled(true)
+  if (newOptions.routeFor !== undefined) warnDeprecated('routeFor', 'labelsFor')
+  if (newOptions.cleanPath !== undefined) warnDeprecated('cleanPath', 'labelsFor')
+  if (newOptions.path === false) warnDeprecated('path: false', 'labelsFor')
   if (typeof window === 'undefined') return
   if (wired) return
   wired = true

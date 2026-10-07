@@ -25,6 +25,8 @@ import { initLogger, triggerTestLog, sendTestLog } from '../src/client/logger.js
 import { allow, configureRateLimiter, resetRateLimiter } from '../src/client/rateLimiter.js'
 import { createClientLogHandler } from '../src/functions/logHandler.js'
 import { getBucket } from '../src/functions/sourceMapCache.js'
+import { enableNavigation } from '../src/client/navigation.js'
+import { getCurrentRoute, getCurrentScreen, bc, clearBreadcrumbs, getLastBreadcrumbs } from '../src/client/breadcrumbs.js'
 import { resetDeprecationWarnings } from '../src/shared/deprecate.js'
 import type { LogPayload } from '../src/shared/types.js'
 import { assert, reportResults } from './testHelpers.js'
@@ -239,6 +241,129 @@ async function testTriggerTestLogCallsSendTestLog() {
   assert('sendTestLog is exported alongside it', typeof sendTestLog === 'function')
 }
 
+// --- bc.nav / setScreen, with navigation off (#57) ---
+
+function testBcNavActsLikeBeforeWhenNavigationIsOff() {
+  console.log('\nTest: bc.nav, with navigation off, still works as before')
+  clearBreadcrumbs()
+  bc.nav('Checkout')
+  assert('the screen is set', getCurrentScreen() === 'Checkout')
+  const [entry] = getLastBreadcrumbs(10)
+  assert('a nav breadcrumb named navigate_<screen> was added', entry.name === 'navigate_Checkout', entry.name)
+}
+
+function testBcNavWarnsOnce() {
+  console.log('\nTest: bc.nav warns exactly once, however many times it is used')
+  resetDeprecationWarnings()
+  const { warnings } = captureWarnings(() => {
+    bc.nav('A')
+    bc.nav('B')
+  })
+  const matching = warnings.filter((w) => w.includes('"bc.nav"'))
+  assert('exactly one warning was printed', matching.length === 1, JSON.stringify(warnings))
+}
+
+function testSetScreenActsLikeBeforeWhenNavigationIsOff() {
+  console.log('\nTest: logger.setScreen, with navigation off, still works as before')
+  clearBreadcrumbs()
+  const logger = initLogger({ appId: 'acme', releaseId: 'r1', logFunction: async () => {} })
+  logger.setScreen('Dashboard')
+  assert('the screen is set', getCurrentScreen() === 'Dashboard')
+  const [entry] = getLastBreadcrumbs(10)
+  assert('a nav breadcrumb named navigate_<screen> was added', entry.name === 'navigate_Dashboard', entry.name)
+}
+
+function testSetScreenWarnsOnce() {
+  console.log('\nTest: setScreen warns exactly once, however many times it is used')
+  resetDeprecationWarnings()
+  const logger = initLogger({ appId: 'acme', releaseId: 'r1', logFunction: async () => {} })
+  const { warnings } = captureWarnings(() => {
+    logger.setScreen('A')
+    logger.setScreen('B')
+  })
+  const matching = warnings.filter((w) => w.includes('"setScreen"'))
+  assert('exactly one warning was printed', matching.length === 1, JSON.stringify(warnings))
+}
+
+// --- bc.error -> bc.handledError ---
+
+function testBcErrorActsLikeHandledError() {
+  console.log('\nTest: bc.error, used alone, behaves like bc.handledError')
+  clearBreadcrumbs()
+  bc.error('ValidationError', { field: 'price' })
+  const [entry] = getLastBreadcrumbs(10)
+  assert('an error breadcrumb was added', entry.type === 'error')
+  assert('it names the error type', entry.name === 'ValidationError')
+}
+
+function testBcErrorWarnsOnce() {
+  console.log('\nTest: bc.error warns exactly once, however many times it is used')
+  resetDeprecationWarnings()
+  const { warnings } = captureWarnings(() => {
+    bc.error('A')
+    bc.error('B')
+  })
+  const matching = warnings.filter((w) => w.includes('"bc.error"'))
+  assert('exactly one warning was printed', matching.length === 1, JSON.stringify(warnings))
+}
+
+// --- routeFor / cleanPath / path: false -> labelsFor ---
+
+function testRouteForActsLikeLabelsFor() {
+  console.log('\nTest: routeFor, used alone, behaves the same as before — its string becomes route')
+  enableNavigation({ routeFor: (p) => (p === '/special' ? 'Special' : undefined) })
+  history.pushState({}, '', '/special')
+  assert('the route is the string routeFor returned', getCurrentRoute()?.route === 'Special', JSON.stringify(getCurrentRoute()))
+}
+
+function testRouteForWarnsOnce() {
+  console.log('\nTest: routeFor warns exactly once, however many times enableNavigation is called with it')
+  resetDeprecationWarnings()
+  const { warnings } = captureWarnings(() => {
+    enableNavigation({ routeFor: () => 'A' })
+    enableNavigation({ routeFor: () => 'B' })
+  })
+  const matching = warnings.filter((w) => w.includes('"routeFor"'))
+  assert('exactly one warning was printed', matching.length === 1, JSON.stringify(warnings))
+}
+
+function testCleanPathActsLikeBefore() {
+  console.log('\nTest: cleanPath, used alone, still runs before the id rule sees the path')
+  enableNavigation({ cleanPath: (p) => p.replace(/[^/]+@[^/]+/g, ':email') })
+  history.pushState({}, '', '/users/jane@example.com')
+  assert('the cleaned path is stored', getCurrentRoute()?.path === '/users/:email', JSON.stringify(getCurrentRoute()))
+}
+
+function testCleanPathWarnsOnce() {
+  console.log('\nTest: cleanPath warns exactly once, however many times enableNavigation is called with it')
+  resetDeprecationWarnings()
+  const { warnings } = captureWarnings(() => {
+    enableNavigation({ cleanPath: (p) => p })
+    enableNavigation({ cleanPath: (p) => p })
+  })
+  const matching = warnings.filter((w) => w.includes('"cleanPath"'))
+  assert('exactly one warning was printed', matching.length === 1, JSON.stringify(warnings))
+}
+
+function testPathFalseActsLikeBefore() {
+  console.log('\nTest: path: false, used alone, still omits path everywhere')
+  enableNavigation({ path: false })
+  history.pushState({}, '', '/orders/5')
+  assert('path is omitted', getCurrentRoute()?.path === undefined, JSON.stringify(getCurrentRoute()))
+  assert('route is still set', getCurrentRoute()?.route === '/orders/:id', JSON.stringify(getCurrentRoute()))
+}
+
+function testPathFalseWarnsOnce() {
+  console.log('\nTest: path: false warns exactly once, however many times enableNavigation is called with it')
+  resetDeprecationWarnings()
+  const { warnings } = captureWarnings(() => {
+    enableNavigation({ path: false })
+    enableNavigation({ path: false })
+  })
+  const matching = warnings.filter((w) => w.includes('"path: false"'))
+  assert('exactly one warning was printed', matching.length === 1, JSON.stringify(warnings))
+}
+
 // --- Runner ---
 
 function testOldRateLimitNamesWarnOnce() {
@@ -294,6 +419,22 @@ async function run() {
   testBucketNameActsLikeBucket()
   testBucketNameWarnsOnce()
   testBucketWinsOverBucketName()
+
+  // Navigation-off cases run before any enableNavigation() call in this process —
+  // once navigation is turned on, bc.nav/setScreen are ignored for the rest of it.
+  testBcNavActsLikeBeforeWhenNavigationIsOff()
+  testBcNavWarnsOnce()
+  testSetScreenActsLikeBeforeWhenNavigationIsOff()
+  testSetScreenWarnsOnce()
+  testBcErrorActsLikeHandledError()
+  testBcErrorWarnsOnce()
+
+  testRouteForActsLikeLabelsFor()
+  testRouteForWarnsOnce()
+  testCleanPathActsLikeBefore()
+  testCleanPathWarnsOnce()
+  testPathFalseActsLikeBefore()
+  testPathFalseWarnsOnce()
 
   testSessionLimitActsLikeBurstLimit()
   testSessionLimitWarnsOnce()

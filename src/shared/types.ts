@@ -9,24 +9,29 @@ export interface BaseLabels {
   releaseId?: string
   errorType?: string
   errorCategory?: string
-  /** The route pattern, e.g. `/orders/:id/items`. Set by `enableNavigation()`. */
+  /** The route pattern, e.g. `/orders/:id/items`. Set by `enableNavigation()` or `navigatedTo()`. */
   route?: string
-  /** The real path, e.g. `/orders/1042/items`. Omitted when `enableNavigation({ path: false })`. */
+  /** The real path, e.g. `/orders/1042/items`. Set by `enableNavigation()` or `navigatedTo()`. */
   path?: string
-  /** Whether `route` came from `routeFor` or the id rule. Set by `enableNavigation()`. */
+  /**
+   * Whether `route` came from the deprecated `routeFor` or the id rule.
+   * @deprecated Removed in 2.0 — a `labelsFor` answer is final and carries no source.
+   */
   routeSource?: 'router' | 'pattern'
 }
 
 /**
- * What `enableNavigation()` (`@dasasian/firebase-structured-logger/client/navigation`)
- * hands to the core logger for the current page, through `setCurrentRoute` in
- * `client/breadcrumbs.ts`. `path` is absent exactly when `enableNavigation` was
- * given `{ path: false }`.
+ * What `enableNavigation()` and `navigatedTo()` (both
+ * `@dasasian/firebase-structured-logger/client/navigation`) hand to the core logger for
+ * the current page, through `setCurrentRoute` in `client/breadcrumbs.ts`. Used exactly
+ * as given — a field left out is not logged — so every field is optional.
  */
 export interface NavigationLabels {
-  route: string
+  route?: string
+  screen?: string
   path?: string
-  routeSource: 'router' | 'pattern'
+  /** @deprecated Removed in 2.0. Set only by `defaultLabelsFor()` and the deprecated `routeFor`/`cleanPath`/`path: false`. */
+  routeSource?: 'router' | 'pattern'
 }
 
 export interface ErrorPayload {

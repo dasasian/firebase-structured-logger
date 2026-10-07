@@ -1,12 +1,14 @@
 /**
- * `enableNavigation()` (#27) — `@dasasian/firebase-structured-logger/client/navigation`.
+ * `enableNavigation()` (#27, #57) — `@dasasian/firebase-structured-logger/client/navigation`.
  *
- * Covers the id rule, the labels it attaches (`route`, `path`, `routeSource`), what
- * never leaves the browser (the query string, non-route fragments), `cleanPath` and
- * `path: false`, the `history.pushState`/`replaceState`/`popstate` wiring (wrap once,
- * leave a foreign wrapper alone whichever side it installs on, return the original's
- * result, run with the original `this`), and that none of this reaches the core
- * `/client` bundle.
+ * Covers the id rule, `labelsFor` (the single customisation point) and `defaultLabelsFor`,
+ * `navigatedTo` for screens that change without the URL changing, the one-`nav`-crumb-per-
+ * page-change rule (including when the app also calls the now-ignored `bc.nav`/`setScreen`
+ * in the same tick), what never leaves the browser (the query string, non-route fragments),
+ * the deprecated `routeFor`/`cleanPath`/`path: false` still working, the
+ * `history.pushState`/`replaceState`/`popstate` wiring (wrap once, leave a foreign wrapper
+ * alone whichever side it installs on, return the original's result, run with the original
+ * `this`), and that none of this reaches the core `/client` bundle.
  *
  * Tests run in one process and share module state on purpose — `history.pushState`
  * is wrapped once for the file, the way it would be once for a real session — so
@@ -20,8 +22,8 @@ import '../tests/browserStubs.js'
 import * as path from 'path'
 import { build } from 'esbuild'
 import { assert, reportResults } from './testHelpers.js'
-import { routePattern, enableNavigation } from '../src/client/navigation.js'
-import { getCurrentRoute, getLastBreadcrumbs } from '../src/client/breadcrumbs.js'
+import { routePattern, enableNavigation, defaultLabelsFor, navigatedTo } from '../src/client/navigation.js'
+import { getCurrentRoute, getLastBreadcrumbs, getCurrentScreen, bc } from '../src/client/breadcrumbs.js'
 import { initLogger } from '../src/client/logger.js'
 import type { LogPayload } from '../src/shared/types.js'
 
@@ -34,6 +36,17 @@ function lastBreadcrumb() {
 
 function tick(ms = 0): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function captureWarnings<T>(fn: () => T): { result: T; warnings: string[] } {
+  const warnings: string[] = []
+  const real = console.warn
+  console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(' ')) }
+  try {
+    return { result: fn(), warnings }
+  } finally {
+    console.warn = real
+  }
 }
 
 // --- The id rule ---
@@ -54,6 +67,17 @@ function testIdRule() {
     const got = routePattern(input)
     assert(`${input} -> ${expected}`, got === expected, `got: ${got}`)
   }
+}
+
+// --- defaultLabelsFor ---
+
+function testDefaultLabelsFor() {
+  console.log('\nTest: defaultLabelsFor — the id-rule route, screen equal to it, the path, and routeSource: pattern')
+  const labels = defaultLabelsFor('/orders/1042/items')
+  assert('route is the id-rule pattern', labels.route === '/orders/:id/items', JSON.stringify(labels))
+  assert('screen equals route', labels.screen === '/orders/:id/items', JSON.stringify(labels))
+  assert('path is the real path', labels.path === '/orders/1042/items', JSON.stringify(labels))
+  assert('routeSource is pattern', labels.routeSource === 'pattern', JSON.stringify(labels))
 }
 
 // --- Off unless called ---
@@ -112,17 +136,22 @@ function testFirstEnableWrapsAndWrapsAroundAForeignWrapper() {
 
   const nav = getCurrentRoute()
   assert('route is the id-rule pattern', nav?.route === '/orders/:id', JSON.stringify(nav))
+  assert('screen is the route, from defaultLabelsFor', nav?.screen === '/orders/:id', JSON.stringify(nav))
   assert('path is the real path', nav?.path === '/orders/1042', JSON.stringify(nav))
   assert('routeSource is pattern', nav?.routeSource === 'pattern', JSON.stringify(nav))
+
+  const crumb = lastBreadcrumb()
+  assert('the crumb name is the screen (the route, here)', crumb.name === '/orders/:id', crumb.name)
+  assert('the crumb data carries route and path', JSON.stringify(crumb.data) === JSON.stringify({ route: '/orders/:id', path: '/orders/1042' }), JSON.stringify(crumb.data))
 }
 
 function testReplaceStateAddsABreadcrumb() {
-  console.log('\nTest: replaceState adds one nav breadcrumb with the real path')
+  console.log('\nTest: replaceState adds one nav breadcrumb named after the screen')
   const before = getLastBreadcrumbs(1000).length
   history.replaceState({}, '', '/orders/2099')
   const after = getLastBreadcrumbs(1000).length
   assert('one breadcrumb was added', after === before + 1, `got ${after - before}`)
-  assert('its name is the real path', lastBreadcrumb().name === '/orders/2099', lastBreadcrumb().name)
+  assert('its name is the screen (the route, here)', lastBreadcrumb().name === '/orders/:id', lastBreadcrumb().name)
   assert('route reflects the new page', getCurrentRoute()?.route === '/orders/:id')
 }
 
@@ -164,10 +193,10 @@ function testSecondEnableReplacesOptionsWithoutRewrapping() {
   )
 }
 
-// --- routeFor, the id-rule fallback, and routeSource ---
+// --- routeFor, the id-rule fallback, and routeSource (deprecated) ---
 
 function testRouteForFallsBackToIdRuleWhenUndefined() {
-  console.log('\nTest: routeFor returning undefined falls back to the id rule')
+  console.log('\nTest: the deprecated routeFor returning undefined falls back to the id rule')
   enableNavigation({ routeFor: (p) => (p === '/orders/1042/items' ? 'OrderItems' : undefined) })
 
   history.pushState({}, '', '/orders/1042/items')
@@ -225,10 +254,10 @@ function testHashRouting() {
   assert('an auth-shaped fragment is dropped too', !serialized.includes('access_token'), serialized)
 }
 
-// --- cleanPath and path: false ---
+// --- cleanPath and path: false (deprecated) ---
 
 function testCleanPath() {
-  console.log('\nTest: cleanPath runs before the path is stored and before routeFor/the id rule sees it')
+  console.log('\nTest: the deprecated cleanPath runs before the path is stored and before routeFor/the id rule sees it')
   enableNavigation({ cleanPath: (p) => p.replace(/[^/]+@[^/]+/g, ':email') })
 
   history.pushState({}, '', '/users/jane@example.com/profile')
@@ -241,7 +270,7 @@ function testCleanPath() {
 }
 
 function testPathFalse() {
-  console.log('\nTest: path: false omits path everywhere, including breadcrumbs')
+  console.log('\nTest: the deprecated path: false omits path everywhere, including breadcrumbs')
   enableNavigation({ path: false })
 
   const before = getLastBreadcrumbs(1000).length
@@ -258,40 +287,137 @@ function testPathFalse() {
   assert('the real path is not in the breadcrumb', !serialized.includes('/orders/99'), serialized)
 }
 
-// --- Entry labels end to end, and screen's fallback ---
+// --- labelsFor: the single customisation point ---
 
-async function testEntryLabelsAndScreenFallback() {
-  console.log('\nTest: an entry carries route/path/routeSource, and screen falls back to route when unset')
-  enableNavigation({})
+function testLabelsForIsUsedExactly() {
+  console.log('\nTest: labelsFor — an entry carries exactly route/screen/path returned, a field left out is absent')
+  enableNavigation({ labelsFor: (p) => ({ route: `custom:${p}` }) })
 
   let sent: LogPayload | undefined
   const logger = initLogger({
     appId: 'nav-test',
     releaseId: 'r1',
-    logFunction: async (data) => {
-      sent = data
-    },
+    logFunction: async (data) => { sent = data },
   })
 
-  history.pushState({}, '', '/orders/1042/items?token=x#frag')
+  history.pushState({}, '', '/orders/1042')
   logger.info('navigated')
-  await tick()
 
-  assert('route is on the entry', sent?.labels.route === '/orders/:id/items', JSON.stringify(sent?.labels))
-  assert('path is on the entry', sent?.labels.path === '/orders/1042/items', JSON.stringify(sent?.labels))
-  assert('routeSource is on the entry', sent?.labels.routeSource === 'pattern', JSON.stringify(sent?.labels))
-  assert('screen falls back to route when never set', sent?.labels.screen === '/orders/:id/items', JSON.stringify(sent?.labels))
-  const serialized = JSON.stringify(sent)
-  assert('no query reaches the entry', !serialized.includes('token'), serialized)
-  assert('no fragment reaches the entry', !serialized.includes('frag'), serialized)
+  const nav = getCurrentRoute()
+  assert('route is exactly what labelsFor returned', nav?.route === 'custom:/orders/1042', JSON.stringify(nav))
+  assert('screen was left out, so it is absent', nav?.screen === undefined, JSON.stringify(nav))
+  assert('path was left out, so it is absent', nav?.path === undefined, JSON.stringify(nav))
 
-  logger.setScreen('Checkout')
-  history.pushState({}, '', '/dashboard')
-  logger.info('navigated again')
-  await tick()
+  return (async () => {
+    await tick()
+    assert('the entry route matches', sent?.labels.route === 'custom:/orders/1042', JSON.stringify(sent?.labels))
+    assert('the entry screen is absent, not defaulted', sent?.labels.screen === undefined, JSON.stringify(sent?.labels))
+    assert('the entry path is absent', sent?.labels.path === undefined, JSON.stringify(sent?.labels))
+  })()
+}
 
-  assert("the app's own screen is kept, not overridden by route", sent?.labels.screen === 'Checkout', JSON.stringify(sent?.labels))
-  assert('route still updates', sent?.labels.route === '/dashboard', JSON.stringify(sent?.labels))
+function testNoOptionsGivesDefaultLabels() {
+  console.log('\nTest: enableNavigation() with no options gives defaultLabelsFor labels, including routeSource: pattern')
+  enableNavigation()
+  history.pushState({}, '', '/orders/4100/items')
+
+  const nav = getCurrentRoute()
+  const expected = defaultLabelsFor('/orders/4100/items')
+  assert('route matches defaultLabelsFor', nav?.route === expected.route, JSON.stringify(nav))
+  assert('screen matches defaultLabelsFor', nav?.screen === expected.screen, JSON.stringify(nav))
+  assert('path matches defaultLabelsFor', nav?.path === expected.path, JSON.stringify(nav))
+  assert('routeSource is pattern', nav?.routeSource === 'pattern', JSON.stringify(nav))
+}
+
+function testThrowingLabelsForFallsBackAndWarnsOnce() {
+  console.log('\nTest: a throwing labelsFor gives the default labels, and warns exactly once however often it throws')
+  enableNavigation({ labelsFor: () => { throw new Error('boom') } })
+
+  const { warnings } = captureWarnings(() => {
+    history.pushState({}, '', '/orders/501')
+    history.pushState({}, '', '/orders/502')
+    history.pushState({}, '', '/orders/503')
+  })
+
+  const nav = getCurrentRoute()
+  assert('the page got the default labels', nav?.route === '/orders/:id' && nav?.screen === '/orders/:id', JSON.stringify(nav))
+  const matching = warnings.filter((w) => w.includes('labelsFor'))
+  assert('exactly one warning was printed across three throws', matching.length === 1, JSON.stringify(warnings))
+}
+
+function testLabelsForNeverReceivesQueryOrFragment() {
+  console.log('\nTest: labelsFor never receives a query string or a non-route fragment')
+  const received: string[] = []
+  enableNavigation({ labelsFor: (p) => { received.push(p); return defaultLabelsFor(p) } })
+
+  history.pushState({}, '', '/orders/9?token=abc#frag')
+  const last = received[received.length - 1]
+  assert('no query string reached labelsFor', !last.includes('token'), last)
+  assert('no fragment reached labelsFor', !last.includes('frag'), last)
+  assert('the real path reached labelsFor', last === '/orders/9', last)
+}
+
+// --- One crumb per page change, even with the now-ignored bc.nav/setScreen ---
+
+function testOneCrumbPerPageChangeEvenWithBcNavInTheSameTick() {
+  console.log('\nTest: one page change gives exactly one nav crumb, even when bc.nav/setScreen fire in the same tick')
+  enableNavigation()
+  history.pushState({}, '', '/orders/10')
+  const screenBefore = getCurrentRoute()?.screen
+
+  const before = getLastBreadcrumbs(1000).length
+  const { warnings } = captureWarnings(() => {
+    bc.nav('IgnoredScreen')
+    initLogger({ appId: 'nav-test', releaseId: 'r1', logFunction: async () => {} }).setScreen('AlsoIgnored')
+    history.pushState({}, '', '/orders/11')
+  })
+  const after = getLastBreadcrumbs(1000).length
+
+  assert('exactly one nav crumb was added for the one URL change', after === before + 1, `got ${after - before}`)
+  const crumb = lastBreadcrumb()
+  assert('the crumb is the page change, not bc.nav/setScreen', crumb.name === '/orders/:id', crumb.name)
+  assert('the screen label is unaffected by the ignored calls', getCurrentRoute()?.screen === '/orders/:id', String(getCurrentRoute()?.screen))
+  assert('bc.nav warned once', warnings.some((w) => w.includes('"bc.nav"')), JSON.stringify(warnings))
+  assert('setScreen warned once', warnings.some((w) => w.includes('"setScreen"')), JSON.stringify(warnings))
+  void screenBefore
+}
+
+// --- navigatedTo: the same breadcrumb and labels as automatic navigation ---
+
+function testNavigatedToGivesTheSameCrumbAndLabelsAsAutomaticNavigation() {
+  console.log('\nTest: navigatedTo gives the same breadcrumb and labels as automatic navigation')
+  const before = getLastBreadcrumbs(1000).length
+  navigatedTo('ManualScreen', { route: '/manual/:id', path: '/manual/42' })
+  const after = getLastBreadcrumbs(1000).length
+
+  assert('exactly one nav crumb was added', after === before + 1, `got ${after - before}`)
+  const crumb = lastBreadcrumb()
+  assert('the crumb type is nav', crumb.type === 'nav')
+  assert('the crumb name is the screen', crumb.name === 'ManualScreen', crumb.name)
+  assert('the crumb data carries route and path', JSON.stringify(crumb.data) === JSON.stringify({ route: '/manual/:id', path: '/manual/42' }), JSON.stringify(crumb.data))
+
+  const nav = getCurrentRoute()
+  assert('the screen label is set', nav?.screen === 'ManualScreen')
+  assert('the route label is set', nav?.route === '/manual/:id')
+  assert('the path label is set', nav?.path === '/manual/42')
+}
+
+function testNavigatedToWithNoExtrasOmitsRouteAndPath() {
+  console.log('\nTest: navigatedTo(screen) with no route/path leaves both absent, and the crumb name falls back to nothing else')
+  navigatedTo('ScreenOnly')
+  const crumb = lastBreadcrumb()
+  assert('the crumb name is the screen', crumb.name === 'ScreenOnly', crumb.name)
+  assert('no data object is attached', crumb.data === undefined, JSON.stringify(crumb.data))
+  const nav = getCurrentRoute()
+  assert('route is absent', nav?.route === undefined, JSON.stringify(nav))
+  assert('path is absent', nav?.path === undefined, JSON.stringify(nav))
+}
+
+// --- getCurrentScreen is untouched by navigation being on ---
+
+function testGetCurrentScreenIsUnaffectedByNavigation() {
+  console.log('\nTest: with navigation on, getCurrentScreen stays whatever it last was off-navigation (never set here)')
+  assert('getCurrentScreen was never set via the ignored setScreen/bc.nav calls', getCurrentScreen() === undefined, String(getCurrentScreen()))
 }
 
 // --- Not in the core bundle ---
@@ -318,6 +444,7 @@ async function testNavigationCodeIsNotInTheCoreBundle() {
 
 async function run() {
   testIdRule()
+  testDefaultLabelsFor()
   testOffByDefault()
   testFirstEnableWrapsAndWrapsAroundAForeignWrapper()
   testReplaceStateAddsABreadcrumb()
@@ -328,7 +455,14 @@ async function run() {
   testHashRouting()
   testCleanPath()
   testPathFalse()
-  await testEntryLabelsAndScreenFallback()
+  await testLabelsForIsUsedExactly()
+  testNoOptionsGivesDefaultLabels()
+  testThrowingLabelsForFallsBackAndWarnsOnce()
+  testLabelsForNeverReceivesQueryOrFragment()
+  testOneCrumbPerPageChangeEvenWithBcNavInTheSameTick()
+  testNavigatedToGivesTheSameCrumbAndLabelsAsAutomaticNavigation()
+  testNavigatedToWithNoExtrasOmitsRouteAndPath()
+  testGetCurrentScreenIsUnaffectedByNavigation()
   await testNavigationCodeIsNotInTheCoreBundle()
   reportResults()
 }
