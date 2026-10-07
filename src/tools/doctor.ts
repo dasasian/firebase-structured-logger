@@ -12,6 +12,7 @@
 
 import * as fs from 'fs'
 import * as path from 'path'
+import { minimatch } from 'minimatch'
 import { RELEASE_MARKER, embeddedDir, embeddedMarkerPath } from '../shared/paths.js'
 import { findPackageCopies, findTopLevelVersion, readPackageJson } from '../shared/nodeModules.js'
 import { leadingMajorVersion, meetsMinimum } from '../shared/versionRange.js'
@@ -30,6 +31,7 @@ export type FindingId =
   | 'duplicate-storage'
   | 'unsupported-peer'
   | 'embedded-maps-without-release'
+  | 'logs-inside-functions-source'
 
 export interface DoctorSetup {
   kind: SetupKind
@@ -63,6 +65,7 @@ export interface DoctorOptions {
 interface FirebaseFunctionsConfig {
   source?: string
   runtime?: string
+  ignore?: string[]
 }
 
 interface FirebaseHostingConfig {
@@ -95,6 +98,11 @@ function couldNotCheck(message: string, fix: string): DoctorFinding {
 
 function firstOf<T>(value: T | T[] | undefined): T | undefined {
   return Array.isArray(value) ? value[0] : value
+}
+
+/** `firebase.json` -> `functions` is one codebase's config, or an array of several. */
+function allOf<T>(value: T | T[] | undefined): T[] {
+  return Array.isArray(value) ? value : value ? [value] : []
 }
 
 function hostingPublicDirs(hosting: FirebaseHostingConfig | FirebaseHostingConfig[] | undefined): string[] {
@@ -286,6 +294,88 @@ export function checkUnsupportedPeers(
   }
 }
 
+const LOGS_WALK_MAX_DEPTH = 8
+const LOGS_WALK_MAX_ENTRIES = 5000
+
+/**
+ * Finds `*.jsonl` files under `dir`, skipping `node_modules`, symlinks, and anything
+ * `isIgnored` matches — checked, and pruned without descending, at every directory
+ * along the way, the same order firebase-tools applies `ignore` in its own recursive
+ * walk (see `isIgnoredByFirebaseTools`): a file inside an ignored directory is never
+ * visited, rather than visited and then filtered out by its own name. Depth and total
+ * entries visited are capped — a real Functions source tree fits comfortably under
+ * both, and the caps keep this cheap on one that does not (a stray symlink loop, a
+ * vendored dependency tree someone forgot to call `node_modules`).
+ */
+function findJsonlFiles(dir: string, isIgnored: (fullPath: string) => boolean): string[] {
+  const results: string[] = []
+  let visited = 0
+  const walk = (current: string, depth: number) => {
+    if (depth > LOGS_WALK_MAX_DEPTH) return
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (visited >= LOGS_WALK_MAX_ENTRIES) return
+      visited++
+      if (entry.isSymbolicLink()) continue
+      const full = path.join(current, entry.name)
+      if (isIgnored(full)) continue
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules') continue
+        walk(full, depth + 1)
+      } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+        results.push(full)
+      }
+    }
+  }
+  if (fs.existsSync(dir)) walk(dir, 0)
+  return results
+}
+
+/** Always appended by firebase-tools regardless of a custom `ignore` list. */
+const FIREBASE_TOOLS_ALWAYS_IGNORED = ['firebase-debug.log', 'firebase-debug.*.log', '.runtimeconfig.json']
+/** firebase-tools' default `functions.ignore`, used only when `ignore` is absent. */
+const FIREBASE_TOOLS_DEFAULT_IGNORE = ['node_modules', '.git']
+
+/**
+ * Mirrors how firebase-tools decides whether a file in a Functions source folder is
+ * ignored (same semantics for the emulator's watcher and for `deploy`'s upload):
+ * `minimatch(fullPath, pattern, { matchBase: true, dot: true })` against each pattern
+ * in `functions.ignore`, or `FIREBASE_TOOLS_DEFAULT_IGNORE` when `ignore` is absent —
+ * either way with `FIREBASE_TOOLS_ALWAYS_IGNORED` appended. Source: firebase-tools'
+ * `packageSource` in `src/deploy/functions/prepareFunctionsUpload.ts` (the ignore list
+ * and its defaults) and `readdirRecursive` in `src/fsAsync.ts` (the minimatch call and
+ * its options).
+ */
+function isIgnoredByFirebaseTools(filePath: string, configuredIgnore: string[] | undefined): boolean {
+  const patterns = [...(configuredIgnore ?? FIREBASE_TOOLS_DEFAULT_IGNORE), ...FIREBASE_TOOLS_ALWAYS_IGNORED]
+  return patterns.some((pattern) => minimatch(filePath, pattern, { matchBase: true, dot: true }))
+}
+
+function checkLogsInsideFunctionsSource(
+  projectRoot: string,
+  functionsConfigs: FirebaseFunctionsConfig[],
+  findings: DoctorFinding[],
+): void {
+  for (const config of functionsConfigs) {
+    const sourceDir = path.resolve(projectRoot, config.source ?? 'functions')
+    const flagged = findJsonlFiles(sourceDir, (p) => isIgnoredByFirebaseTools(p, config.ignore))
+    if (flagged.length === 0) continue
+
+    const folders = [...new Set(flagged.map((f) => displayPath(projectRoot, path.dirname(f))))]
+    findings.push({
+      id: 'logs-inside-functions-source',
+      level: 'warning',
+      message: `${flagged.length} .jsonl file(s) under ${displayPath(projectRoot, sourceDir)}, not excluded by ignore: ${folders.join(', ')}`,
+      fix: "Point logLocalDir outside the Functions source, e.g. logLocalDir: '../.fsl-logs'.",
+    })
+  }
+}
+
 function checkEmbeddedMapsWithoutRelease(backendDir: string | null, findings: DoctorFinding[]): void {
   if (!backendDir) return
   const dir = embeddedDir(backendDir)
@@ -329,6 +419,9 @@ export function runDoctor(options: DoctorOptions): DoctorReport {
   const searchDirs = [backendDir, options.projectRoot].filter((d): d is string => d !== null)
   const ownPkg = readOwnPackageJson()
   checkUnsupportedPeers(searchDirs, (ownPkg.peerDependencies as Record<string, string>) ?? {}, findings)
+  if (firebaseJson.ok === true) {
+    checkLogsInsideFunctionsSource(options.projectRoot, allOf(firebaseJson.config.functions), findings)
+  }
   checkEmbeddedMapsWithoutRelease(backendDir, findings)
 
   const hasFirebaseFunctions = backendDir !== null && findTopLevelVersion([backendDir], 'firebase-functions') !== undefined

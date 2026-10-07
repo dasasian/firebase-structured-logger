@@ -218,6 +218,71 @@ function testDuplicateStorageNamesWhoOwnsEachCopy() {
   cleanup([root])
 }
 
+// --- logs-inside-functions-source ---
+
+function writeJsonl(dir: string, fileName: string): void {
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, fileName), '{"severity":"INFO"}\n')
+}
+
+function testLogsInsideFunctionsSourceFires() {
+  console.log('\nTest: logs-inside-functions-source fires when a .jsonl file sits under functions/ and ignore does not cover it')
+  const { root, backend } = firebaseProject()
+  writeJsonl(path.join(backend, 'logs'), 'dev.jsonl')
+  const report = runDoctor({ projectRoot: root })
+  assert('logs-inside-functions-source fires as a warning', findingIds(report).includes('logs-inside-functions-source'))
+  assert('at warning level', report.findings.find((f) => f.id === 'logs-inside-functions-source')?.level === 'warning')
+  const message = report.findings.find((f) => f.id === 'logs-inside-functions-source')?.message ?? ''
+  assert('names the folder', message.includes('logs'), message)
+  cleanup([root])
+}
+
+function testLogsInsideFunctionsSourceQuietWhenIgnored() {
+  console.log('\nTest: logs-inside-functions-source stays quiet when firebase.json ignore covers the folder')
+  const { root, backend } = firebaseProject()
+  writeJson(path.join(root, 'firebase.json'), {
+    functions: { source: 'functions', ignore: ['node_modules', '.git', 'logs'] },
+    hosting: { public: 'dist' },
+  })
+  writeJsonl(path.join(backend, 'logs'), 'dev.jsonl')
+  const report = runDoctor({ projectRoot: root })
+  assert('logs-inside-functions-source does not fire', !findingIds(report).includes('logs-inside-functions-source'))
+  cleanup([root])
+}
+
+function testLogsInsideFunctionsSourceQuietWithNoJsonl() {
+  console.log('\nTest: logs-inside-functions-source stays quiet with no .jsonl files under functions/')
+  const { root } = firebaseProject()
+  const report = runDoctor({ projectRoot: root })
+  assert('logs-inside-functions-source does not fire', !findingIds(report).includes('logs-inside-functions-source'))
+  cleanup([root])
+}
+
+function testLogsInsideFunctionsSourceMultiCodebase() {
+  console.log('\nTest: logs-inside-functions-source checks every codebase in a functions array')
+  const root = tempProject()
+  const api = path.join(root, 'api')
+  const worker = path.join(root, 'worker')
+  writeJson(path.join(root, 'firebase.json'), {
+    functions: [
+      { source: 'api', codebase: 'api' },
+      { source: 'worker', codebase: 'worker', ignore: ['node_modules', '.git', 'logs'] },
+    ],
+  })
+  writeJson(path.join(api, 'package.json'), { name: 'api', engines: { node: '>=22' } })
+  writePackage(api, 'firebase-functions', '7.4.0')
+  writeJson(path.join(worker, 'package.json'), { name: 'worker', engines: { node: '>=22' } })
+  writePackage(worker, 'firebase-functions', '7.4.0')
+  writeJsonl(path.join(api, 'logs'), 'dev.jsonl')
+  writeJsonl(path.join(worker, 'logs'), 'dev.jsonl')
+
+  const report = runDoctor({ projectRoot: root })
+  const findings = report.findings.filter((f) => f.id === 'logs-inside-functions-source')
+  assert('fires exactly once (api only — worker ignores logs)', findings.length === 1, JSON.stringify(findings))
+  assert('names the api codebase folder', findings[0]?.message.includes('api'), JSON.stringify(findings))
+  cleanup([root])
+}
+
 // --- embedded-maps-without-release ---
 
 function testEmbeddedMapsWithoutReleaseFires() {
@@ -291,6 +356,10 @@ function run() {
   testDuplicateStorageNamesWhoOwnsEachCopy()
   testEmbeddedMapsWithoutReleaseFires()
   testEmbeddedMapsWithoutReleaseQuiet()
+  testLogsInsideFunctionsSourceFires()
+  testLogsInsideFunctionsSourceQuietWhenIgnored()
+  testLogsInsideFunctionsSourceQuietWithNoJsonl()
+  testLogsInsideFunctionsSourceMultiCodebase()
   testFirebaseSetupSummary()
   testCloudRunSetupSummary()
   reportResults()

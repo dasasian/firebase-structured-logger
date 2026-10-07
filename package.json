@@ -113,6 +113,7 @@
   "dependencies": {
     "@google-cloud/storage": "^7.19.0 || ^8.1.0",
     "@jridgewell/trace-mapping": "^0.3.31",
+    "minimatch": "^9.0.9",
     "ulid": "^3.0.2"
   },
   "peerDependencies": {

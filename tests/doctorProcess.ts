@@ -129,6 +129,31 @@ function testJsonShape() {
   fs.rmSync(root, { recursive: true, force: true })
 }
 
+function testJsonCarriesLogsInsideFunctionsSource() {
+  console.log('\nTest: --json carries logs-inside-functions-source when a .jsonl file sits under functions/')
+  const { root, backend } = cleanFirebaseProject()
+  fs.mkdirSync(path.join(backend, 'logs'), { recursive: true })
+  fs.writeFileSync(path.join(backend, 'logs', 'dev.jsonl'), '{"severity":"INFO"}\n')
+  const out = runCli(root, ['--json'])
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(out.stdout.trim())
+  } catch {
+    parsed = undefined
+  }
+  assert('stdout is valid JSON', parsed !== undefined, out.stdout.slice(0, 300))
+  if (parsed === undefined) {
+    fs.rmSync(root, { recursive: true, force: true })
+    return
+  }
+  const findings = (parsed as Record<string, unknown>).findings as Array<Record<string, unknown>>
+  const finding = findings.find((f) => f.id === 'logs-inside-functions-source')
+  assert('logs-inside-functions-source is present', finding !== undefined, JSON.stringify(findings))
+  assert('at warning level', finding?.level === 'warning', JSON.stringify(finding))
+  fs.rmSync(root, { recursive: true, force: true })
+}
+
 function run() {
   testCleanExitsZero()
   testErrorExitsOne()
@@ -136,6 +161,7 @@ function run() {
   testWarningExitsOneWithStrict()
   testCouldNotCheckAlwaysExitsOne()
   testJsonShape()
+  testJsonCarriesLogsInsideFunctionsSource()
   reportResults()
 }
 
