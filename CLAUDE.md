@@ -223,7 +223,8 @@ The adapters type the router structurally and have no peer dependency: they read
 `router.subscribe` / `state.matches` (React Router data router, 6.4+ and 7) and
 `afterEach` / `currentRoute` (Vue Router 4). The rules that keep one change one crumb:
 React records only when `location.key` changes, so a redirect collapses to its final
-page, and strips `basename` from `route`; Vue skips a navigation with a `failure` and
+page; `route` is joined from the route configs, so it never holds the `basename`, while
+`path` (`location.pathname`) does; Vue skips a navigation with a `failure` and
 anything before the first real match (`START_LOCATION`), and uses `to.path`, never
 `fullPath`. Tests drive real routers in memory — `createMemoryRouter`, and
 `createRouter` with `createMemoryHistory` — with both React Router majors installed

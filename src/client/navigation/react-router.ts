@@ -52,14 +52,9 @@ function labelsFromState(state: ReactRouterStateLike): NavigationLabels {
 }
 
 /**
- * Subscribes with `router.subscribe`; never wraps `history`. A navigation is recorded
- * only when `state.location.key` changes from the last recorded one — so a redirect's
- * intermediate (pending) notifications and any revalidation or fetcher update, which
- * keep the same key, add no crumb. `route` is joined from each match's `route.path` in
- * router order, skipping index and pathless matches (`path` is `undefined`); an absolute
- * child path resets the join rather than appending to it. `path` is always
- * `state.location.pathname`, basename included, since that is the real address. A second
- * call stops the first.
+ * Needs a data router (`createBrowserRouter`, `createHashRouter`, `createMemoryRouter`).
+ * One crumb per `location.key`, so a redirect records only the page it ends on. `path`
+ * keeps the `basename`; `route` never has it. A second call stops the first.
  */
 export function enableReactRouterNavigation(
   router: ReactRouterLike,
