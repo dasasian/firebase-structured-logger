@@ -7,6 +7,14 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-10-07
+
+Where the user is, told by the router and the page. A router adapter takes `route` and
+`screen` from React Router or Vue Router's own patterns and names, so a redirect on first
+load is one breadcrumb and a `:param` route is one page. `data-fsl-view` marks name the
+tabs, steps and dialogs on screen, and every entry carries them as a `view` label. And
+`/testing` lets an app assert what it logs, with the real entries the logger sends.
+
 ### Added
 
 - **`labelsFor` and `defaultLabelsFor`** on `/client/navigation`: one function names a page's `route`, `screen` and `path`, and its answer is used exactly as returned. It replaces `routeFor`, `cleanPath` and `path: false`.
@@ -304,7 +312,8 @@ The README is reorganised around what you get rather than how the machine is bui
 - **Emulator mode** — under `FUNCTIONS_EMULATOR=true`, entries are written to a local `dev.jsonl` with rotation instead of Cloud Logging, so local development needs no live credentials.
 - **`fsl` CLI** — source map upload to Storage, deploy packing, and skill installation.
 
-[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/dasasian/firebase-structured-logger/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/dasasian/firebase-structured-logger/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/dasasian/firebase-structured-logger/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/dasasian/firebase-structured-logger/compare/v0.9.0...v1.0.0
