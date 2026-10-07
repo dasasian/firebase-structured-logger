@@ -6,6 +6,7 @@
 import { sessionStorageStub, localStorageStub, withFrozenTime, setVisibility } from './browserStubs.js'
 import { initLogger } from '../src/client/logger.js'
 import { configureRateLimiter, resetRateLimiter, flushDueSummaries } from '../src/client/rateLimiter.js'
+import { setNavigationEnabled, setCurrentRoute, setCurrentScreen, clearBreadcrumbs } from '../src/client/breadcrumbs.js'
 import type { LogPayload } from '../src/shared/types.js'
 import type { Logger } from '../src/client/logger.js'
 import { assert, reportResults } from './testHelpers.js'
@@ -209,6 +210,50 @@ async function testTwoHundredErrorsThroughTheLoggerSendThreeCopiesAndASummary() 
 }
 
 /**
+ * "Done when" (#60): navigation on with screen A, then the legacy setScreen('B')
+ * (ignored while navigation is on, so it changes nothing) — the repeat signature
+ * must still key off the same screen the entries are labelled with, or the two
+ * calls below would group under two different signatures instead of one.
+ */
+async function testRepeatSignatureUsesTheSameScreenAsTheLabelWithNavigationOn() {
+  console.log('\nTest: with navigation on, the repeat signature groups under the nav screen, not getCurrentScreen() (#60)')
+  configureRateLimiter({
+    burstLimit: 500,
+    duplicateLimit: 1,
+    storageKey: 'fsl_ratelimit',
+    summaryIntervalMinutes: 60,
+  })
+  resetRateLimiter()
+  localStorageStub.setItem('fsl_pending_summaries', '[]')
+  clearBreadcrumbs()
+  setNavigationEnabled(true)
+  setCurrentRoute({ screen: 'A' })
+  setCurrentScreen('B') // legacy call, ignored while navigation is on
+  const { logger, allPayloads } = makeLogger()
+
+  try {
+    const t0 = Date.now()
+    withFrozenTime(t0, () => logger.error(new Error('nav screen mismatch')))
+    withFrozenTime(t0 + 1000, () => logger.error(new Error('nav screen mismatch')))
+    await new Promise((r) => setTimeout(r, 10))
+
+    const fullCopy = allPayloads().find((p) => p.jsonPayload?.error?.message === 'nav screen mismatch')
+    assert('the full copy is labelled with the nav screen', fullCopy?.labels.screen === 'A', JSON.stringify(fullCopy?.labels))
+
+    withFrozenTime(t0 + 1000 + 61 * 60_000, () => setVisibility('hidden'))
+    await new Promise((r) => setTimeout(r, 10))
+    setVisibility('visible')
+
+    const summary = allPayloads().find((p) => p.labels.repeatOf !== undefined)
+    assert('a summary was sent', summary !== undefined)
+    assert('the summary groups under the nav screen, A', summary?.labels.screen === 'A', `got: ${summary?.labels.screen}`)
+  } finally {
+    setNavigationEnabled(false)
+    clearBreadcrumbs()
+  }
+}
+
+/**
  * A summary is queued in localStorage so it survives the tab closing — the
  * exact case where the send that follows can plausibly fail (offline, or the
  * tab tearing down right after `visibilitychange: hidden`). A summary may
@@ -354,6 +399,7 @@ async function run() {
   await testEverySeverityCostsOneUnitOfBudget()
   await testReserveIsHonouredBySeverity()
   await testTwoHundredErrorsThroughTheLoggerSendThreeCopiesAndASummary()
+  await testRepeatSignatureUsesTheSameScreenAsTheLabelWithNavigationOn()
   await testFailedSummarySendKeepsItQueued()
   await testDroppedLogConsoleMessages()
   await testDefaultFloorFollowsNodeEnv()

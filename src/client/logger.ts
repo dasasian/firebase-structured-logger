@@ -6,10 +6,10 @@ import {
   addBreadcrumb,
   getLastBreadcrumbs,
   MAX_BREADCRUMBS,
-  getCurrentScreen,
   setCurrentScreen,
   clearBreadcrumbs,
   getCurrentRoute,
+  getActiveScreen,
 } from './breadcrumbs'
 import {
   allow,
@@ -170,7 +170,7 @@ export class Logger<
       context,
       attachments,
       toErrorPayload(error),
-      signatureFor(error, getCurrentScreen()),
+      signatureFor(error, getActiveScreen()),
     )
   }
 
@@ -259,7 +259,7 @@ export class Logger<
     const allLabels: LogPayload['labels'] = {
       appId: this.config.appId,
       releaseId: this.config.releaseId,
-      screen: nav?.screen ?? getCurrentScreen(),
+      screen: getActiveScreen(),
       route: nav?.route,
       path: nav?.path,
       routeSource: nav?.routeSource,

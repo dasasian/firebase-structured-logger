@@ -11,6 +11,7 @@ import {
   setCurrentScreen,
   getCurrentScreen,
   setNavigationEnabled,
+  setCurrentRoute,
   bc,
 } from '../src/client/breadcrumbs.js'
 import { assert, reportResults } from './testHelpers.js'
@@ -233,6 +234,14 @@ function testBcNavAndSetScreenAreIgnoredWithNavigationOn() {
   }
 }
 
+function testCrumbNameFallsBackToPathWhenScreenAndRouteAreAbsent() {
+  console.log('\nTest: setCurrentRoute names the crumb path when labelsFor returns only path (#60)')
+  clearBreadcrumbs()
+  setCurrentRoute({ path: '/x' })
+  const [entry] = getLastBreadcrumbs(10)
+  assert('the crumb name is the path', entry.name === '/x', entry.name)
+}
+
 // --- Runner ---
 
 function run() {
@@ -249,6 +258,7 @@ function run() {
   testShorthandHelpers()
   testHandledErrorRecordsAnErrorCrumb()
   testBcNavAndSetScreenAreIgnoredWithNavigationOn()
+  testCrumbNameFallsBackToPathWhenScreenAndRouteAreAbsent()
 
   reportResults()
 }

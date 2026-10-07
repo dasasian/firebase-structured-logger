@@ -59,21 +59,30 @@ let currentRoute: NavigationLabels | undefined
  * Called by `enableNavigation()` and `navigatedTo()` (`client/navigation.ts`) on every
  * page change — never by the core itself. Mirrors `setNavigationEnabled`: the one-way
  * setter a helper hands data through, rather than the core reaching out to the helper.
- * Adds one `nav` breadcrumb named after `labels.screen`, falling back to `labels.route`
- * when there is no screen name; `labels` itself is stored exactly as given, so a field
- * left out of it stays absent from the entry labels built from `getCurrentRoute()`.
+ * Adds one `nav` breadcrumb named after `labels.screen`, else `labels.route`, else
+ * `labels.path`; `labels` itself is stored exactly as given, so a field left out of it
+ * stays absent from the entry labels built from `getCurrentRoute()`.
  */
 export function setCurrentRoute(labels: NavigationLabels): void {
   currentRoute = labels
   const data: Record<string, unknown> = {}
   if (labels.route !== undefined) data.route = labels.route
   if (labels.path !== undefined) data.path = labels.path
-  addBreadcrumb('nav', labels.screen ?? labels.route ?? '', Object.keys(data).length > 0 ? data : undefined)
+  addBreadcrumb('nav', labels.screen ?? labels.route ?? labels.path ?? '', Object.keys(data).length > 0 ? data : undefined)
 }
 
 /** The current page's navigation labels, or `undefined` when navigation was never turned on. */
 export function getCurrentRoute(): NavigationLabels | undefined {
   return currentRoute
+}
+
+/**
+ * The screen to label an entry with right now — navigation's, when it has one,
+ * else the legacy `setScreen`/`bc.nav` value. Written once so the label and the
+ * repeat signature can never read two different answers to the same question.
+ */
+export function getActiveScreen(): string | undefined {
+  return currentRoute?.screen ?? currentScreen
 }
 
 /**
