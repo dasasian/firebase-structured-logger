@@ -23,6 +23,7 @@ import { assert, reportResults } from './testHelpers.js'
 import { enableReactRouterNavigation, type ReactRouterLike } from '../src/client/navigation/react-router.js'
 import { enableNavigation } from '../src/client/navigation.js'
 import { getCurrentRoute, getLastBreadcrumbs, bc } from '../src/client/breadcrumbs.js'
+import { resetSession } from '../src/testing.js'
 
 interface RouterMajor {
   label: string
@@ -43,17 +44,6 @@ async function loadMajor(label: string, pkg: string): Promise<RouterMajor> {
 
 function crumbCount(): number {
   return getLastBreadcrumbs(1000).length
-}
-
-/**
- * `MAX_BREADCRUMBS` caps the retained trail, so a plain `crumbCount()` delta goes stale
- * once the whole file's run has pushed past the cap — the count pins at the cap and a
- * genuinely new crumb stops showing up as one. Comparing object identity against a
- * snapshot stays correct regardless of how much of the trail has been evicted.
- */
-function crumbsAddedSince(before: ReturnType<typeof getLastBreadcrumbs>): number {
-  const seen = new Set(before)
-  return getLastBreadcrumbs(1000).filter((entry) => !seen.has(entry)).length
 }
 
 async function captureWarningsAsync(fn: () => Promise<void>): Promise<string[]> {
@@ -92,6 +82,7 @@ function makeRoutes(redirect: RouterMajor['redirect']) {
 
 async function testNestedMatchGivesOneCrumbWithTheRightLabels(major: RouterMajor) {
   console.log(`\n[${major.label}] Test: /orders/1042/items -> one crumb, route/screen/path`)
+  resetSession()
   const router = major.createMemoryRouter(makeRoutes(major.redirect), { initialEntries: ['/orders/1042/items'] })
   const before = crumbCount()
   const stop = enableReactRouterNavigation(router)
@@ -107,6 +98,7 @@ async function testNestedMatchGivesOneCrumbWithTheRightLabels(major: RouterMajor
 
 async function testNestedRouteWalksUpToTheDeepestHandleScreen(major: RouterMajor) {
   console.log(`\n[${major.label}] Test: a leaf with no handle under a named parent -> screen is the parent's`)
+  resetSession()
   const router = major.createMemoryRouter(makeRoutes(major.redirect), { initialEntries: ['/orders/1042/nameless'] })
   const stop = enableReactRouterNavigation(router)
 
@@ -119,6 +111,7 @@ async function testNestedRouteWalksUpToTheDeepestHandleScreen(major: RouterMajor
 
 async function testIndexAndPathlessRoutesAddNoSegmentAndAbsoluteChildResets(major: RouterMajor) {
   console.log(`\n[${major.label}] Test: index route adds no segment; pathless layout adds no segment; absolute child resets the join`)
+  resetSession()
   const router = major.createMemoryRouter(makeRoutes(major.redirect), { initialEntries: ['/orders/1042/items'] })
   const stop = enableReactRouterNavigation(router)
 
@@ -137,6 +130,7 @@ async function testIndexAndPathlessRoutesAddNoSegmentAndAbsoluteChildResets(majo
 
 async function testBasenameIsExcludedFromRouteButIncludedInPath(major: RouterMajor) {
   console.log(`\n[${major.label}] Test: basename '/app' -> route has no /app; path is location.pathname (basename included)`)
+  resetSession()
   const router = major.createMemoryRouter(makeRoutes(major.redirect), {
     initialEntries: ['/app/orders/1042/items'],
     basename: '/app',
@@ -163,16 +157,17 @@ function waitForInitialized(router: ReactRouterLike): Promise<void> {
 
 async function testFirstLoadRedirectRecordsOnlyTheFinalPage(major: RouterMajor) {
   console.log(`\n[${major.label}] Test: a first-load loader redirect -> one crumb, for the page it ends on, not the start page`)
+  resetSession()
   const routes = [
     { path: '/', loader: () => { throw major.redirect('/rooms') }, handle: { screen: 'Home' } },
     { path: '/rooms', handle: { screen: 'Rooms' } },
   ]
   const router = major.createMemoryRouter(routes, { initialEntries: ['/'] })
-  const before = getLastBreadcrumbs(1000)
+  const before = crumbCount()
   const stop = enableReactRouterNavigation(router)
   await waitForInitialized(router)
 
-  assert(`[${major.label}] exactly one crumb for the whole first-load redirect`, crumbsAddedSince(before) === 1, `got ${crumbsAddedSince(before)}`)
+  assert(`[${major.label}] exactly one crumb for the whole first-load redirect`, crumbCount() === before + 1, `got ${crumbCount() - before}`)
   assert(`[${major.label}] the recorded page is the one the redirect ends on`, getCurrentRoute()?.screen === 'Rooms', JSON.stringify(getCurrentRoute()))
 
   stop()
@@ -180,13 +175,14 @@ async function testFirstLoadRedirectRecordsOnlyTheFinalPage(major: RouterMajor) 
 
 async function testFirstLoadWithLoaderAndNoRedirectRecordsThatPage(major: RouterMajor) {
   console.log(`\n[${major.label}] Test: a first load with a loader and no redirect -> exactly one crumb, for that page`)
+  resetSession()
   const routes = [{ path: '/', loader: async () => ({ ok: true }), handle: { screen: 'Home' } }]
   const router = major.createMemoryRouter(routes, { initialEntries: ['/'] })
-  const before = getLastBreadcrumbs(1000)
+  const before = crumbCount()
   const stop = enableReactRouterNavigation(router)
   await waitForInitialized(router)
 
-  assert(`[${major.label}] exactly one crumb for the first load`, crumbsAddedSince(before) === 1, `got ${crumbsAddedSince(before)}`)
+  assert(`[${major.label}] exactly one crumb for the first load`, crumbCount() === before + 1, `got ${crumbCount() - before}`)
   assert(`[${major.label}] the recorded page is the one page there is`, getCurrentRoute()?.screen === 'Home', JSON.stringify(getCurrentRoute()))
 
   stop()
@@ -194,14 +190,15 @@ async function testFirstLoadWithLoaderAndNoRedirectRecordsThatPage(major: Router
 
 async function testAlreadyInitializedRouterRecordsItsPageOnce(major: RouterMajor) {
   console.log(`\n[${major.label}] Test: a router already initialized when the adapter is enabled -> its current page recorded once`)
+  resetSession()
   const routes = [{ path: '/', handle: { screen: 'Home' } }]
   const router = major.createMemoryRouter(routes, { initialEntries: ['/'] })
   assert(`[${major.label}] a router with no loaders is initialized synchronously by createMemoryRouter`, router.state.initialized === true, String(router.state.initialized))
 
-  const before = getLastBreadcrumbs(1000)
+  const before = crumbCount()
   const stop = enableReactRouterNavigation(router)
 
-  assert(`[${major.label}] its current page is recorded exactly once`, crumbsAddedSince(before) === 1, `got ${crumbsAddedSince(before)}`)
+  assert(`[${major.label}] its current page is recorded exactly once`, crumbCount() === before + 1, `got ${crumbCount() - before}`)
   assert(`[${major.label}] the recorded page is the router's current page`, getCurrentRoute()?.screen === 'Home', JSON.stringify(getCurrentRoute()))
 
   stop()
@@ -209,6 +206,7 @@ async function testAlreadyInitializedRouterRecordsItsPageOnce(major: RouterMajor
 
 async function testEntryBeforeInitializationHasNoRouteOrScreen(major: RouterMajor) {
   console.log(`\n[${major.label}] Test: before the router initializes, there is no recorded route/screen yet`)
+  resetSession()
   const routes = [{ path: '/', loader: async () => ({ ok: true }), handle: { screen: 'Home' } }]
   const router = major.createMemoryRouter(routes, { initialEntries: ['/'] })
   assert(`[${major.label}] the router has not initialized yet`, router.state.initialized === false, String(router.state.initialized))
@@ -227,6 +225,7 @@ async function testEntryBeforeInitializationHasNoRouteOrScreen(major: RouterMajo
 
 async function testLoaderRedirectCollapsesToOneCrumbForTheFinalPage(major: RouterMajor) {
   console.log(`\n[${major.label}] Test: a loader redirect('/login') -> one crumb, for /login, not the page it redirected from`)
+  resetSession()
   const router = major.createMemoryRouter(makeRoutes(major.redirect), { initialEntries: ['/orders/1042/items'] })
   const stop = enableReactRouterNavigation(router)
 
@@ -240,6 +239,7 @@ async function testLoaderRedirectCollapsesToOneCrumbForTheFinalPage(major: Route
 
 async function testRevalidationWithTheSameLocationKeyAddsNoCrumb(major: RouterMajor) {
   console.log(`\n[${major.label}] Test: a revalidation that keeps the same location.key -> no crumb`)
+  resetSession()
   const router = major.createMemoryRouter(makeRoutes(major.redirect), { initialEntries: ['/orders/1042/items'] })
   const stop = enableReactRouterNavigation(router)
   await router.navigate('/revalidating')
@@ -253,6 +253,7 @@ async function testRevalidationWithTheSameLocationKeyAddsNoCrumb(major: RouterMa
 
 async function testAdjustMasksAnEmail(major: RouterMajor) {
   console.log(`\n[${major.label}] Test: adjust masks an email in path`)
+  resetSession()
   const router = major.createMemoryRouter(makeRoutes(major.redirect), { initialEntries: ['/orders/1042/items'] })
   const stop = enableReactRouterNavigation(router, {
     adjust: (labels) => ({ ...labels, path: labels.path?.replace(/[^/]+@[^/]+/g, ':email') }),
@@ -268,6 +269,7 @@ async function testAdjustMasksAnEmail(major: RouterMajor) {
 
 async function testThrowingAdjustWarnsOnceAndKeepsTheRoutersLabels(major: RouterMajor) {
   console.log(`\n[${major.label}] Test: a throwing adjust -> unadjusted labels, warns exactly once however often it throws`)
+  resetSession()
   const router = major.createMemoryRouter(makeRoutes(major.redirect), { initialEntries: ['/orders/1042/items'] })
 
   let stop: (() => void) | undefined
@@ -296,6 +298,7 @@ async function testThrowingAdjustWarnsOnceAndKeepsTheRoutersLabels(major: Router
 
 async function testSecondAdapterCallStopsTheFirst(major: RouterMajor) {
   console.log(`\n[${major.label}] Test: a second enableReactRouterNavigation call stops the first — only the second records`)
+  resetSession()
   const routerA = major.createMemoryRouter(makeRoutes(major.redirect), { initialEntries: ['/orders/1/items'] })
   const stopA = enableReactRouterNavigation(routerA)
 
@@ -316,6 +319,7 @@ async function testSecondAdapterCallStopsTheFirst(major: RouterMajor) {
 
 async function testStopGivesNoMoreCrumbs(major: RouterMajor) {
   console.log(`\n[${major.label}] Test: stop() -> no more crumbs`)
+  resetSession()
   const router = major.createMemoryRouter(makeRoutes(major.redirect), { initialEntries: ['/orders/1/items'] })
   const stop = enableReactRouterNavigation(router)
 
@@ -327,6 +331,7 @@ async function testStopGivesNoMoreCrumbs(major: RouterMajor) {
 
 async function testAdapterDisablesLegacyBcNav(major: RouterMajor) {
   console.log(`\n[${major.label}] Test: with only the adapter on, bc.nav/setScreen are ignored — one crumb per change, not two`)
+  resetSession()
   const router = major.createMemoryRouter(makeRoutes(major.redirect), { initialEntries: ['/orders/1/items'] })
   const stop = enableReactRouterNavigation(router)
 
@@ -344,6 +349,7 @@ async function testAdapterDisablesLegacyBcNav(major: RouterMajor) {
 
 async function testAdapterWinsOverEnableNavigation(major: RouterMajor) {
   console.log(`\n[${major.label}] Test: an adapter wins over enableNavigation() — one warning, and the history wrapper stops recording`)
+  resetSession()
   enableNavigation()
   history.pushState({}, '', '/before-adapter')
   assert(`[${major.label}] enableNavigation recorded before any adapter`, getCurrentRoute()?.path === '/before-adapter', JSON.stringify(getCurrentRoute()))
@@ -367,6 +373,12 @@ async function testAdapterWinsOverEnableNavigation(major: RouterMajor) {
   stop?.()
 }
 
+/**
+ * Every case here calls `resetSession()` first (`/testing`, #64), so each starts with
+ * an empty trail and a full budget — order no longer matters, and a run of more than
+ * `MAX_BREADCRUMBS` cases in this file can no longer pin a `crumbCount()` delta at the
+ * cap the way it used to.
+ */
 async function runPerMajorCases(major: RouterMajor): Promise<void> {
   await testNestedMatchGivesOneCrumbWithTheRightLabels(major)
   await testNestedRouteWalksUpToTheDeepestHandleScreen(major)
@@ -378,17 +390,6 @@ async function runPerMajorCases(major: RouterMajor): Promise<void> {
   await testThrowingAdjustWarnsOnceAndKeepsTheRoutersLabels(major)
   await testSecondAdapterCallStopsTheFirst(major)
   await testStopGivesNoMoreCrumbs(major)
-  await runCrumbCapSafeInitializationCases(major)
-}
-
-/**
- * These, unlike the ones above, measure new crumbs by identity
- * (`crumbsAddedSince`) rather than by raw count, so they stay correct once
- * `MAX_BREADCRUMBS` caps the shared trail. Run after the count-delta tests
- * above, never interleaved with them, so those keep the headroom a plain
- * count delta needs.
- */
-async function runCrumbCapSafeInitializationCases(major: RouterMajor): Promise<void> {
   await testFirstLoadRedirectRecordsOnlyTheFinalPage(major)
   await testFirstLoadWithLoaderAndNoRedirectRecordsThatPage(major)
   await testAlreadyInitializedRouterRecordsItsPageOnce(major)
