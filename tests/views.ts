@@ -40,10 +40,14 @@ initFunctionsLogger({ appId: 'views-test', logLocalDir: LOG_DIR })
 
 const doc = jsdomWindow.document
 
-function mark(name: string, hidden = false): HTMLElement {
+type HideBy = 'display' | 'opacity' | 'visibility'
+
+function mark(name: string, hideBy?: HideBy | true): HTMLElement {
   const el = doc.createElement('div')
   el.setAttribute('data-fsl-view', name)
-  if (hidden) el.style.display = 'none'
+  if (hideBy === true || hideBy === 'display') el.style.display = 'none'
+  if (hideBy === 'opacity') el.style.opacity = '0'
+  if (hideBy === 'visibility') el.style.visibility = 'hidden'
   doc.body.appendChild(el)
   return el
 }
@@ -114,6 +118,22 @@ async function testNoneVisibleGivesNoViewLabel() {
   logger.error(new Error('all hidden'))
   await flush()
   assert('no view label', sent[0]?.labels.view === undefined, JSON.stringify(sent[0]?.labels))
+}
+
+function testOpacityZeroMarkIsExcluded() {
+  console.log('\nTest: an opacity: 0 mark is left out')
+  clearMarks()
+  mark('visible')
+  mark('faded', 'opacity')
+  assert('only the visible mark is read', getActiveView() === 'visible', String(getActiveView()))
+}
+
+function testVisibilityHiddenMarkIsExcluded() {
+  console.log('\nTest: a visibility: hidden mark is left out')
+  clearMarks()
+  mark('visible')
+  mark('invisible', 'visibility')
+  assert('only the visible mark is read', getActiveView() === 'visible', String(getActiveView()))
 }
 
 // --- The getClientRects fallback ---
@@ -203,6 +223,8 @@ async function run() {
   await testVisibleMarksJoinInPageOrder()
   testHiddenMarkIsExcluded()
   await testNoneVisibleGivesNoViewLabel()
+  testOpacityZeroMarkIsExcluded()
+  testVisibilityHiddenMarkIsExcluded()
   testGetClientRectsFallbackDecidesWithoutCheckVisibility()
   await testRepeatSummaryCarriesNoView()
   await testSameErrorDifferentViewsOneSignature()

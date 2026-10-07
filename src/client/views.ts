@@ -1,11 +1,5 @@
 import { setViewReader } from './breadcrumbs'
 
-/**
- * `@dasasian/firebase-structured-logger/client/views` — its own entry point
- * (CLAUDE.md, "Optional client helpers are separate entry points"), so an app
- * that never imports it ships none of this. See README, "Views: what was on
- * screen", and CLAUDE.md, "Views are read when an entry is written".
- */
 const VIEW_ATTR = 'data-fsl-view'
 
 type CheckVisibility = (options?: { opacityProperty?: boolean; visibilityProperty?: boolean }) => boolean
@@ -28,13 +22,7 @@ function readViews(): string | undefined {
   return names.length > 0 ? names.join(' › ') : undefined
 }
 
-/**
- * Turns on view labelling for the session. Registers `readViews` as the
- * reader `getActiveView()` (`breadcrumbs.ts`) calls when an entry is
- * written — no listeners, no observers, nothing kept in sync. A later call
- * replaces the reader rather than adding a second one. Does nothing outside
- * a browser (Node, SSR).
- */
+/** Does nothing outside a browser. Calling it again changes nothing. */
 export function enableViews(): void {
   if (typeof document === 'undefined') return
   setViewReader(readViews)

@@ -54,32 +54,43 @@ for (const key of [
 
 /**
  * jsdom has no `checkVisibility` and no layout — `getClientRects()` always
- * returns empty regardless of display (verified against jsdom 30). `/client/views`
- * needs both to differ by the same rule, so both stubs read one thing: inline
- * `display`/`visibility`/`opacity` on the element or an ancestor. Installed at
- * import time, before `client/views` or anything that calls `checkVisibility`.
+ * returns empty regardless of display (verified against jsdom 30). Both stubs
+ * read inline style on the element or an ancestor, and both match the real
+ * rule: `display: none` always hides; `visibility: hidden`/`opacity: 0` only
+ * hide `checkVisibility()` when the matching option is passed true, and never
+ * affect `getClientRects()` — a real browser still boxes a `visibility:
+ * hidden` or `opacity: 0` element, only `display: none` collapses it. Both
+ * installed at import time, before `client/views` or anything that calls
+ * `checkVisibility`.
  */
-function visibleByInlineStyle(el: Element): boolean {
+function ancestorStyleMatches(el: Element, predicate: (style: CSSStyleDeclaration) => boolean): boolean {
   let node: Element | null = el
   while (node) {
     const style = (node as HTMLElement).style
-    if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false
+    if (style && predicate(style)) return true
     node = node.parentElement
   }
-  return true
+  return false
 }
+
+const isDisplayNone = (el: Element) => ancestorStyleMatches(el, (s) => s.display === 'none')
+const isOpacityZero = (el: Element) => ancestorStyleMatches(el, (s) => s.opacity === '0')
+const isVisibilityHidden = (el: Element) => ancestorStyleMatches(el, (s) => s.visibility === 'hidden')
 
 type CheckVisibilityOptions = { opacityProperty?: boolean; visibilityProperty?: boolean }
 
-win.Element.prototype.checkVisibility = function (this: Element, _options?: CheckVisibilityOptions): boolean {
-  return visibleByInlineStyle(this)
+win.Element.prototype.checkVisibility = function (this: Element, options?: CheckVisibilityOptions): boolean {
+  if (isDisplayNone(this)) return false
+  if (options?.opacityProperty && isOpacityZero(this)) return false
+  if (options?.visibilityProperty && isVisibilityHidden(this)) return false
+  return true
 } as (options?: CheckVisibilityOptions) => boolean
 
 const nonEmptyRects = [{}] as unknown as ReturnType<Element['getClientRects']>
 const emptyRects = [] as unknown as ReturnType<Element['getClientRects']>
 
 win.Element.prototype.getClientRects = function (this: Element): ReturnType<Element['getClientRects']> {
-  return visibleByInlineStyle(this) ? nonEmptyRects : emptyRects
+  return isDisplayNone(this) ? emptyRects : nonEmptyRects
 }
 
 /**

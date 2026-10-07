@@ -106,11 +106,7 @@ export function getCurrentRoute(): NavigationLabels | undefined {
 
 let viewReader: (() => string | undefined) | undefined
 
-/**
- * Set by `enableViews()` (`client/views.ts`), never by the core itself — the
- * setter a helper hands data through, mirroring `setCurrentRoute`. A later call
- * replaces the reader rather than adding a second one.
- */
+/** Set by `enableViews()`, never by the core itself. A later call replaces the reader. */
 export function setViewReader(reader: () => string | undefined): void {
   viewReader = reader
 }

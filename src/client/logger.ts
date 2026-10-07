@@ -380,10 +380,6 @@ export class Logger<
    * that triggered this. So it is only acknowledged (removed from the queue)
    * once `send` reports the entry actually reached `logFunction`; otherwise
    * the next flush, or the next visit, finds it still there and retries it.
-   *
-   * `view: undefined` overrides `send`'s live `getActiveView()` — a summary
-   * is sent later, on its own schedule, and what is visible then is not
-   * where the repeated errors happened.
    */
   private async sendRepeatSummary(summary: SentSummary): Promise<void> {
     const labels: Record<string, string | undefined> = {
