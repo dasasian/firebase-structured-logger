@@ -14,6 +14,7 @@ export interface ReactRouteMatchLike {
 export interface ReactRouterStateLike {
   location: { pathname: string; key: string }
   matches: ReactRouteMatchLike[]
+  initialized: boolean
 }
 
 export interface ReactRouterLike {
@@ -53,8 +54,13 @@ function labelsFromState(state: ReactRouterStateLike): NavigationLabels {
 
 /**
  * Needs a data router (`createBrowserRouter`, `createHashRouter`, `createMemoryRouter`).
- * One crumb per `location.key`, so a redirect records only the page it ends on. `path`
- * keeps the `basename`; `route` never has it. A second call stops the first.
+ * One crumb per `location.key`, so a redirect records only the page it ends on. Before
+ * `router.state.initialized`, matches exist but loaders have not run, so the first
+ * record waits for `initialized` to become true rather than recording at enable time —
+ * a first-load redirect would otherwise record the page nobody saw. A first load with no
+ * redirect keeps the same `location.key` ("default") when it initializes, so that first
+ * record does not go through the `location.key` check either. `path` keeps the
+ * `basename`; `route` never has it. A second call stops the first.
  */
 export function enableReactRouterNavigation(
   router: ReactRouterLike,
@@ -63,11 +69,24 @@ export function enableReactRouterNavigation(
   const adjustLabels = createAdjuster(options.adjust)
   let stopped = false
   let lastKey = router.state.location.key
+  let sawInitialized = router.state.initialized
+
+  function record(state: ReactRouterStateLike): void {
+    if (state.matches.length === 0) return
+    setCurrentRoute(adjustLabels(labelsFromState(state)))
+  }
 
   const unsubscribe = router.subscribe((state) => {
+    if (!sawInitialized) {
+      if (!state.initialized) return
+      sawInitialized = true
+      lastKey = state.location.key
+      record(state)
+      return
+    }
     if (state.location.key === lastKey) return
     lastKey = state.location.key
-    setCurrentRoute(adjustLabels(labelsFromState(state)))
+    record(state)
   })
 
   function stop(): void {
@@ -79,8 +98,8 @@ export function enableReactRouterNavigation(
 
   registerAdapterStop(stop)
 
-  if (router.state.matches.length > 0) {
-    setCurrentRoute(adjustLabels(labelsFromState(router.state)))
+  if (sawInitialized) {
+    record(router.state)
   }
 
   return stop
