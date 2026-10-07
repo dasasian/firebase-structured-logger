@@ -26,9 +26,11 @@ const LOG_DIR = './test-configuretwice-output'
 
 import { initializeApp } from 'firebase-admin/app'
 import { createRouter, createMemoryHistory } from 'vue-router'
+import { createMemoryRouter as createMemoryRouter6 } from 'react-router-6'
 import { configureRateLimiter, allow, resetRateLimiter } from '../src/client/rateLimiter.js'
 import { enableNavigation } from '../src/client/navigation.js'
 import { enableVueRouterNavigation } from '../src/client/navigation/vue-router.js'
+import { enableReactRouterNavigation } from '../src/client/navigation/react-router.js'
 import { getCurrentRoute } from '../src/client/breadcrumbs.js'
 import { initLogger as initClientLogger } from '../src/client/logger.js'
 import { configureTraces as configureClientTraces, startTrace as startClientTrace } from '../src/client/timing.js'
@@ -178,6 +180,24 @@ async function testEnableVueRouterNavigationTwiceStopsTheFirst() {
 }
 
 /**
+ * enableReactRouterNavigation — same "second call stops the first" shape. #62.
+ */
+async function testEnableReactRouterNavigationTwiceStopsTheFirst() {
+  console.log('\nTest: enableReactRouterNavigation — second call stops the first adapter')
+  const routerA = createMemoryRouter6(
+    [{ path: '/', handle: { screen: 'HomeA' } }, { path: '/orders/:id', handle: { screen: 'OrderA' } }],
+    { initialEntries: ['/'] },
+  )
+  enableReactRouterNavigation(routerA)
+
+  const routerB = createMemoryRouter6([{ path: '/', handle: { screen: 'HomeB' } }], { initialEntries: ['/'] })
+  enableReactRouterNavigation(routerB)
+
+  await routerA.navigate('/orders/5')
+  assert('the first adapter no longer records once the second starts', getCurrentRoute()?.screen !== 'OrderA', JSON.stringify(getCurrentRoute()))
+}
+
+/**
  * client/timing's configureTraces — a second call replaces the limits
  * wholesale (README: "configureTraces holds every limit"), same as
  * enableNavigation's options. #51.
@@ -227,6 +247,7 @@ async function run() {
   testConfigureAttachmentsTwice()
   testEnableNavigationTwice()
   await testEnableVueRouterNavigationTwiceStopsTheFirst()
+  await testEnableReactRouterNavigationTwiceStopsTheFirst()
   await testConfigureClientTracesTwiceReplaces()
   await testConfigureServerTracesTwiceReplaces()
   fs.rmSync(LOG_DIR, { recursive: true, force: true })

@@ -22,6 +22,7 @@ import { assert, reportResults } from './testHelpers.js'
 import * as client from '../src/client/index.js'
 import * as functions from '../src/functions/index.js'
 import * as vueRouterNavigation from '../src/client/navigation/vue-router.js'
+import * as reactRouterNavigation from '../src/client/navigation/react-router.js'
 
 const EXPECTED: Record<string, string[]> = {
   client: [
@@ -53,6 +54,7 @@ const EXPECTED: Record<string, string[]> = {
     'configureTraces',
   ],
   'client/navigation/vue-router': ['enableVueRouterNavigation'],
+  'client/navigation/react-router': ['enableReactRouterNavigation'],
 }
 
 function checkSurface(name: string, mod: object) {
@@ -91,6 +93,7 @@ function run() {
   checkSurface('client', client)
   checkSurface('functions', functions)
   checkSurface('client/navigation/vue-router', vueRouterNavigation)
+  checkSurface('client/navigation/react-router', reactRouterNavigation)
   testClientLoggerIsNotConstructible()
   testDoctorCommandSurface()
   reportResults()

@@ -443,10 +443,11 @@ async function testNavigationCodeIsNotInTheCoreBundle() {
   assert('the pushState wrapper is absent', !code.includes('pushState'), 'found pushState in the core bundle')
   assert('the history wrapper marker is absent', !code.includes('fsl.wrappedHistoryMethod'), 'found the wrapper symbol in the core bundle')
   assert('the Vue Router adapter is absent', !code.includes('enableVueRouterNavigation'), 'found enableVueRouterNavigation in the core bundle')
+  assert('the React Router adapter is absent', !code.includes('enableReactRouterNavigation'), 'found enableReactRouterNavigation in the core bundle')
 }
 
-async function testVueRouterAdapterIsNotInTheNavigationOrCoreBundle() {
-  console.log('\nTest: esbuild bundles of src/client/navigation.ts and src/client/index.ts contain none of the Vue Router adapter')
+async function testRouterAdaptersAreNotInTheNavigationOrCoreBundle() {
+  console.log('\nTest: esbuild bundles of src/client/navigation.ts and src/client/index.ts contain none of either router adapter')
   for (const entry of ['./src/client/navigation', './src/client/index']) {
     const result = await build({
       stdin: {
@@ -463,7 +464,8 @@ async function testVueRouterAdapterIsNotInTheNavigationOrCoreBundle() {
     const code = result.outputFiles[0].text
     assert(`${entry}: the Vue Router adapter is absent`, !code.includes('enableVueRouterNavigation'), `found enableVueRouterNavigation in ${entry}`)
     assert(`${entry}: no vue-router import`, !code.includes('vue-router'), `found a vue-router reference in ${entry}`)
-    assert(`${entry}: the adapter's afterEach wiring is absent`, !code.includes('registerAdapterStop'), `found registerAdapterStop in ${entry}`)
+    assert(`${entry}: the React Router adapter is absent`, !code.includes('enableReactRouterNavigation'), `found enableReactRouterNavigation in ${entry}`)
+    assert(`${entry}: the adapters' wiring is absent`, !code.includes('registerAdapterStop'), `found registerAdapterStop in ${entry}`)
   }
 }
 
@@ -475,12 +477,7 @@ async function testVueRouterAdapterIsNotInTheNavigationOrCoreBundle() {
  * output. `tsc` runs here, not conditionally, to rule out a stale `dist/` from an
  * earlier build passing this test for the wrong reason.
  */
-async function testBuiltCommonJsAdapterNeverRequiresTheHistoryWrapper() {
-  console.log('\nTest: the built dist/client/navigation/vue-router.js never pulls in the history wrapper or id rule')
-  execFileSync('npx', ['tsc'], { cwd: process.cwd(), stdio: 'pipe' })
-  const entry = path.join(process.cwd(), 'dist', 'client', 'navigation', 'vue-router.js')
-  assert('the build produced dist/client/navigation/vue-router.js', fs.existsSync(entry), entry)
-
+async function buildMinifiedCjs(entry: string) {
   const result = await build({
     entryPoints: [entry],
     bundle: true,
@@ -490,13 +487,33 @@ async function testBuiltCommonJsAdapterNeverRequiresTheHistoryWrapper() {
     minify: true,
     logLevel: 'silent',
   })
-  const code = result.outputFiles[0].text
-  assert('no pushState', !code.includes('pushState'), 'found pushState')
-  assert('no replaceState', !code.includes('replaceState'), 'found replaceState')
-  assert('no wrapHistoryMethod', !code.includes('wrapHistoryMethod'), 'found wrapHistoryMethod')
-  assert('no fsl.wrappedHistoryMethod marker', !code.includes('fsl.wrappedHistoryMethod'), 'found fsl.wrappedHistoryMethod')
-  assert('no routePattern (the id rule)', !code.includes('routePattern'), 'found routePattern')
-  console.log(`  dist/client/navigation/vue-router.js, bundled + minified: ${code.length} bytes`)
+  return result.outputFiles[0].text
+}
+
+async function testBuiltCommonJsAdaptersNeverRequireTheHistoryWrapper() {
+  console.log('\nTest: the built dist/client/navigation/{vue,react}-router.js never pull in the history wrapper or id rule, and never pull in each other')
+  execFileSync('npx', ['tsc'], { cwd: process.cwd(), stdio: 'pipe' })
+  const vueEntry = path.join(process.cwd(), 'dist', 'client', 'navigation', 'vue-router.js')
+  const reactEntry = path.join(process.cwd(), 'dist', 'client', 'navigation', 'react-router.js')
+  assert('the build produced dist/client/navigation/vue-router.js', fs.existsSync(vueEntry), vueEntry)
+  assert('the build produced dist/client/navigation/react-router.js', fs.existsSync(reactEntry), reactEntry)
+
+  const vueCode = await buildMinifiedCjs(vueEntry)
+  const reactCode = await buildMinifiedCjs(reactEntry)
+
+  for (const [name, code] of [['vue-router.js', vueCode], ['react-router.js', reactCode]] as const) {
+    assert(`${name}: no pushState`, !code.includes('pushState'), `found pushState in ${name}`)
+    assert(`${name}: no replaceState`, !code.includes('replaceState'), `found replaceState in ${name}`)
+    assert(`${name}: no wrapHistoryMethod`, !code.includes('wrapHistoryMethod'), `found wrapHistoryMethod in ${name}`)
+    assert(`${name}: no fsl.wrappedHistoryMethod marker`, !code.includes('fsl.wrappedHistoryMethod'), `found fsl.wrappedHistoryMethod in ${name}`)
+    assert(`${name}: no routePattern (the id rule)`, !code.includes('routePattern'), `found routePattern in ${name}`)
+  }
+
+  assert('vue-router.js: the React Router adapter is absent', !vueCode.includes('enableReactRouterNavigation'), 'found enableReactRouterNavigation in vue-router.js')
+  assert('react-router.js: the Vue Router adapter is absent', !reactCode.includes('enableVueRouterNavigation'), 'found enableVueRouterNavigation in react-router.js')
+
+  console.log(`  dist/client/navigation/vue-router.js, bundled + minified: ${vueCode.length} bytes`)
+  console.log(`  dist/client/navigation/react-router.js, bundled + minified: ${reactCode.length} bytes`)
 }
 
 async function run() {
@@ -521,8 +538,8 @@ async function run() {
   testNavigatedToWithNoExtrasOmitsRouteAndPath()
   testGetCurrentScreenIsUnaffectedByNavigation()
   await testNavigationCodeIsNotInTheCoreBundle()
-  await testVueRouterAdapterIsNotInTheNavigationOrCoreBundle()
-  await testBuiltCommonJsAdapterNeverRequiresTheHistoryWrapper()
+  await testRouterAdaptersAreNotInTheNavigationOrCoreBundle()
+  await testBuiltCommonJsAdaptersNeverRequireTheHistoryWrapper()
   reportResults()
 }
 
