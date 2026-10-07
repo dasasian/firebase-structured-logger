@@ -387,6 +387,7 @@ Setup: Firebase — functions in ./functions, web build in ./dist
 | `duplicate-storage` | warning | two copies of `@google-cloud/storage`; fix with `npm dedupe` |
 | `unsupported-peer` | warning | an installed peer (`firebase-admin`, `firebase-functions`, `firebase`) is outside the supported range |
 | `logs-inside-functions-source` | warning | local log files sit inside the Functions source folder and `firebase.json` → `ignore` does not cover them — the emulator restarts on every entry, and a deploy uploads them |
+| `skill-out-of-date` | warning | a skill in `.claude/skills/` was installed by an older fsl than the one in `node_modules` — run `npx fsl install-skills` |
 | `embedded-maps-without-release` | warning | maps are embedded without a `.release` marker, so an older release can resolve against the wrong map |
 
 **Exit code:** `0` when there are no errors, `1` when there is one. `--strict` also fails on
@@ -1166,14 +1167,75 @@ Narrow it when you need to:
 | `labels.sentLate="true"` | repeat summaries sent on a later visit |
 | `labels.trace="app_boot"` | slow runs of one trace — `labels.slow` says whether the trace or a step was late |
 
-Locally, the emulator's JSONL answers the same questions. Point
-**[firebase-mcp-server](https://github.com/dasasian/firebase-mcp-server)** at either and ask
-Claude instead — `npx fsl install-skills` installs the two skills below.
+### Reading logs from the terminal
 
-| Skill | Description |
-|-------|-------------|
-| `/logs` | Validate logging in a file — error paths, labels, PII, unwrapped handlers, breadcrumbs |
-| `/query-logs` | Query Cloud Logging or local JSONL via [firebase-mcp-server](https://github.com/dasasian/firebase-mcp-server) |
+`fsl logs` asks the same questions without the Cloud Logging console, and the same
+command reads the emulator's local files. Its flags are named after SQL clauses:
+
+```bash
+# One user's story — client and server, in time order
+npx fsl logs --where labels.userId=<uid> --since 2h --select timestamp,severity,labels.screen,message
+
+# Which screen had the most errors in a release
+npx fsl logs --where severity=ERROR --where labels.releaseId=<sha> \
+  --group-by labels.screen --select labels.screen,count --order-by "count desc" --limit 10
+
+# The same, against .fsl-logs/ instead of the cloud
+npx fsl logs --local --where severity=ERROR --group-by labels.screen --select labels.screen,count
+```
+
+| Flag | Meaning |
+|---|---|
+| `--where field=value` | one condition; repeat it for more. Operators: `=`, `!=`, `>=`, `<=`, `~` (contains) |
+| `--select a,b,count` | the fields to print — fewer fields, smaller output |
+| `--group-by field` | count or aggregate per value; `--select` names the aggregate (`count`, `min(f)`, `max(f)`) |
+| `--order-by "field desc"`, `--limit N`, `--distinct field` | as in SQL. `--limit` is 100 by default and 1000 at most |
+| `--since 1h` | `1h`, `2d`, or an ISO time; 1 hour by default |
+| `--repeats <repeatKey>` | one repeating error — its full copies, its summaries, and the true count |
+| `--local` | read `.fsl-logs/*.jsonl` instead of Cloud Logging |
+| `--project <id>` | the Google Cloud project; read from `.firebaserc` when not given |
+
+It prints one JSON entry per line. When `--limit` cut the result, the last line on stderr
+says how many more there were. A field or flag it does not know is an error that names
+the valid ones.
+
+Production entries come through `gcloud logging read`, so the `gcloud` CLI and
+`gcloud auth application-default login` are the only setup. No Google library is added
+to your install.
+
+Two more subcommands:
+
+```bash
+# The labels in your logs: every key, how many entries carry it, and sample values
+npx fsl logs schema
+npx fsl logs schema --add venueId "the venue the order belongs to" --add tableId   # labels your code can write, for the next reader
+npx fsl logs schema --refresh                                                       # re-read the logs; --add entries are kept
+
+# The files an entry uploaded, downloaded to .fsl-logs/attachments/<logId>/
+npx fsl logs attachments <logId>
+```
+
+`schema` reads the last 500 entries and keeps what it found in `.fsl-logs/schema.json`
+for a day, in two parts: `fromLogs`, which `--refresh` rewrites, and `fromCode`, which
+`--add` fills and `--refresh` leaves alone. `userId`, and any key whose name contains
+`email`, `name` or `phone`, is listed with a count and no sample values. The meaning of
+each label fsl writes itself is on `BaseLabels` in `dist/shared/types.d.ts`.
+
+### Skills for your coding agent
+
+`npx fsl install-skills` copies two skills into `.claude/skills/` (or `--global`):
+
+| Skill | What it does |
+|-------|--------------|
+| `/fsl-review [scope]` | Reads `CAPABILITIES.md` from the installed package and the code in the scope — the app, a folder or a file — and proposes how fsl could best serve that code: what to add, what to fix. It proposes and stops; trim the list, then have your agent make the changes, file issues, or both. The whole app as scope runs `fsl doctor` first. |
+| `/fsl-logs` | How to answer a question from the logs with `fsl logs`: the shape of a query, `schema` for the labels, `--repeats` for how often an error really happened, `attachments` for the files. |
+
+`CAPABILITIES.md` ships in the package and says, for each thing fsl can do, what it gives
+you, when it fits, how to add it, and the mistakes to avoid. The skills hold only the
+steps, so a copy installed last year still works; `install-skills` stamps the fsl version
+into each skill's frontmatter and `fsl doctor` warns `skill-out-of-date` when the stamp
+and the installed package disagree. `install-skills` asks before it removes a skill this
+package no longer ships (`/logs`, `/query-logs`); `--force` answers yes.
 
 > A stack trace is self-reported by the browser, and so is `userId` on client entries — the
 > uid comes from the client's own labels, not from a verified token. Backend entries are
@@ -1295,7 +1357,12 @@ npx fsl doctor
 npx fsl doctor --backend=./server --dist=./dist   # no firebase.json to read
 npx fsl doctor --strict --json                   # CI: fail on warnings too, machine-readable
 
-# Install the Claude Code skills into the current project (or --global, --force)
+# Read the logs — production through gcloud, or --local for .fsl-logs/ (see "Reading logs from the terminal")
+npx fsl logs --where labels.userId=<uid> --since 2h
+npx fsl logs schema
+npx fsl logs attachments <logId>
+
+# Install the Claude Code skills into the current project (or --global; --force skips the questions)
 npx fsl install-skills
 ```
 

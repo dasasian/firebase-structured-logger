@@ -197,6 +197,59 @@ A check that cannot run is the error `could-not-check`, never a pass: expo-docto
 exited 0 when it could not read its config, and CI went green on projects nobody
 checked. The finding ids and `--json` fields are public API from 1.0.
 
+## Skills and `fsl logs` are for agents
+
+The skills and the CLI are read by a coding agent far more often than by a person, and
+they are designed for that reader.
+
+**Facts live in the package; skills hold only steps.** `install-skills` copies a skill
+into the app, and the copy does not change when the app updates fsl — POUR5 ran a copy
+that still taught `bc.nav` for months. So what fsl can do is in `CAPABILITIES.md`, which
+ships in the package and always matches the installed version: for each capability, what
+it gives, when it fits, how to add it, and the mistakes to avoid. A skill says how to
+work (read the file, read the code, propose, stop) and names nothing that a release can
+change. The one thing a stale copy can still get wrong is its own steps, so
+`install-skills` stamps `fsl-version` into the frontmatter and doctor reports
+`skill-out-of-date` when it differs from `node_modules` — a fixed-format file, within
+doctor's rule. Labels an app adds are not in `CAPABILITIES.md`: `fsl logs schema` reads
+them from the logs, and an agent reads `AppLabels` and the `labels` arguments in the
+app's own code for what it *could* write.
+
+**`/fsl-review` proposes and stops.** It reads `CAPABILITIES.md` and the code in the
+scope, and says how fsl could best serve that code. No levels, no fixed output shape,
+no `file:line` quota: the user trims the proposal, and what happens next — edits, issues,
+subagents — is an ordinary request to their agent, not the skill's business. It runs
+`fsl doctor` only when the scope is the whole project; doctor checks the setup, and the
+setup has nothing to say about `src/checkout`.
+
+**`fsl logs` is flags named after SQL clauses, never a SQL string.** An agent writes
+`--where labels.screen=Checkout --group-by labels.screen` reliably; a single
+`"SELECT ... WHERE severity='ERROR'"` needs nested quotes, and one extra shell quoting
+layer is the most common way an agent's command fails. Flags are also checkable one at a
+time, so an unknown field is an error that names the valid ones and shows an example —
+agents invent flags, and the error is where they learn. Output is JSONL, `--select` is the
+field mask, `--limit` is 100 by default and 1000 at most, and a cut result says on stderr
+how many more there were and how to narrow. The transport is `gcloud logging read`:
+every path to Cloud Logging needs `gcloud` for ADC anyway, so a Google library would add
+install weight for 1.5 seconds. The transport is one function behind the filter builder,
+so `@google-cloud/logging` can replace it later without touching a flag. The query
+processor and the local-file reader are the ones from `firebase-mcp-server`, copied, not
+shared as a package: two users do not justify a third repo. Group by, distinct and
+aggregates stay because they are what lets an agent answer "which screen?" in ten lines
+instead of five thousand; `dist/tools` never reaches an app's bundle, so its size is
+not a cost.
+
+**`fsl logs schema` keeps two kinds of knowledge apart.** `fromLogs` is what the logs
+show — keys, counts, up to three sample values — and `--refresh` rewrites it. `fromCode`
+is what an agent found by reading the app, added with `--add name [meaning]`, and
+`--refresh` leaves it alone. Samples are skipped for `userId` and for any key whose name
+contains `email`, `name` or `phone`, so the file can be pasted into an issue. The cache
+is `.fsl-logs/schema.json`, per machine, already ignored by git.
+
+**`install-skills` asks before it removes a skill**, and `--force` answers yes. It
+removes only skills this package used to ship (`logs`, `query-logs`), never anything an
+app wrote itself.
+
 ## Tests run from a fresh clone
 
 Everything in `npm test` and `npm run smoke:install` must run for someone who has just
