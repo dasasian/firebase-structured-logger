@@ -449,7 +449,7 @@ npx fsl doctor --strict --json
 ### Mistakes
 - Reading a missing finding as a pass for something doctor does not check (release id passed to `initLogger`, a bucket name passed to a handler) → doctor does not read code → check those in the code.
 - Ignoring `could-not-check` → it is an error, never a pass → fix what it names, often `npm install`.
-- A `skill-out-of-date` finding → the installed skill copy was written by a different fsl version than the one in `node_modules` → run `npx fsl install-skills`.
+- A `skill-out-of-date` finding → the installed skill copy was written by a different fsl version than the fsl running doctor → run `npx fsl install-skills`.
 - Reading the logs to explain missing entries before running doctor → most causes are setup problems doctor reads off disk → run doctor first.
 
 ## fsl logs

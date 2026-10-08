@@ -382,8 +382,6 @@ function checkEmbeddedMapsWithoutRelease(backendDir: string | null, findings: Do
   })
 }
 
-const OWN_PACKAGE_NAME = '@dasasian/firebase-structured-logger'
-
 function readSkillVersion(skillFile: string): string | undefined {
   const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(fs.readFileSync(skillFile, 'utf-8'))
   return frontmatter ? /^fsl-version:[ \t]*(\S+)[ \t]*$/m.exec(frontmatter[1])?.[1] : undefined
@@ -402,25 +400,13 @@ function stampedSkills(projectRoot: string): { name: string; version: string }[]
   return stamped
 }
 
-function checkSkillsOutOfDate(projectRoot: string, findings: DoctorFinding[]): void {
-  const stamped = stampedSkills(projectRoot)
-  if (stamped.length === 0) return
-
-  const installed = readPackageJson(path.join(projectRoot, 'node_modules', ...OWN_PACKAGE_NAME.split('/')))
-  if (!installed.ok || typeof installed.pkg.version !== 'string') {
-    findings.push(couldNotCheck(
-      `${stamped.length} installed skill(s) carry an fsl-version, but ${OWN_PACKAGE_NAME} is not readable in node_modules, so they cannot be compared.`,
-      'Run npm install.',
-    ))
-    return
-  }
-
-  for (const skill of stamped) {
-    if (skill.version === installed.pkg.version) continue
+function checkSkillsOutOfDate(projectRoot: string, runningVersion: string, findings: DoctorFinding[]): void {
+  for (const skill of stampedSkills(projectRoot)) {
+    if (skill.version === runningVersion) continue
     findings.push({
       id: 'skill-out-of-date',
       level: 'warning',
-      message: `.claude/skills/${skill.name} was installed by fsl ${skill.version}; node_modules has ${installed.pkg.version}.`,
+      message: `.claude/skills/${skill.name} was installed by fsl ${skill.version}; this is fsl ${runningVersion}.`,
       fix: 'npx fsl install-skills',
     })
   }
@@ -478,7 +464,7 @@ export function runDoctor(options: DoctorOptions): DoctorReport {
     checkLogsInsideFunctionsSource(options.projectRoot, allOf(firebaseJson.config.functions), findings)
   }
   checkEmbeddedMapsWithoutRelease(backendDir, findings)
-  checkSkillsOutOfDate(options.projectRoot, findings)
+  checkSkillsOutOfDate(options.projectRoot, ownPkg.version as string, findings)
 
   const setup = describeSetup(options.projectRoot, { kind, backendDir, distDirs }, searchDirs, callable)
 

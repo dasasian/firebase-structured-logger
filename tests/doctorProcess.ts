@@ -157,10 +157,9 @@ function testJsonCarriesLogsInsideFunctionsSource() {
 function testJsonCarriesSkillOutOfDate() {
   console.log('\nTest: --json carries skill-out-of-date for a stale skill')
   const { root } = cleanFirebaseProject()
-  writePackage(root, '@dasasian/firebase-structured-logger', '1.4.0')
   const skillDir = path.join(root, '.claude', 'skills', 'fsl-review')
   fs.mkdirSync(skillDir, { recursive: true })
-  fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\nname: fsl-review\ndescription: x\nfsl-version: 1.3.0\n---\n')
+  fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\nname: fsl-review\ndescription: x\nfsl-version: 0.0.1\n---\n')
   const out = runCli(root, ['--json'])
   const findings = (JSON.parse(out.stdout.trim()) as { findings: Array<Record<string, unknown>> }).findings
   const finding = findings.find((f) => f.id === 'skill-out-of-date')

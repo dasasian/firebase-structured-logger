@@ -308,6 +308,8 @@ function testEmbeddedMapsWithoutReleaseQuiet() {
 
 // --- skill-out-of-date ---
 
+const RUNNING_VERSION = (JSON.parse(fs.readFileSync('package.json', 'utf-8')) as { version: string }).version
+
 function writeSkill(root: string, name: string, content: string): void {
   const dir = path.join(root, '.claude', 'skills', name)
   fs.mkdirSync(dir, { recursive: true })
@@ -319,56 +321,44 @@ function stamped(version: string): string {
 }
 
 function testSkillOutOfDateFires() {
-  console.log('\nTest: skill-out-of-date fires when a skill is stamped 1.3.0 and node_modules has 1.4.0')
+  console.log('\nTest: skill-out-of-date fires when a skill is stamped with a version other than the running fsl')
   const { root } = firebaseProject()
-  writePackage(root, '@dasasian/firebase-structured-logger', '1.4.0')
-  writeSkill(root, 'fsl-review', stamped('1.3.0'))
+  writeSkill(root, 'fsl-review', stamped('0.0.1'))
   const report = runDoctor({ projectRoot: root })
   const finding = report.findings.find((f) => f.id === 'skill-out-of-date')
   assert('skill-out-of-date fires', finding !== undefined)
   assert('at warning level', finding?.level === 'warning')
-  assert('names both versions', !!finding && finding.message.includes('1.3.0') && finding.message.includes('1.4.0'))
+  assert('names both versions', !!finding && finding.message.includes('0.0.1') && finding.message.includes(RUNNING_VERSION))
   assert('fix is install-skills', finding?.fix === 'npx fsl install-skills')
   cleanup([root])
 }
 
 function testSkillOutOfDateQuietWhenEqual() {
-  console.log('\nTest: skill-out-of-date stays quiet when the versions are equal')
+  console.log('\nTest: skill-out-of-date stays quiet when the stamp equals the running fsl')
   const { root } = firebaseProject()
-  writePackage(root, '@dasasian/firebase-structured-logger', '1.4.0')
-  writeSkill(root, 'fsl-review', stamped('1.4.0'))
+  writeSkill(root, 'fsl-review', stamped(RUNNING_VERSION))
   const report = runDoctor({ projectRoot: root })
-  assert('no finding of any kind about skills', !findingIds(report).includes('skill-out-of-date') && !findingIds(report).includes('could-not-check'))
+  assert('no skill-out-of-date', !findingIds(report).includes('skill-out-of-date'))
   cleanup([root])
 }
 
 function testSkillWithoutStampIsNotOurs() {
   console.log('\nTest: a skill with no frontmatter, or no fsl-version, is skipped')
   const { root } = firebaseProject()
-  writePackage(root, '@dasasian/firebase-structured-logger', '1.4.0')
   writeSkill(root, 'plain', '# no frontmatter\n')
   writeSkill(root, 'unstamped', '---\nname: mine\ndescription: mine\n---\n')
   const report = runDoctor({ projectRoot: root })
-  assert('no finding', !findingIds(report).includes('skill-out-of-date') && !findingIds(report).includes('could-not-check'))
+  assert('no finding', findingIds(report).length === 0, findingIds(report).join(','))
   cleanup([root])
 }
 
-function testStampedSkillWithoutInstalledPackageIsCouldNotCheck() {
-  console.log('\nTest: a stamped skill and no package in node_modules is could-not-check, not a pass')
+function testSkillCheckNeedsNothingInNodeModules() {
+  console.log('\nTest: the check never needs fsl in the project\'s node_modules (web/ and functions/ layouts)')
   const { root } = firebaseProject()
-  writeSkill(root, 'fsl-review', stamped('1.3.0'))
+  writeSkill(root, 'fsl-review', stamped(RUNNING_VERSION))
   const report = runDoctor({ projectRoot: root })
-  const finding = report.findings.find((f) => f.id === 'could-not-check')
-  assert('could-not-check fires as an error', finding?.level === 'error')
-  assert('says to run npm install', finding?.fix === 'Run npm install.')
-  cleanup([root])
-}
-
-function testNoSkillsAndNoPackageIsQuiet() {
-  console.log('\nTest: with no stamped skills the package need not be installed')
-  const { root } = firebaseProject()
-  const report = runDoctor({ projectRoot: root })
-  assert('no skill finding, no could-not-check', findingIds(report).length === 0, findingIds(report).join(','))
+  assert('no could-not-check, no findings', findingIds(report).length === 0, findingIds(report).join(','))
+  assert('the project has no fsl in node_modules', !fs.existsSync(path.join(root, 'node_modules', '@dasasian')))
   cleanup([root])
 }
 
@@ -429,8 +419,7 @@ function run() {
   testSkillOutOfDateFires()
   testSkillOutOfDateQuietWhenEqual()
   testSkillWithoutStampIsNotOurs()
-  testStampedSkillWithoutInstalledPackageIsCouldNotCheck()
-  testNoSkillsAndNoPackageIsQuiet()
+  testSkillCheckNeedsNothingInNodeModules()
   testFirebaseSetupSummary()
   testCloudRunSetupSummary()
   reportResults()

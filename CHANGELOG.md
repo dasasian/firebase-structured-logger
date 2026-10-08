@@ -15,7 +15,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`/fsl-logs` skill** for coding agents, installed by `fsl install-skills`.
 - **`/fsl-review [scope]` skill** and **`CAPABILITIES.md`**. The skill reads `CAPABILITIES.md` from the installed package and the code in the scope (the app, a folder or a file), and proposes how fsl could best serve that code. It proposes and stops. `CAPABILITIES.md` ships in the package: for each capability, what it gives, the code signals it fits, how to add it, and the mistakes to avoid.
 - **`fsl install-skills` writes `fsl-version`** (the package version) into each skill's frontmatter, and asks before removing an installed `logs` or `query-logs`; `--force` answers yes.
-- **`fsl doctor` finding `skill-out-of-date`** (warning): a skill's `fsl-version` differs from the fsl in `node_modules`. Skills without `fsl-version` are skipped; stamped skills with fsl missing from `node_modules` report `could-not-check`.
+- **`fsl doctor` finding `skill-out-of-date`** (warning): a skill's `fsl-version` differs from the fsl running doctor. Skills without `fsl-version` are skipped.
 - **`BaseLabels`** declares every label fsl writes, each with a one-line comment: `repeatKey`, `repeatOf`, `repeatCount`, `firstSeen`, `lastSeen`, `sentLate`, `truncated`, `hasAttachments`, `logId`, `functionName`, `trace`, `run`, `slow`, `step`, `feedback`.
 
 ### Removed

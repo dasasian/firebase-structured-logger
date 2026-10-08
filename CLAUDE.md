@@ -228,8 +228,8 @@ it gives, when it fits, how to add it, and the mistakes to avoid. A skill says h
 work (read the file, read the code, propose, stop) and names nothing that a release can
 change. The one thing a stale copy can still get wrong is its own steps, so
 `install-skills` stamps `fsl-version` into the frontmatter and doctor reports
-`skill-out-of-date` when it differs from `node_modules` — a fixed-format file, within
-doctor's rule. Labels an app adds are not in `CAPABILITIES.md`: `fsl logs schema` reads
+`skill-out-of-date` when it differs from the fsl running doctor — the same package that
+stamped it, read from its own `package.json`, within doctor's rule. Labels an app adds are not in `CAPABILITIES.md`: `fsl logs schema` reads
 them from the logs, and an agent reads `AppLabels` and the `labels` arguments in the
 app's own code for what it *could* write.
 

@@ -387,7 +387,7 @@ Setup: Firebase — functions in ./functions, web build in ./dist
 | `duplicate-storage` | warning | two copies of `@google-cloud/storage`; fix with `npm dedupe` |
 | `unsupported-peer` | warning | an installed peer (`firebase-admin`, `firebase-functions`, `firebase`) is outside the supported range |
 | `logs-inside-functions-source` | warning | local log files sit inside the Functions source folder and `firebase.json` → `ignore` does not cover them — the emulator restarts on every entry, and a deploy uploads them |
-| `skill-out-of-date` | warning | a skill in `.claude/skills/` carries an `fsl-version` that differs from the fsl in `node_modules` — run `npx fsl install-skills`. A skill with no `fsl-version` is not ours and is skipped; stamped skills with fsl missing from `node_modules` are `could-not-check` |
+| `skill-out-of-date` | warning | a skill in `.claude/skills/` carries an `fsl-version` that differs from the fsl running doctor — run `npx fsl install-skills`. A skill with no `fsl-version` is not ours and is skipped |
 | `embedded-maps-without-release` | warning | maps are embedded without a `.release` marker, so an older release can resolve against the wrong map |
 
 **Exit code:** `0` when there are no errors, `1` when there is one. `--strict` also fails on
