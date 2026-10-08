@@ -490,7 +490,8 @@ beforeEach(() => {
 test('team settings is its own screen', async () => {
   const router = createMemoryRouter(routes, { initialEntries: ['/settings/team'] })
   enableReactRouterNavigation(router)
-  await logger.info('probe')
+  logger.info('probe')
+  await capture.settled()
 
   const entry = capture.entries.findLast((e) => e.message === 'probe')
   expect(entry?.labels.screen).toBe('SettingsTeam')
@@ -498,10 +499,12 @@ test('team settings is its own screen', async () => {
 })
 ```
 
-- **`captureEntries()`** returns `{ logFunction, entries, clear() }`. Each entry is
+- **`captureEntries()`** returns `{ logFunction, entries, clear(), settled() }`. Each entry is
   exactly what your log function would receive — after label cleaning, size limits and
   the rate limiter — so the test checks what ships.
-- **`await` the log call.** Its promise ends after the entry reaches `logFunction`.
+- **`await capture.settled()` before you read `entries`.** A log call returns nothing, and an
+  entry with attachments reaches `logFunction` only after its files are read. `settled()`
+  waits for every send already started, repeat summaries and trace warnings included.
 - **Find your entry by its message,** not by position. The logger sends entries of its
   own (repeat summaries, trace warnings), and an entry the rate limiter dropped is simply
   missing — `findLast` gives `undefined` and the test fails, never quietly reads the

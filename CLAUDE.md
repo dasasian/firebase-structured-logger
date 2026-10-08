@@ -338,6 +338,12 @@ state; a getter would let an app's test pass while the sent entry is wrong.
 logger's session state, the other the test's list. No core module imports
 `/testing`, and nothing in it may need a DOM.
 
+Log calls return `void`: a promise would be a floating promise at every log call in an
+app. So a test waits with `capture.settled()`. The core tells `/testing` about each send
+through `setSendWatcher` in `logger.ts`, a named setter that no entry point exports. With
+no watcher set, the call does nothing, and the list of running sends lives in `/testing`,
+so production keeps none.
+
 ## Optional client helpers are separate entry points
 
 Navigation, and the helpers after it (#51 timing, #58 views, #52 marked actions, #53 network), each

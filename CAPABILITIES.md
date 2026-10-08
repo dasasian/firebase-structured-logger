@@ -324,7 +324,7 @@ For a flow spanning functions: `startTrace(name)`, then `.step(...)`, then `.end
 ## Testing what an app logs
 
 ### Gives
-- `captureEntries()` returns `{ logFunction, entries, clear() }`; `entries` are what the logger sends, after cleaning, size limits and the rate limiter.
+- `captureEntries()` returns `{ logFunction, entries, clear(), settled() }`; `entries` are what the logger sends, after cleaning, size limits and the rate limiter.
 - `resetSession()` empties the trail, current page, rate-limit budget, duplicate counts and pending summaries. Navigation and views stay enabled.
 
 ### Fits when
@@ -344,14 +344,16 @@ beforeEach(() => {
   capture.clear()
 })
 
-test('logs the probe', () => {
+test('logs the probe', async () => {
   logger.info('probe')
+  await capture.settled()
   const entry = capture.entries.findLast((e) => e.message === 'probe')
   expect(entry?.labels.appId).toBe('test')
 })
 ```
 
 ### Mistakes
+- `capture.entries` read right after a log call, with no `await capture.settled()` → an entry with attachments reaches `logFunction` only after its files are read → `await capture.settled()` first.
 - `capture.entries[0]` or `entries.at(-1)` → the logger also sends its own entries, and a rate-limited entry is missing → find by message with `findLast`.
 - No `resetSession()` in `beforeEach` → the 50-crumb trail and 50-entry budget carry over between tests → call it before each test.
 - A test of `data-fsl-view` in a node environment → views need a DOM → use jsdom.
