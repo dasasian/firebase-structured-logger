@@ -117,6 +117,28 @@ setupGlobalErrorHandler() // capture uncaught errors + unhandled rejections
 `logFunction` is just `(payload) => Promise<unknown>`. `httpsCallable()` happens to fit it —
 anything else that fits will work too.
 
+**Errors your framework catches.** An error boundary catches a render error before `window`
+sees it, so `setupGlobalErrorHandler()` alone never logs it. React Router's default error page,
+every `errorElement` and every `ErrorBoundary` are boundaries, and so is Vue's error handling.
+Hand the error to fsl where the framework catches it — one line:
+
+```ts
+import { handleReactError, handleVueError } from '@dasasian/firebase-structured-logger/client'
+
+// React 19
+createRoot(document.getElementById('root')!, { onCaughtError: handleReactError }).render(<App />)
+
+// Vue 3
+app.config.errorHandler = handleVueError
+```
+
+Each caught error is logged once as an `ERROR` (`errorType` `ReactError` or `VueError`) with
+the component stack, and with the page labels when navigation is on. Pass only
+`onCaughtError`: an error no boundary catches already reaches `window`. Your own
+`errorElement` or boundary shows the UI and does not log, or the error is logged twice.
+Errors from a router's loaders and actions are the router adapter's job — see
+[Navigation, automatically](#navigation-automatically).
+
 **2. Add the log function** — in `functions/src/index.ts`:
 
 ```ts
@@ -763,8 +785,17 @@ enableVueRouterNavigation(router, {
 })
 ```
 
-Each adapter returns a function that stops it. Calling an adapter again stops the first
-one. If you call both an adapter and `enableNavigation()`, the adapter wins and the
+**Route errors.** With a data router, a loader or action that throws, or returns an error
+response, puts the error in the router's state, where neither `window` nor `onCaughtError`
+sees it. The React Router adapter logs each one once, after it records the page, so the
+entry carries that page's labels: an `Error` or a 5xx response as an `ERROR`, a 4xx response
+— a 404 included — as a `WARNING`, both with `errorType` `RouteError`. A `redirect()` is a
+page change, never an error. The Vue Router adapter logs what `router.onError` reports — a
+guard that throws, a lazy route that fails to load — as an `ERROR`. `<BrowserRouter>` and
+`enableNavigation()` have no loaders, so there is nothing for them to log.
+
+Each adapter returns a function that stops it, route errors included. Calling an adapter
+again stops the first one. If you call both an adapter and `enableNavigation()`, the adapter wins and the
 console says so once. Neither router is a dependency of this package: the adapter only
 reads the router you pass in.
 
@@ -1285,7 +1316,7 @@ const capture = captureEntries()     // { logFunction, entries, clear(), settled
 resetSession()                       // a fresh session: trail, page, budget, repeat counts
 ```
 
-Also exported: `initLogger`, `getClientLogger`, `setupGlobalErrorHandler`, `handleReactError`,
+Also exported: `initLogger`, `getClientLogger`, `setupGlobalErrorHandler`, `handleReactError`, `handleVueError`,
 `sendFeedback`, `sendTestLog`, `addBreadcrumb`, `bc`.
 
 **Renamed in 1.0.** The old names still work in 1.x, each with a one-time console warning,

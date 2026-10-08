@@ -319,6 +319,28 @@ anything before the first real match (`START_LOCATION`), and uses `to.path`, nev
 `createRouter` with `createMemoryHistory` — with both React Router majors installed
 through npm aliases.
 
+## Errors a framework catches are logged where it catches them
+
+`setupGlobalErrorHandler()` hears only what reaches `window`, and a framework that catches
+an error stops it there. So fsl takes each error at the hook of whoever caught it, and every
+error has exactly one way in:
+
+| Caught by | Hook | Wired by |
+|---|---|---|
+| nothing | `window` `error` / `unhandledrejection` | `setupGlobalErrorHandler()` |
+| a React boundary — React Router's default page, an `errorElement`, an `ErrorBoundary` | `createRoot(el, { onCaughtError })` | the app, with `handleReactError` |
+| Vue | `app.config.errorHandler` | the app, with `handleVueError` |
+| a data router's loader or action | `router.state.errors` | the React Router adapter, always on |
+| Vue Router — a guard that throws, a lazy route that fails | `router.onError` | the Vue Router adapter, always on |
+
+The sets do not overlap — tested with real routers: a render error reaches only
+`onCaughtError`, a loader error only `router.state.errors` — so nothing is logged twice, and
+the app's own boundary shows UI and never logs. `onCaughtError` cannot move into the
+adapter: the root exists before the router. Route labels need no extra work, because
+navigation already puts them on every entry. A `redirect()` is a page change, never an error;
+an adapter called again, or stopped, takes its error listener with it, so an app that makes
+a new router at each sign-in does not log twice.
+
 ## Views are read when an entry is written
 
 `/client/views` keeps no state about what is open: no listeners, no observers, no
