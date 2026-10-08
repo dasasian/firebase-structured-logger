@@ -31,17 +31,8 @@ for (const [key, value] of Object.entries({
   Object.defineProperty(globalThis, key, { value, configurable: true, writable: true })
 }
 
-interface RootOptionsLike {
-  onCaughtError?: (error: unknown, errorInfo: { componentStack?: string; errorBoundary?: unknown }) => void
-}
-
-interface RootLike {
-  render: (element: unknown) => void
-  unmount: () => void
-}
-
 interface ReactLike {
-  createElement: (type: unknown, props?: unknown) => unknown
+  createElement: (type: unknown, props?: unknown) => import('react').ReactNode
   act: (callback: () => Promise<void> | void) => Promise<void>
 }
 
@@ -61,7 +52,7 @@ const REACT = 'react'
 const REACT_DOM_CLIENT = 'react-dom/client'
 
 let React: ReactLike
-let createRoot: (container: unknown, options?: RootOptionsLike) => RootLike
+let createRoot: typeof import('react-dom/client').createRoot
 let enableReactRouterNavigation: typeof import('../src/client/navigation/react-router.js').enableReactRouterNavigation
 let handleReactError: typeof import('../src/client/errorHandler.js').handleReactError
 let capture: import('../src/testing.js').Capture
@@ -116,9 +107,8 @@ async function testRenderErrorReachesOnlyOnCaughtError(label: string, major: Rou
     { initialEntries: ['/'] },
   )
   const stop = enableReactRouterNavigation(router)
-  const options: RootOptionsLike = { onCaughtError: handleReactError }
   const container = dom.window.document.createElement('div')
-  const root = createRoot(container, options)
+  const root = createRoot(container, { onCaughtError: handleReactError })
   await silencingConsoleError(async () => {
     await React.act(async () => root.render(React.createElement(major.RouterProvider, { router })))
     await React.act(async () => router.navigate('/crash'))
