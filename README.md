@@ -748,8 +748,8 @@ enableReactRouterNavigation(router)
 | `path` | `to.path` — never the query or hash | `location.pathname` |
 
 No name anywhere in the match → `screen` is the route. Vue names that are symbols are
-skipped. One page change is one breadcrumb: a React Router redirect records only the page
-it ends on, and a Vue navigation that was blocked or cancelled records nothing.
+skipped. One page change is one breadcrumb: a React Router loader `redirect()` records only the
+page it ends on (a `<Navigate>` element records both the page that renders it and the page it ends on), and a Vue navigation that was blocked or cancelled records nothing.
 
 One option, `adjust`, takes the router's labels and returns the ones to log — for
 cleaning personal data out of a path:

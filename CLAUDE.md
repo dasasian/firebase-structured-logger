@@ -308,8 +308,9 @@ The adapters type the router structurally and have no peer dependency: they read
 `afterEach` / `currentRoute` (Vue Router 4). The rules that keep one change one crumb:
 React records the first page only once `router.state.initialized` is true — before
 that, matches exist but loaders have not run, so a first-load redirect would record a
-page nobody saw — and after that only when `location.key` changes, so a redirect
-collapses to its final page; `route` is joined from the route configs, so it never holds the `basename`, while
+page nobody saw — and after that only when `location.key` changes, so a loader
+`redirect()` collapses to its final page, while a `<Navigate>` element records both the page
+that renders it and the page it ends on; `route` is joined from the route configs, so it never holds the `basename`, while
 `path` (`location.pathname`) does; Vue skips a navigation with a `failure` and
 anything before the first real match (`START_LOCATION`), and uses `to.path`, never
 `fullPath`. Tests drive real routers in memory — `createMemoryRouter`, and

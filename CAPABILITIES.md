@@ -105,7 +105,7 @@ enableNavigation()
 ### Mistakes
 - `bc.nav(` while an adapter or `enableNavigation()` is on → records the same page twice, so fsl ignores it and warns → delete the call.
 - `setScreen(` or `logger.setScreen(` while navigation is on → same, ignored with a warning → delete the call and name the screen with `handle: { screen }` (React Router) or the route `name` (Vue Router).
-- A `<Navigate>` redirect with a hand-written `bc.action(` or `navigatedTo(` beside it → the adapter records a redirect as one breadcrumb for the page it ends on → delete the hand-written call.
+- A `<Navigate>` redirect with a hand-written `bc.action(` or `navigatedTo(` beside it → the adapter already records the page that holds the `<Navigate>` and the page it ends on, so the hand-written call adds a third breadcrumb → delete the call.
 - Per-route hand-written `navigatedTo(` calls in an app with a router → the adapter already sees every route change → use the adapter and remove them.
 - `enableNavigation()` and an adapter both called → the adapter wins and a warning is printed → keep only the adapter.
 - `enableReactRouterNavigation(` called with `<BrowserRouter>` (no data router) → the adapter reads `router.subscribe` and `router.state`, which only a data router has → use `enableNavigation()`, or move to `createBrowserRouter` and then use the adapter.

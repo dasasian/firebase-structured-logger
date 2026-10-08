@@ -55,7 +55,7 @@ function labelsFromState(state: ReactRouterStateLike): NavigationLabels {
 /**
  * Needs a data router (`createBrowserRouter`, `createHashRouter`, `createMemoryRouter`).
  * One crumb per page: the first once the router is initialized, then one per
- * `location.key`, so a redirect — on first load too — records only the page it ends on.
+ * `location.key`, so a loader `redirect()` — on first load too — records only the page it ends on, while a `<Navigate>` element records both pages.
  * `path` keeps the `basename`; `route` never has it. A second call stops the first.
  */
 export function enableReactRouterNavigation(
