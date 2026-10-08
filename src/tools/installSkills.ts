@@ -78,6 +78,12 @@ async function copySkill(srcDir: string, target: SkillsTarget, skillName: string
   let copied = 0
   for (const file of fs.readdirSync(srcDir)) {
     const dest = path.join(destDir, file)
+    const source = fs.readFileSync(path.join(srcDir, file))
+    const content = file === SKILL_FILE
+      ? Buffer.from(source.toString('utf-8').replace(VERSION_PLACEHOLDER, `fsl-version: ${version}`))
+      : source
+
+    if (fs.existsSync(dest) && fs.readFileSync(dest).equals(content)) continue
 
     if (fs.existsSync(dest) && !force) {
       if (!ask) {
@@ -92,11 +98,7 @@ async function copySkill(srcDir: string, target: SkillsTarget, skillName: string
     }
 
     fs.mkdirSync(destDir, { recursive: true })
-    if (file === SKILL_FILE) {
-      fs.writeFileSync(dest, fs.readFileSync(path.join(srcDir, file), 'utf-8').replace(VERSION_PLACEHOLDER, `fsl-version: ${version}`))
-    } else {
-      fs.copyFileSync(path.join(srcDir, file), dest)
-    }
+    fs.writeFileSync(dest, content)
     console.log(`  ✓ ${target.label}/${skillName}/${file}`)
     copied++
   }

@@ -162,6 +162,15 @@ async function testNoTerminalWithNothingToAskExitsZero() {
   assert('nothing on stderr', run.stderr.length === 0, run.stderr.join('|'))
 }
 
+async function testRunningAgainChangesNothingAndExitsZero() {
+  console.log('\nTest: a second run over identical files asks nothing and exits 0')
+  const project = tempProject()
+  await installWithNoTerminal(project, {})
+  const again = await installWithNoTerminal(project, {})
+  assert('exits 0', again.exitCode === 0, String(again.exitCode))
+  assert('nothing on stderr', again.stderr.length === 0, again.stderr.join('|'))
+}
+
 async function testNoTerminalWithForceDoesEverything() {
   console.log('\nTest: with no terminal and --force, it removes, overwrites and exits 0')
   const project = tempProject()
@@ -177,6 +186,7 @@ async function testNoTerminalWithForceDoesEverything() {
 async function main() {
   await testNoTerminalNeverAnswersForYou()
   await testNoTerminalWithNothingToAskExitsZero()
+  await testRunningAgainChangesNothingAndExitsZero()
   await testNoTerminalWithForceDoesEverything()
   await testStampsTheVersion()
   await testEveryShippedSkillCanBeStamped()
