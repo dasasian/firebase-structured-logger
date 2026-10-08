@@ -342,7 +342,10 @@ Log calls return `void`: a promise would be a floating promise at every log call
 app. So a test waits with `capture.settled()`. The core tells `/testing` about each send
 through `setSendWatcher` in `logger.ts`, a named setter that no entry point exports. With
 no watcher set, the call does nothing, and the list of running sends lives in `/testing`,
-so production keeps none.
+so production keeps none. The logger has one watcher, so a second `captureEntries()` replaces
+the first's — and the running sends are one list in `/testing`, not one per capture, or the
+first capture's `settled()` would return at once while its entries were still on the way.
+`tests/configureTwice.ts` pins that.
 
 ## Optional client helpers are separate entry points
 

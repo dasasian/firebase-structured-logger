@@ -281,6 +281,34 @@ async function testCaptureEntriesTwiceGivesIndependentCaptures() {
   assert('clearing a does not touch b', b.entries.length === 1, JSON.stringify(b.entries))
 }
 
+/**
+ * captureEntries() also installs the logger's one send watcher, so a second call
+ * replaces the first's. Both captures' `settled()` must still wait for sends the
+ * logger makes afterwards, or the first capture's test reads `entries` too early.
+ */
+async function testCaptureEntriesTwiceBothSettleWaitForSends() {
+  console.log('\nTest: captureEntries() twice — either capture\'s settled() waits for a send started afterwards')
+  const first = captureEntries()
+  const second = captureEntries()
+  const logger = initClientLogger({
+    appId: 'cfg-test',
+    releaseId: 'r1',
+    logFunction: async (data) => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      return first.logFunction(data)
+    },
+  })
+
+  logger.info('late-entry')
+  await first.settled()
+  assert('the first capture\'s settled() waited for the send', first.entries.length === 1, JSON.stringify(first.entries))
+
+  first.clear()
+  logger.info('late-entry-2')
+  await second.settled()
+  assert('the second capture\'s settled() waited for the send', first.entries.length === 1, JSON.stringify(first.entries))
+}
+
 async function run() {
   testConfigureRateLimiterTwice()
   testConfigureSourceMapBucketTwice()
@@ -292,6 +320,7 @@ async function run() {
   await testConfigureServerTracesTwiceReplaces()
   testEnableViewsTwiceNoSecondReader()
   await testCaptureEntriesTwiceGivesIndependentCaptures()
+  await testCaptureEntriesTwiceBothSettleWaitForSends()
   fs.rmSync(LOG_DIR, { recursive: true, force: true })
   reportResults()
 }

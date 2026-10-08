@@ -18,7 +18,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { build } from 'esbuild'
 import { assert, reportResults } from './testHelpers.js'
-import { captureEntries, resetSession } from '../src/testing.js'
+import { captureEntries, resetSession, type Capture } from '../src/testing.js'
 import { initLogger } from '../src/client/logger.js'
 import { enableReactRouterNavigation } from '../src/client/navigation/react-router.js'
 import { getCurrentRoute, getLastBreadcrumbs } from '../src/client/breadcrumbs.js'
@@ -47,7 +47,8 @@ async function testRoutingProbeGivesScreenRouteAndOneNavCrumb() {
   const router = createMemoryRouter(routes, { initialEntries: ['/settings/team'] })
   const stop = enableReactRouterNavigation(router)
 
-  await logger.info('probe')
+  logger.info('probe')
+  await capture.settled()
 
   const entry = capture.entries.findLast((e) => e.message === 'probe')
   assert('the entry was captured', entry !== undefined, JSON.stringify(capture.entries))
@@ -66,7 +67,8 @@ async function testSixtyProbesWithResetBetweenAreAllCaptured() {
 
   for (let i = 0; i < 60; i++) {
     resetSession()
-    await logger.info(`probe-${i}`)
+    logger.info(`probe-${i}`)
+    await capture.settled()
   }
 
   assert('all 60 probes were captured', capture.entries.length === 60, `got ${capture.entries.length}`)
@@ -117,8 +119,9 @@ async function testRateLimiterDroppedEntryIsAbsentNotUndefined() {
     try {
       // Default burstLimit 50, reservedForErrors 10 — INFO (below ERROR) can spend
       // only the 40 logs outside the reserve before every further one is refused.
-      for (let i = 0; i < 40; i++) await logger.info(`fill-${i}`)
-      await logger.info('over-budget')
+      for (let i = 0; i < 40; i++) logger.info(`fill-${i}`)
+      logger.info('over-budget')
+      await capture.settled()
     } finally {
       console.warn = realWarn
     }
@@ -199,13 +202,69 @@ async function testResetSessionRestoresFullBudget() {
 
     capture.clear()
     resetSession()
-    await logger.info('after-reset')
+    logger.info('after-reset')
+    await capture.settled()
 
     assert(
       'a log after resetSession() is captured',
       capture.entries.some((e) => e.message === 'after-reset'),
       JSON.stringify(capture.entries),
     )
+  } finally {
+    delete globals.sessionStorage
+    delete globals.localStorage
+  }
+}
+
+function slowLogFunction(capture: Capture): Capture['logFunction'] {
+  return async (data) => {
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    return capture.logFunction(data)
+  }
+}
+
+async function testSettledWaitsForAnAttachmentSend() {
+  console.log('\nTest: settled() waits for an entry whose attachment is still being read')
+  resetSession()
+  const capture = captureEntries()
+  const logger = initLogger({ appId: 'test', releaseId: 'r1', logFunction: slowLogFunction(capture) })
+
+  logger.info('with-file', undefined, undefined, { note: 'YQ==' })
+  assert('the entry is not there yet', capture.entries.length === 0, JSON.stringify(capture.entries))
+  await capture.settled()
+
+  const entry = capture.entries.findLast((e) => e.message === 'with-file')
+  assert('the entry is there after settled()', entry !== undefined, JSON.stringify(capture.entries))
+  assert('it carries the attachment', entry?.attachments?.note === 'YQ==', JSON.stringify(entry?.attachments))
+}
+
+async function testSettledWaitsForARepeatSummary() {
+  console.log('\nTest: a repeat summary is in entries after settled()')
+  const globals = globalThis as Record<string, unknown>
+  globals.sessionStorage = new MemoryStorage()
+  globals.localStorage = new MemoryStorage()
+
+  try {
+    resetSession()
+    const capture = captureEntries()
+    const logger = initLogger({ appId: 'test', releaseId: 'r1', logFunction: slowLogFunction(capture) })
+
+    const realWarn = console.warn
+    console.warn = () => {}
+    try {
+      for (let i = 0; i < 4; i++) logger.error(new Error('flaky'))
+      flushDueSummaries(true)
+    } finally {
+      console.warn = realWarn
+    }
+    await capture.settled()
+    capture.clear()
+
+    logger.sendPendingSummaries()
+    await capture.settled()
+
+    const summary = capture.entries.find((e) => e.message.startsWith('Repeated 1 more times'))
+    assert('the summary is captured after settled()', summary !== undefined, JSON.stringify(capture.entries))
   } finally {
     delete globals.sessionStorage
     delete globals.localStorage
@@ -331,6 +390,8 @@ async function run() {
   await testResetSessionEmptiesTrailAndCurrentRoute()
   await testResetSessionRestoresFullBudget()
   await testResetSessionClearsPendingSummaries()
+  await testSettledWaitsForAnAttachmentSend()
+  await testSettledWaitsForARepeatSummary()
   await testTestingCodeIsNotInAnyClientBundle()
   testNoClientSourceImportsTesting()
   reportResults()

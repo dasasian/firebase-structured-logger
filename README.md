@@ -1281,7 +1281,7 @@ import { trace, startTrace, configureTraces } from '@dasasian/firebase-structure
 configureTraces({ name: { warnAfterMs?, steps?: { step: ms } } })   // see "Timing"
 
 import { captureEntries, resetSession } from '@dasasian/firebase-structured-logger/testing'
-const capture = captureEntries()     // { logFunction, entries, clear() } — see "Testing what your app logs"
+const capture = captureEntries()     // { logFunction, entries, clear(), settled() } — see "Testing what your app logs"
 resetSession()                       // a fresh session: trail, page, budget, repeat counts
 ```
 

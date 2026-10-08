@@ -18,6 +18,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`fsl doctor` finding `skill-out-of-date`** (warning): a skill's `fsl-version` differs from the fsl running doctor. Skills without `fsl-version` are skipped.
 - **`BaseLabels`** declares every label fsl writes, each with a one-line comment: `repeatKey`, `repeatOf`, `repeatCount`, `firstSeen`, `lastSeen`, `sentLate`, `truncated`, `hasAttachments`, `logId`, `functionName`, `trace`, `run`, `slow`, `step`, `feedback`.
 
+- **`/testing` `capture.settled()`** waits for every send already started, so a test can read `entries` after a log call with attachments or after a repeat summary; log methods still return `void`.
+
 ### Removed
 
 - **`/query-logs` skill**, which depended on `firebase-mcp-server`. `fsl install-skills` offers to remove an installed copy.

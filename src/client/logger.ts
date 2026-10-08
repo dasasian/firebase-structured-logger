@@ -28,6 +28,18 @@ export type { RateLimitConfig }
 
 type LogCallable = (data: LogPayload) => Promise<unknown>
 
+type SendWatcher = (sending: Promise<unknown>) => void
+
+let sendWatcher: SendWatcher | undefined
+
+/**
+ * Tells `/testing` about every send as it starts. Not exported from any entry point.
+ * A second call replaces the first watcher; `undefined` removes it.
+ */
+export function setSendWatcher(watcher: SendWatcher | undefined): void {
+  sendWatcher = watcher
+}
+
 export interface FeedbackOptions<
   AppLabels extends Record<string, string | undefined> = Record<string, string | undefined>,
 > {
@@ -164,7 +176,7 @@ export class Logger<
       ...(labels as Record<string, string | undefined>),
     }
 
-    void this.send(
+    const sending = this.send(
       error.message,
       'ERROR',
       errorLabels,
@@ -173,6 +185,7 @@ export class Logger<
       toErrorPayload(error),
       signatureFor(error, getActiveScreen()),
     )
+    sendWatcher?.(sending)
   }
 
   info(
@@ -181,7 +194,8 @@ export class Logger<
     context?: Record<string, unknown>,
     attachments?: Record<string, Blob | File | string>,
   ): void {
-    void this.send(message, 'INFO', labels as Record<string, string | undefined>, context, attachments)
+    const sending = this.send(message, 'INFO', labels as Record<string, string | undefined>, context, attachments)
+    sendWatcher?.(sending)
   }
 
   warning(
@@ -190,7 +204,8 @@ export class Logger<
     context?: Record<string, unknown>,
     attachments?: Record<string, Blob | File | string>,
   ): void {
-    void this.send(message, 'WARNING', labels as Record<string, string | undefined>, context, attachments)
+    const sending = this.send(message, 'WARNING', labels as Record<string, string | undefined>, context, attachments)
+    sendWatcher?.(sending)
   }
 
   debug(
@@ -199,7 +214,8 @@ export class Logger<
     context?: Record<string, unknown>,
     attachments?: Record<string, Blob | File | string>,
   ): void {
-    void this.send(message, 'DEBUG', labels as Record<string, string | undefined>, context, attachments)
+    const sending = this.send(message, 'DEBUG', labels as Record<string, string | undefined>, context, attachments)
+    sendWatcher?.(sending)
   }
 
   /**
@@ -219,7 +235,7 @@ export class Logger<
    */
   sendFeedback(text: string, extras?: FeedbackOptions<AppLabels>): void {
     const exemptFromSeverityFloorAndRateLimiter = true
-    void this.send(
+    const sending = this.send(
       text,
       'NOTICE',
       { [FEEDBACK_LABEL]: 'true', ...(extras?.labels as Record<string, string | undefined>) },
@@ -229,6 +245,7 @@ export class Logger<
       undefined,
       exemptFromSeverityFloorAndRateLimiter,
     )
+    sendWatcher?.(sending)
   }
 
   private async send(
@@ -366,7 +383,9 @@ export class Logger<
     for (const summary of peekPendingSummaries()) {
       if (this.summariesInFlight.has(summary.id)) continue
       this.summariesInFlight.add(summary.id)
-      void this.sendRepeatSummary(summary).finally(() => this.summariesInFlight.delete(summary.id))
+      const sending = this.sendRepeatSummary(summary)
+      sendWatcher?.(sending)
+      void sending.finally(() => this.summariesInFlight.delete(summary.id))
     }
   }
 

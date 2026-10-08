@@ -93,6 +93,21 @@ function testDoctorCommandSurface() {
   }
 }
 
+function testNoEntryPointExportsSetSendWatcher() {
+  console.log('\nTest: no entry point exports setSendWatcher')
+  const modules: Record<string, object> = {
+    client,
+    functions,
+    'client/navigation/vue-router': vueRouterNavigation,
+    'client/navigation/react-router': reactRouterNavigation,
+    'client/views': views,
+    testing,
+  }
+  for (const [name, mod] of Object.entries(modules)) {
+    assert(`${name} does not export setSendWatcher`, !('setSendWatcher' in mod))
+  }
+}
+
 function run() {
   checkSurface('client', client)
   checkSurface('functions', functions)
@@ -100,6 +115,7 @@ function run() {
   checkSurface('client/navigation/react-router', reactRouterNavigation)
   checkSurface('client/views', views)
   checkSurface('testing', testing)
+  testNoEntryPointExportsSetSendWatcher()
   testClientLoggerIsNotConstructible()
   testDoctorCommandSurface()
   reportResults()
