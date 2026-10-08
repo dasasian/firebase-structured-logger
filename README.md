@@ -1234,8 +1234,8 @@ each label fsl writes itself is on `BaseLabels` in `dist/shared/types.d.ts`.
 | `/fsl-review [scope]` | Reads `CAPABILITIES.md` from the installed package and the code in the scope — the app, a folder or a file — and proposes how fsl could best serve that code: what to add, what to fix. It proposes and stops; trim the list, then have your agent make the changes, file issues, or both. The whole app as scope runs `fsl doctor` first. |
 | `/fsl-logs` | How to answer a question from the logs with `fsl logs`: the shape of a query, `schema` for the labels, `--repeats` for how often an error really happened, `attachments` for the files. |
 
-`CAPABILITIES.md` ships in the package and says, for each thing fsl can do, what it gives
-you, when it fits, how to add it, and the mistakes to avoid. The skills hold only the
+`CAPABILITIES.md` ships in the package and says, for each thing an app can add to its code
+and config, what it gives you, when it fits, how to add it, and the mistakes to avoid. The skills hold only the
 steps, so a copy installed last year still works; `install-skills` stamps the fsl version
 into each skill's frontmatter and `fsl doctor` warns `skill-out-of-date` when the stamp
 and the installed package disagree. `install-skills` asks before it removes a skill this

@@ -222,9 +222,11 @@ pattern → why it is wrong → the fix. No motivation, no history. Keep that sh
 
 **Facts live in the package; skills hold only steps.** `install-skills` copies a skill
 into the app, and the copy does not change when the app updates fsl — POUR5 ran a copy
-that still taught `bc.nav` for months. So what fsl can do is in `CAPABILITIES.md`, which
-ships in the package and always matches the installed version: for each capability, what
-it gives, when it fits, how to add it, and the mistakes to avoid. A skill says how to
+that still taught `bc.nav` for months. So what an app can add to its code and config is in
+`CAPABILITIES.md`, which ships in the package and always matches the installed version:
+for each capability, what it gives, when it fits, how to add it, and the mistakes to
+avoid. The tools an agent runs are not capabilities and are not in it: `/fsl-review` runs
+`fsl doctor` itself, and `/fsl-logs` and the command's own errors teach `fsl logs`. A skill says how to
 work (read the file, read the code, propose, stop) and names nothing that a release can
 change. The one thing a stale copy can still get wrong is its own steps, so
 `install-skills` stamps `fsl-version` into the frontmatter and doctor reports
