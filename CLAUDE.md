@@ -97,7 +97,7 @@ nothing else. Run it before a release — it is how the `firebase-admin` import 
 `sourceMapCache.ts` was found, after a require hook that blocked only `firebase-functions`
 had passed.
 
-Two support modules, not suites themselves:
+Three support modules, not suites themselves:
 
 - `tests/testHelpers.ts` — `assert`, `reportResults`, `readLastEntry(dir)`, `clearLog(dir)`,
   `makeRequest(payload)`. Every suite uses these; don't re-roll them per file.
@@ -105,6 +105,17 @@ Two support modules, not suites themselves:
   `dispatchWindowEvent`/`listenerCount`, a stub `navigator`, and `withFrozenTime`.
   **Import it before the module under test** — `rateLimiter` reads `window` and
   `client/logger` reads `navigator` at module load, so a later stub is too late.
+- `tests/logsHelpers.ts` — `runFsl(argv, { cwd, cloud, gcloudOutput, env })` runs `fsl logs`
+  against a fake transport and returns stdout, stderr, the exit code and every request the
+  transport saw; `cloudEntry()` builds a `gcloud logging read --format json` element.
+  The fake project id and bucket are sentinels the suites assert never appear in output.
+
+`labelKeys` drives the client and functions loggers through every scenario that emits a
+label and fails on a key `BaseLabels` does not declare. `BaseLabels` is what `fsl logs`
+validates `--where labels.<key>` against and what the shipped `.d.ts` tells an agent fsl
+writes, so a new label gets a field and a one-line comment there in the same change.
+`logsLocal` runs with `FUNCTIONS_EMULATOR=true` because it reads files the emulator branch
+really wrote.
 
 `errorPayload` is the parity suite: the client and functions loggers must build an identical
 `ErrorPayload`. They share `src/shared/error.ts` now, but they drifted once before.
@@ -238,6 +249,15 @@ shared as a package: two users do not justify a third repo. Group by, distinct a
 aggregates stay because they are what lets an agent answer "which screen?" in ten lines
 instead of five thousand; `dist/tools` never reaches an app's bundle, so its size is
 not a cost.
+
+**`fsl logs` sends a condition to the server only when it surely means the same there.**
+A label key nobody has confirmed (not in `BaseLabels`, `schema.json` or the entries read)
+stays client-side: a typo sent to Cloud Logging returns zero entries and leaves nothing to
+compare the key against, and the "Did you mean" error would never fire. `gcloud logging read`
+signs in with `gcloud auth login`, not application-default credentials. The bucket for
+`attachments` comes from `--bucket` or `FIREBASE_STORAGE_BUCKET`, the variable
+`upload-sourcemaps` reads: `firebase.json` holds no bucket name, and doctor's rule is to
+read only what a file's fixed format says.
 
 **`fsl logs schema` keeps two kinds of knowledge apart.** `fromLogs` is what the logs
 show — keys, counts, up to three sample values — and `--refresh` rewrites it. `fromCode`

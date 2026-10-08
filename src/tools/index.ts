@@ -5,6 +5,7 @@ import { uploadSourceMaps, EXIT_UPLOAD_FAILED_BUT_EMBEDDED } from './uploadSourc
 import { installSkills } from './installSkills'
 import { runDoctor, exitCodeFor, formatDoctorReport } from './doctor'
 import { warnDeprecated } from '../shared/deprecate'
+import { runLogs } from './logs/command'
 
 const [, , command, ...rawArgs] = process.argv
 
@@ -74,6 +75,10 @@ async function main() {
       break
     }
 
+    case 'logs': {
+      process.exit(await runLogs(rawArgs))
+    }
+
     case 'doctor': {
       const report = runDoctor({
         projectRoot: process.cwd(),
@@ -116,7 +121,19 @@ Commands:
 
   fsl install-skills [--global] [--force]
       Copy skills/ to .claude/skills/ (project) or ~/.claude/skills/ (--global).
-      Prompts before overwriting existing skills. Use --force to skip prompts.
+      Prompts before overwriting existing skills, and before removing a skill this
+      package no longer ships (query-logs). Use --force to skip prompts.
+
+  fsl logs [--where field=value]... [--select a,b] [--group-by f] [--order-by "f desc"]
+           [--limit N] [--distinct f] [--since 1h] [--local] [--project <id>] [--repeats <repeatKey>]
+      Read production logs (through gcloud logging read) or, with --local, .fsl-logs/*.jsonl.
+      One JSON entry per line. --where operators: = != >= <= ~ (contains). --limit is 100 by
+      default, 1000 at most; a cut result says on stderr how many more there were.
+      --select with no value lists the fields. Project: --project, else .firebaserc.
+  fsl logs schema [--refresh] [--add name [meaning]]... [--remove name] [--json] [--local]
+      Every label key in the last 500 entries of the last 7 days, with counts and samples.
+  fsl logs attachments <logId> [--bucket <name>]
+      Download an entry's files to .fsl-logs/attachments/<logId>/ through gcloud storage.
 
 
 `)

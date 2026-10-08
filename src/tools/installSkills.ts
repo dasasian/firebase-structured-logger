@@ -3,6 +3,8 @@ import * as path from 'path'
 import * as os from 'os'
 import * as readline from 'readline'
 
+const RETIRED_SKILLS = ['query-logs']
+
 export interface InstallSkillsOptions {
   global?: boolean
   force?: boolean
@@ -16,6 +18,20 @@ function prompt(question: string): Promise<string> {
       resolve(answer.trim().toLowerCase())
     })
   })
+}
+
+async function removeRetiredSkills(targetDir: string, targetLabel: string, force: boolean): Promise<void> {
+  for (const skillName of RETIRED_SKILLS) {
+    const installed = path.join(targetDir, skillName)
+    if (!fs.existsSync(installed)) continue
+    const answer = force ? 'y' : await prompt(`  ${targetLabel}/${skillName} is no longer shipped by this package.\n  Remove it? [y/N] `)
+    if (answer === 'y' || answer === 'yes') {
+      fs.rmSync(installed, { recursive: true })
+      console.log(`  - removed ${targetLabel}/${skillName}`)
+    } else {
+      console.log(`  - kept ${targetLabel}/${skillName}`)
+    }
+  }
 }
 
 export async function installSkills(options: InstallSkillsOptions = {}): Promise<void> {
@@ -61,6 +77,8 @@ export async function installSkills(options: InstallSkillsOptions = {}): Promise
       count++
     }
   }
+
+  await removeRetiredSkills(targetDir, targetLabel, force)
 
   console.log(`[fsl] Installed ${count} skill file(s) to ${targetLabel}/`)
 }

@@ -7,6 +7,17 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`fsl logs`** reads production logs through `gcloud logging read`, or `.fsl-logs/` with `--local`, with flags named after SQL clauses (`--where`, `--select`, `--group-by`, `--order-by`, `--limit`, `--distinct`, `--since`, `--repeats`). One JSON entry per line; a field or flag it does not know is an error that names the valid ones.
+- **`fsl logs schema`** lists every label in the logs with counts and sample values (none for `userId` or keys containing `email`, `name`, `phone`), and keeps labels your code writes with `--add`. **`fsl logs attachments <logId>`** downloads an entry's files.
+- **`/fsl-logs` skill** for coding agents, installed by `fsl install-skills`.
+- **`BaseLabels`** declares every label fsl writes, each with a one-line comment: `repeatKey`, `repeatOf`, `repeatCount`, `firstSeen`, `lastSeen`, `sentLate`, `truncated`, `hasAttachments`, `logId`, `functionName`, `trace`, `run`, `slow`, `step`, `feedback`.
+
+### Removed
+
+- **`/query-logs` skill**, which depended on `firebase-mcp-server`. `fsl install-skills` offers to remove an installed copy.
+
 ## [1.3.0] — 2026-10-07
 
 Where the user is, told by the router and the page. A router adapter takes `route` and

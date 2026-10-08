@@ -1189,19 +1189,22 @@ npx fsl logs --local --where severity=ERROR --group-by labels.screen --select la
 | `--where field=value` | one condition; repeat it for more. Operators: `=`, `!=`, `>=`, `<=`, `~` (contains) |
 | `--select a,b,count` | the fields to print — fewer fields, smaller output |
 | `--group-by field` | count or aggregate per value; `--select` names the aggregate (`count`, `min(f)`, `max(f)`) |
-| `--order-by "field desc"`, `--limit N`, `--distinct field` | as in SQL. `--limit` is 100 by default and 1000 at most |
+| `--order-by "field desc"`, `--limit N`, `--distinct field` | as in SQL. Entries come oldest first unless you order them. `--limit` is 100 by default and 1000 at most |
 | `--since 1h` | `1h`, `2d`, or an ISO time; 1 hour by default |
-| `--repeats <repeatKey>` | one repeating error — its full copies, its summaries, and the true count |
+| `--repeats <repeatKey>` | one repeating error — its full copies, its summaries, and a last line with the true count. Looks back 7 days unless `--since` says otherwise |
 | `--local` | read `.fsl-logs/*.jsonl` instead of Cloud Logging |
 | `--project <id>` | the Google Cloud project; read from `.firebaserc` when not given |
 
-It prints one JSON entry per line. When `--limit` cut the result, the last line on stderr
-says how many more there were. A field or flag it does not know is an error that names
-the valid ones.
+It prints one JSON entry per line. When `--limit` cut the result, a line on stderr says how
+many more there were. A flag it does not know is an error that names the valid ones; a field
+it does not know also names the nearest one and points at `fsl logs schema`. `--select` with
+no value prints the fields. A production query reads the newest 5000 entries in the window and
+says on stderr when it hit that, so narrow with `--since` or `--where`.
 
-Production entries come through `gcloud logging read`, so the `gcloud` CLI and
-`gcloud auth application-default login` are the only setup. No Google library is added
-to your install.
+Production entries come through `gcloud logging read`, so the `gcloud` CLI, signed in with
+`gcloud auth login`, is the only setup — `gcloud` reads with its own sign-in, not the
+application-default credentials. No Google library is added to your install. The project id
+and bucket name are never printed, not even in an error.
 
 Two more subcommands:
 
@@ -1212,7 +1215,7 @@ npx fsl logs schema --add venueId "the venue the order belongs to" --add tableId
 npx fsl logs schema --refresh                                                       # re-read the logs; --add entries are kept
 
 # The files an entry uploaded, downloaded to .fsl-logs/attachments/<logId>/
-npx fsl logs attachments <logId>
+npx fsl logs attachments <logId>               # bucket: --bucket <name>, else FIREBASE_STORAGE_BUCKET (.env.local is loaded)
 ```
 
 `schema` reads the last 500 entries and keeps what it found in `.fsl-logs/schema.json`
