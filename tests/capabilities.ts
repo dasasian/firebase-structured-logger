@@ -78,9 +78,26 @@ function packageImports(code: string): { names: string[]; specifier: string }[] 
 
 const sections = parseSections(capabilities)
 
+const CAPABILITY_TITLES = [
+  'Error capture',
+  'Breadcrumbs',
+  'Navigation',
+  'Pages without a URL change',
+  'Views',
+  'User and labels',
+  'Release ids and source maps',
+  'Attachments',
+  'Feedback',
+  'Timing traces',
+  'Testing what an app logs',
+  'Cloud Functions logger',
+  'withLogging and createHttpLogHandler',
+]
+
 function testSectionShape() {
   console.log('\nTest: every section has the four headings, in order')
-  assert('there are sections', sections.length >= 15, String(sections.length))
+  const titles = sections.map((section) => section.title)
+  assert('the sections are exactly the capabilities an app adds', titles.join('|') === CAPABILITY_TITLES.join('|'), titles.join(' | '))
   for (const section of sections) {
     assert(`${section.title}: Gives, Fits when, Add, Mistakes`, section.headings.join('|') === HEADINGS.join('|'), section.headings.join('|'))
   }
