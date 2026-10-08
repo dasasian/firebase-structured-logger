@@ -10,6 +10,11 @@ export interface InstallSkillsOptions {
   force?: boolean
 }
 
+interface SkillsTarget {
+  dir: string
+  label: string
+}
+
 function prompt(question: string): Promise<string> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
   return new Promise(resolve => {
@@ -20,22 +25,55 @@ function prompt(question: string): Promise<string> {
   })
 }
 
-async function removeRetiredSkills(targetDir: string, targetLabel: string, force: boolean): Promise<void> {
+function isYes(answer: string): boolean {
+  return answer === 'y' || answer === 'yes'
+}
+
+function skillsTarget(global: boolean | undefined): SkillsTarget {
+  return global
+    ? { dir: path.join(os.homedir(), '.claude', 'skills'), label: '~/.claude/skills' }
+    : { dir: path.join(process.cwd(), '.claude', 'skills'), label: '.claude/skills' }
+}
+
+async function removeRetiredSkills(target: SkillsTarget, force: boolean): Promise<void> {
   for (const skillName of RETIRED_SKILLS) {
-    const installed = path.join(targetDir, skillName)
+    const installed = path.join(target.dir, skillName)
     if (!fs.existsSync(installed)) continue
-    const answer = force ? 'y' : await prompt(`  ${targetLabel}/${skillName} is no longer shipped by this package.\n  Remove it? [y/N] `)
-    if (answer === 'y' || answer === 'yes') {
+    const answer = force ? 'y' : await prompt(`  ${target.label}/${skillName} is no longer shipped by this package.\n  Remove it? [y/N] `)
+    if (isYes(answer)) {
       fs.rmSync(installed, { recursive: true })
-      console.log(`  - removed ${targetLabel}/${skillName}`)
+      console.log(`  - removed ${target.label}/${skillName}`)
     } else {
-      console.log(`  - kept ${targetLabel}/${skillName}`)
+      console.log(`  - kept ${target.label}/${skillName}`)
     }
   }
 }
 
+async function copySkill(srcDir: string, target: SkillsTarget, skillName: string, force: boolean): Promise<number> {
+  const destDir = path.join(target.dir, skillName)
+  let copied = 0
+  for (const file of fs.readdirSync(srcDir)) {
+    const dest = path.join(destDir, file)
+
+    if (fs.existsSync(dest) && !force) {
+      const answer = await prompt(`  Skill already exists: ${target.label}/${skillName}/${file}\n  Overwrite? [y/N] `)
+      if (!isYes(answer)) {
+        console.log(`  - skipped ${skillName}/${file}`)
+        continue
+      }
+    }
+
+    fs.mkdirSync(destDir, { recursive: true })
+    fs.copyFileSync(path.join(srcDir, file), dest)
+    console.log(`  ✓ ${target.label}/${skillName}/${file}`)
+    copied++
+  }
+  return copied
+}
+
+/** Copies the package's skills into `.claude/skills/` (or the global one), asking before it overwrites or removes anything unless `force` is set. */
 export async function installSkills(options: InstallSkillsOptions = {}): Promise<void> {
-  const { force = false } = options
+  const force = options.force ?? false
   const packageSkillsDir = path.join(__dirname, '..', '..', 'skills')
 
   if (!fs.existsSync(packageSkillsDir)) {
@@ -43,42 +81,16 @@ export async function installSkills(options: InstallSkillsOptions = {}): Promise
     process.exit(1)
   }
 
-  const targetDir = options.global
-    ? path.join(os.homedir(), '.claude', 'skills')
-    : path.join(process.cwd(), '.claude', 'skills')
-
-  const targetLabel = options.global ? '~/.claude/skills' : '.claude/skills'
-
-  fs.mkdirSync(targetDir, { recursive: true })
+  const target = skillsTarget(options.global)
+  fs.mkdirSync(target.dir, { recursive: true })
 
   let count = 0
   for (const entry of fs.readdirSync(packageSkillsDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue
-
-    const skillName = entry.name
-    const srcDir = path.join(packageSkillsDir, skillName)
-    const destDir = path.join(targetDir, skillName)
-
-    for (const file of fs.readdirSync(srcDir)) {
-      const src = path.join(srcDir, file)
-      const dest = path.join(destDir, file)
-
-      if (fs.existsSync(dest) && !force) {
-        const answer = await prompt(`  Skill already exists: ${targetLabel}/${skillName}/${file}\n  Overwrite? [y/N] `)
-        if (answer !== 'y' && answer !== 'yes') {
-          console.log(`  - skipped ${skillName}/${file}`)
-          continue
-        }
-      }
-
-      fs.mkdirSync(destDir, { recursive: true })
-      fs.copyFileSync(src, dest)
-      console.log(`  ✓ ${targetLabel}/${skillName}/${file}`)
-      count++
-    }
+    count += await copySkill(path.join(packageSkillsDir, entry.name), target, entry.name, force)
   }
 
-  await removeRetiredSkills(targetDir, targetLabel, force)
+  await removeRetiredSkills(target, force)
 
-  console.log(`[fsl] Installed ${count} skill file(s) to ${targetLabel}/`)
+  console.log(`[fsl] Installed ${count} skill file(s) to ${target.label}/`)
 }

@@ -394,6 +394,26 @@ function resolveStorage(searchDirs: string[]): StoragePath {
   return 'none'
 }
 
+function describeSetup(
+  projectRoot: string,
+  detected: { kind: SetupKind; backendDir: string | null; distDirs: string[] },
+  searchDirs: string[],
+  callable: boolean,
+): DoctorSetup {
+  const { kind, backendDir, distDirs } = detected
+  const hasFirebaseFunctions = backendDir !== null && findTopLevelVersion([backendDir], 'firebase-functions') !== undefined
+  const onFunctions = kind === 'firebase' && hasFirebaseFunctions
+  return {
+    kind,
+    backend: backendDir ? displayPath(projectRoot, backendDir) : null,
+    dist: distDirs[0] ? displayPath(projectRoot, distDirs[0]) : null,
+    logging: onFunctions ? 'firebase-functions' : backendDir ? 'stdout' : 'none',
+    trace: onFunctions ? 'trigger' : backendDir ? 'header' : 'none',
+    storage: resolveStorage(searchDirs),
+    callable,
+  }
+}
+
 export function runDoctor(options: DoctorOptions): DoctorReport {
   const findings: DoctorFinding[] = []
   const { kind, backendDir, distDirs } = detectSetup(options, findings)
@@ -414,20 +434,7 @@ export function runDoctor(options: DoctorOptions): DoctorReport {
   }
   checkEmbeddedMapsWithoutRelease(backendDir, findings)
 
-  const hasFirebaseFunctions = backendDir !== null && findTopLevelVersion([backendDir], 'firebase-functions') !== undefined
-  const logging: LoggingPath = kind === 'firebase' && hasFirebaseFunctions ? 'firebase-functions' : backendDir ? 'stdout' : 'none'
-  const trace: TraceSource = kind === 'firebase' && hasFirebaseFunctions ? 'trigger' : backendDir ? 'header' : 'none'
-  const storage = resolveStorage(searchDirs)
-
-  const setup: DoctorSetup = {
-    kind,
-    backend: backendDir ? displayPath(options.projectRoot, backendDir) : null,
-    dist: distDirs[0] ? displayPath(options.projectRoot, distDirs[0]) : null,
-    logging,
-    trace,
-    storage,
-    callable,
-  }
+  const setup = describeSetup(options.projectRoot, { kind, backendDir, distDirs }, searchDirs, callable)
 
   const hasError = findings.some((f) => f.level === 'error')
   const exitCode = hasError ? 1 : 0
