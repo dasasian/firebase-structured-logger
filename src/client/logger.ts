@@ -176,7 +176,7 @@ export class Logger<
       ...(labels as Record<string, string | undefined>),
     }
 
-    const sending = this.send(
+    this.send(
       error.message,
       'ERROR',
       errorLabels,
@@ -185,7 +185,6 @@ export class Logger<
       toErrorPayload(error),
       signatureFor(error, getActiveScreen()),
     )
-    sendWatcher?.(sending)
   }
 
   info(
@@ -194,8 +193,7 @@ export class Logger<
     context?: Record<string, unknown>,
     attachments?: Record<string, Blob | File | string>,
   ): void {
-    const sending = this.send(message, 'INFO', labels as Record<string, string | undefined>, context, attachments)
-    sendWatcher?.(sending)
+    this.send(message, 'INFO', labels as Record<string, string | undefined>, context, attachments)
   }
 
   warning(
@@ -204,8 +202,7 @@ export class Logger<
     context?: Record<string, unknown>,
     attachments?: Record<string, Blob | File | string>,
   ): void {
-    const sending = this.send(message, 'WARNING', labels as Record<string, string | undefined>, context, attachments)
-    sendWatcher?.(sending)
+    this.send(message, 'WARNING', labels as Record<string, string | undefined>, context, attachments)
   }
 
   debug(
@@ -214,8 +211,7 @@ export class Logger<
     context?: Record<string, unknown>,
     attachments?: Record<string, Blob | File | string>,
   ): void {
-    const sending = this.send(message, 'DEBUG', labels as Record<string, string | undefined>, context, attachments)
-    sendWatcher?.(sending)
+    this.send(message, 'DEBUG', labels as Record<string, string | undefined>, context, attachments)
   }
 
   /**
@@ -235,7 +231,7 @@ export class Logger<
    */
   sendFeedback(text: string, extras?: FeedbackOptions<AppLabels>): void {
     const exemptFromSeverityFloorAndRateLimiter = true
-    const sending = this.send(
+    this.send(
       text,
       'NOTICE',
       { [FEEDBACK_LABEL]: 'true', ...(extras?.labels as Record<string, string | undefined>) },
@@ -245,10 +241,14 @@ export class Logger<
       undefined,
       exemptFromSeverityFloorAndRateLimiter,
     )
-    sendWatcher?.(sending)
   }
 
-  private async send(
+  private send(...args: Parameters<Logger<AppLabels>['deliver']>): void {
+    const delivering = this.deliver(...args)
+    sendWatcher?.(delivering)
+  }
+
+  private async deliver(
     message: string,
     severity: LogSeverity,
     labels?: Record<string, string | undefined>,
@@ -420,7 +420,7 @@ export class Logger<
       repeat: { count: summary.repeatCount, firstSeen: summary.firstSeen, lastSeen: summary.lastSeen },
     }
 
-    const sent = await this.send(
+    const sent = await this.deliver(
       `Repeated ${summary.repeatCount} more times: ${summary.message}`,
       'WARNING',
       labels,
