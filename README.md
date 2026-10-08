@@ -1274,7 +1274,9 @@ and config, what it gives you, when it fits, how to add it, and the mistakes to 
 steps, so a copy installed last year still works; `install-skills` stamps the fsl version
 into each skill's frontmatter and `fsl doctor` warns `skill-out-of-date` when the stamp
 and the installed package disagree. `install-skills` asks before it removes a skill this
-package no longer ships (`/logs`, `/query-logs`); `--force` answers yes.
+package no longer ships (`/logs`, `/query-logs`); `--force` answers yes. With no terminal to
+answer on (an agent's shell, CI) and no `--force` it asks nothing, installs the skills that
+need no answer, says on stderr what it left, and exits 1.
 
 > A stack trace is self-reported by the browser, and so is `userId` on client entries — the
 > uid comes from the client's own labels, not from a verified token. Backend entries are

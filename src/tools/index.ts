@@ -9,6 +9,58 @@ import { runLogs } from './logs/command'
 
 const [, , command, ...rawArgs] = process.argv
 
+const USAGE = `
+firebase-structured-logger (fsl)
+
+Commands:
+  fsl upload-sourcemaps [--bucket=<name>] [--backend=<path>] [--embed-sourcemaps] [--release=<id>] [--dist=<path>] [--prefix=<path>]
+      Upload .map files from dist/ to Cloud Storage and delete them locally.
+      --bucket defaults to VITE_FIREBASE_STORAGE_BUCKET or FIREBASE_STORAGE_BUCKET (loaded from .env.local automatically).
+      --backend path to the backend directory (e.g. ./functions or ./backend). --functions is
+               a deprecated alias, kept for existing scripts.
+      --embed-sourcemaps copies maps to {backend}/sourcemaps/current/ for fast lookup of current release.
+               Given without --bucket, embeds only and uploads nothing — for a backend with no
+               bucket. Only the deployed release can then be symbolicated.
+      --prefix Cloud Storage prefix to upload under (default sourcemaps/). Must match
+               createClientLogHandler({ sourceMaps: { prefix } }) or maps are not found.
+      Authenticates via FIREBASE_SERVICE_ACCOUNT_PATH if set, otherwise uses ADC.
+      Release ID defaults to git rev-parse --short HEAD.
+
+  fsl doctor [--backend=<path>] [--dist=<path>] [--strict] [--json]
+      Check the project's setup from disk: how logging, trace ids, Storage and the
+      callable will behave, and any findings. Reads firebase.json when present;
+      otherwise --backend and --dist say where things are.
+      --strict  also fail (exit 1) on warnings, not just errors.
+      --json    print the same result as JSON instead of the human-readable report.
+      Exit code: 0 with no errors, 1 with an error (or a warning under --strict).
+
+  fsl --help | -h | help, or --help | -h after any command: print this text and exit 0.
+
+  fsl install-skills [--global] [--force]
+      Copy skills/ to .claude/skills/ (project) or ~/.claude/skills/ (--global).
+      Prompts before overwriting existing skills, and before removing a skill this
+      package no longer ships (logs, query-logs). Use --force to skip prompts. With no terminal
+      to answer on and no --force it asks nothing, installs what needs no answer, lists on
+      stderr what it left, and exits 1.
+
+  fsl logs [--where field=value]... [--select a,b] [--group-by f] [--order-by "f desc"]
+           [--limit N] [--distinct f] [--since 1h] [--local] [--project <id>] [--repeats <repeatKey>]
+      Read production logs (through gcloud logging read) or, with --local, .fsl-logs/*.jsonl.
+      One JSON entry per line. --where operators: = != >= <= ~ (contains). --limit is 100 by
+      default, 1000 at most; a cut result says on stderr how many more there were.
+      --select with no value lists the fields. Project: --project, else .firebaserc.
+  fsl logs schema [--refresh] [--add name [meaning]]... [--remove name] [--json] [--local]
+      Every label key in the last 500 entries of the last 7 days, with counts and samples.
+  fsl logs attachments <logId> [--bucket <name>]
+      Download an entry's files to .fsl-logs/attachments/<logId>/ through gcloud storage.
+
+
+`
+
+function wantsHelp(): boolean {
+  return command === 'help' || [command, ...rawArgs].some(arg => arg === '--help' || arg === '-h')
+}
+
 function parseArgs(args: string[]): Record<string, string> {
   const result: Record<string, string> = {}
   for (const arg of args) {
@@ -40,6 +92,11 @@ function loadEnvFile(filePath: string): void {
 }
 
 async function main() {
+  if (wantsHelp()) {
+    console.log(USAGE)
+    return
+  }
+
   const args = parseArgs(rawArgs)
 
   loadEnvFile('.env.local')
@@ -71,8 +128,7 @@ async function main() {
     }
 
     case 'install-skills': {
-      await installSkills({ global: args.global === 'true', force: args.force === 'true' })
-      break
+      process.exit(await installSkills({ global: args.global === 'true', force: args.force === 'true' }))
     }
 
     case 'logs': {
@@ -94,49 +150,7 @@ async function main() {
     }
 
     default: {
-      console.log(`
-firebase-structured-logger (fsl)
-
-Commands:
-  fsl upload-sourcemaps [--bucket=<name>] [--backend=<path>] [--embed-sourcemaps] [--release=<id>] [--dist=<path>] [--prefix=<path>]
-      Upload .map files from dist/ to Cloud Storage and delete them locally.
-      --bucket defaults to VITE_FIREBASE_STORAGE_BUCKET or FIREBASE_STORAGE_BUCKET (loaded from .env.local automatically).
-      --backend path to the backend directory (e.g. ./functions or ./backend). --functions is
-               a deprecated alias, kept for existing scripts.
-      --embed-sourcemaps copies maps to {backend}/sourcemaps/current/ for fast lookup of current release.
-               Given without --bucket, embeds only and uploads nothing — for a backend with no
-               bucket. Only the deployed release can then be symbolicated.
-      --prefix Cloud Storage prefix to upload under (default sourcemaps/). Must match
-               createClientLogHandler({ sourceMaps: { prefix } }) or maps are not found.
-      Authenticates via FIREBASE_SERVICE_ACCOUNT_PATH if set, otherwise uses ADC.
-      Release ID defaults to git rev-parse --short HEAD.
-
-  fsl doctor [--backend=<path>] [--dist=<path>] [--strict] [--json]
-      Check the project's setup from disk: how logging, trace ids, Storage and the
-      callable will behave, and any findings. Reads firebase.json when present;
-      otherwise --backend and --dist say where things are.
-      --strict  also fail (exit 1) on warnings, not just errors.
-      --json    print the same result as JSON instead of the human-readable report.
-      Exit code: 0 with no errors, 1 with an error (or a warning under --strict).
-
-  fsl install-skills [--global] [--force]
-      Copy skills/ to .claude/skills/ (project) or ~/.claude/skills/ (--global).
-      Prompts before overwriting existing skills, and before removing a skill this
-      package no longer ships (logs, query-logs). Use --force to skip prompts.
-
-  fsl logs [--where field=value]... [--select a,b] [--group-by f] [--order-by "f desc"]
-           [--limit N] [--distinct f] [--since 1h] [--local] [--project <id>] [--repeats <repeatKey>]
-      Read production logs (through gcloud logging read) or, with --local, .fsl-logs/*.jsonl.
-      One JSON entry per line. --where operators: = != >= <= ~ (contains). --limit is 100 by
-      default, 1000 at most; a cut result says on stderr how many more there were.
-      --select with no value lists the fields. Project: --project, else .firebaserc.
-  fsl logs schema [--refresh] [--add name [meaning]]... [--remove name] [--json] [--local]
-      Every label key in the last 500 entries of the last 7 days, with counts and samples.
-  fsl logs attachments <logId> [--bucket <name>]
-      Download an entry's files to .fsl-logs/attachments/<logId>/ through gcloud storage.
-
-
-`)
+      console.log(USAGE)
       if (command) {
         console.error(`Unknown command: ${command}`)
         process.exit(1)

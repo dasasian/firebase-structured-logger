@@ -20,6 +20,31 @@ interface Install {
   lines: string[]
 }
 
+interface NoTerminalInstall {
+  exitCode: number
+  stdout: string[]
+  stderr: string[]
+}
+
+async function installWithNoTerminal(project: string, options: { force?: boolean }): Promise<NoTerminalInstall> {
+  const stdout: string[] = []
+  const stderr: string[] = []
+  const previous = process.cwd()
+  const log = console.log
+  const error = console.error
+  process.chdir(project)
+  console.log = (line: string) => void stdout.push(line)
+  console.error = (...parts: unknown[]) => void stderr.push(parts.join(' '))
+  try {
+    const exitCode = await installSkills({ force: options.force, isTTY: false })
+    return { exitCode, stdout, stderr }
+  } finally {
+    console.log = log
+    console.error = error
+    process.chdir(previous)
+  }
+}
+
 async function installInto(project: string, options: { force?: boolean; answer?: string }): Promise<Install> {
   const questions: string[] = []
   const lines: string[] = []
@@ -114,7 +139,55 @@ async function testNothingToRemoveIsQuiet() {
   assert('no removal line', !lines.some((line) => line.includes('removed') || line.includes('kept')))
 }
 
+async function testNoTerminalNeverAnswersForYou() {
+  console.log('\nTest: with no terminal and no --force, nothing is asked, what needs no answer is done, and it exits 1')
+  const project = tempProject()
+  const skills = path.join(project, '.claude', 'skills')
+  plant(skills, 'logs')
+  plant(skills, 'fsl-logs')
+  const run = await installWithNoTerminal(project, {})
+  assert('exits 1', run.exitCode === 1, String(run.exitCode))
+  assert('fsl-review, which needed no answer, was installed', fs.existsSync(path.join(skills, 'fsl-review', 'SKILL.md')))
+  assert('the existing fsl-logs was not overwritten', fs.readFileSync(path.join(skills, 'fsl-logs', 'SKILL.md'), 'utf-8') === 'planted')
+  assert('the retired logs was kept', fs.existsSync(path.join(skills, 'logs')))
+  const removal = run.stderr.find((line) => line.includes('logs was not removed'))
+  assert('stderr names the kept skill and the --force that removes it', !!removal && removal.includes('Run fsl install-skills --force to remove .claude/skills/logs'), run.stderr.join('|'))
+  assert('stderr names the skipped overwrite and the --force that does it', run.stderr.some((line) => line.includes('fsl-logs/SKILL.md was not overwritten') && line.includes('Run fsl install-skills --force to overwrite')), run.stderr.join('|'))
+}
+
+async function testNoTerminalWithNothingToAskExitsZero() {
+  console.log('\nTest: with no terminal and nothing needing an answer, it installs and exits 0')
+  const run = await installWithNoTerminal(tempProject(), {})
+  assert('exits 0', run.exitCode === 0, String(run.exitCode))
+  assert('nothing on stderr', run.stderr.length === 0, run.stderr.join('|'))
+}
+
+async function testRunningAgainChangesNothingAndExitsZero() {
+  console.log('\nTest: a second run over identical files asks nothing and exits 0')
+  const project = tempProject()
+  await installWithNoTerminal(project, {})
+  const again = await installWithNoTerminal(project, {})
+  assert('exits 0', again.exitCode === 0, String(again.exitCode))
+  assert('nothing on stderr', again.stderr.length === 0, again.stderr.join('|'))
+}
+
+async function testNoTerminalWithForceDoesEverything() {
+  console.log('\nTest: with no terminal and --force, it removes, overwrites and exits 0')
+  const project = tempProject()
+  const skills = path.join(project, '.claude', 'skills')
+  plant(skills, 'logs')
+  plant(skills, 'fsl-logs')
+  const run = await installWithNoTerminal(project, { force: true })
+  assert('exits 0', run.exitCode === 0, String(run.exitCode))
+  assert('logs is gone', !fs.existsSync(path.join(skills, 'logs')))
+  assert('fsl-logs was overwritten', fs.readFileSync(path.join(skills, 'fsl-logs', 'SKILL.md'), 'utf-8') !== 'planted')
+}
+
 async function main() {
+  await testNoTerminalNeverAnswersForYou()
+  await testNoTerminalWithNothingToAskExitsZero()
+  await testRunningAgainChangesNothingAndExitsZero()
+  await testNoTerminalWithForceDoesEverything()
   await testStampsTheVersion()
   await testEveryShippedSkillCanBeStamped()
   await testRetiredSkillsAreAskedAbout()

@@ -7,6 +7,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`fsl --help`, `-h` and `help`, and `--help` or `-h` after any command, print the usage and exit 0** instead of running the command (`install-skills --help` ran the install). **`fsl install-skills` with no terminal and no `--force`** no longer answers N for you: it asks nothing, installs what needs no answer, names on stderr what it left and the `--force` that does it, and exits 1.
+
 ### Added
 
 - **`fsl logs`** reads production logs through `gcloud logging read`, or `.fsl-logs/` with `--local`, with flags named after SQL clauses (`--where`, `--select`, `--group-by`, `--order-by`, `--limit`, `--distinct`, `--since`, `--repeats`). One JSON entry per line; a field or flag it does not know is an error that names the valid ones.
