@@ -23,7 +23,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **`fsl doctor` `maps-published`** is an error only when nothing removes the maps before a deploy: no `fsl upload-sourcemaps` in a `package.json` script or hosting `predeploy`, and no `.map` entry in hosting `ignore`. A plain `npm run build` no longer fails doctor.
+- **`fsl doctor` `maps-published`** is an error only when nothing removes the maps before a deploy: no `fsl upload-sourcemaps` in a `package.json` script or hosting `predeploy`, and no `**/*.map` in hosting `ignore`. A plain `npm run build` no longer fails doctor.
 
 ### Removed
 

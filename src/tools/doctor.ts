@@ -158,6 +158,7 @@ function findMapFiles(dir: string): string[] {
 }
 
 const UPLOAD_SOURCEMAPS_COMMAND = /\bfsl\s+upload-sourcemaps\b/
+const HOSTING_IGNORE_EVERY_MAP = '**/*.map'
 
 function packageScriptUploadsMaps(projectRoot: string): boolean {
   try {
@@ -172,7 +173,7 @@ function hostingUploadsOrIgnoresMaps(hosting: FirebaseHostingConfig | FirebaseHo
   return allOf(hosting).some((config) => {
     const predeploy = allOf(config.predeploy)
     const ignore = allOf(config.ignore)
-    return predeploy.some((command) => UPLOAD_SOURCEMAPS_COMMAND.test(command)) || ignore.some((pattern) => pattern.endsWith('.map'))
+    return predeploy.some((command) => UPLOAD_SOURCEMAPS_COMMAND.test(command)) || ignore.includes(HOSTING_IGNORE_EVERY_MAP)
   })
 }
 

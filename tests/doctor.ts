@@ -122,7 +122,7 @@ function testMapsPublishedFiresDespiteUnrelatedConfig() {
   writeJson(path.join(root, 'package.json'), { scripts: { build: 'vite build' } })
   writeJson(path.join(root, 'firebase.json'), {
     functions: { source: 'functions' },
-    hosting: { public: 'dist', predeploy: 'npm run build', ignore: ['firebase.json'] },
+    hosting: { public: 'dist', predeploy: 'npm run build', ignore: ['firebase.json', '**/*.js.map'] },
   })
   assert('maps-published fires as an error', findingIds(runDoctor({ projectRoot: root })).includes('maps-published'))
   cleanup([root])
