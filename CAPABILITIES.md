@@ -176,7 +176,7 @@ Put the mark in the one shared modal component and pass the name in as a prop, s
 
 ### Mistakes
 - A dialog, modal or drawer element with no `data-fsl-view` while `enableViews()` is called → the dialog is invisible to the `view` label → add the mark, once, in the shared modal component.
-- `data-fsl-view="order-1042"` or any mark holding an id, name or other value → names must be fixed words, never values → `data-fsl-view="order"`.
+- `` data-fsl-view={`Order ${order.id}`} `` or any mark whose value is a record id, name, email or free text → the value reaches every log entry as user data → use a value from a fixed set of code names, as in `` data-fsl-view={`Tab ${tab.name}`} `` where `tab.name` is one of `"details"`, `"history"`.
 - A mark on every row of a list → the label becomes `row › row › row` → mark the list once.
 - `bc.action(` used to say a dialog is open → a view is a label, not a breadcrumb → mark the dialog; keep `bc.action` for the click that opened it.
 - `enableViews` imported from `/client` → it lives in its own entry point → import from `/client/views`.
@@ -441,4 +441,4 @@ app.post('/log', createHttpLogHandler({ authorize: async (req) => isSignedIn(req
 - `withLogging` used outside Cloud Functions → it is a Cloud Functions tool → use `logInfo` and friends directly.
 - `userId` passed as a label inside `withLogging` → taken from `request.auth.uid` already → remove it.
 - A handler that calls `logInfo(` with no `withLogging(` around it → entries carry no `functionName` or `userId` → wrap it.
-- `maxInstances` left at 1 while client logs drop under load → deliberate cost guard → raise `maxInstances` on `createClientLogFunction`.
+- `maxInstances` raised on `createClientLogFunction` from reading the code alone → `maxInstances: 1` is the cost guard → raise it only when logs show dropped client entries.

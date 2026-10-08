@@ -8,8 +8,10 @@ fsl-version: <version>
 
 The scope is the app, a folder or a file. If none is given, it is the whole app.
 
-1. Find the installed package nearest the scope: walk up from the scope to the first
-   `node_modules/@dasasian/firebase-structured-logger`. If there is none, say so and stop.
+1. Find the installed package. For a folder or a file, walk up from the scope to the first
+   `node_modules/@dasasian/firebase-structured-logger`. For the whole app, use the one in the
+   project root, and if another install in the project (such as the Cloud Functions folder) has a different
+   version, name both versions in the proposal. If there is none, say so and stop.
 2. If the scope is the whole app, run `npx fsl doctor --json` in the project root and keep
    its findings. For a folder or a file, skip this step.
 3. Read `CAPABILITIES.md` in that package. It is the only source of what fsl can do, how to
