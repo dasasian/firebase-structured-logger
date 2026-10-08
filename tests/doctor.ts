@@ -80,6 +80,54 @@ function testMapsPublishedQuiet() {
   cleanup([root])
 }
 
+function mapsProject(): { root: string; dist: string } {
+  const { root, dist } = firebaseProject()
+  writeMap(dist, 'app-abc.js.map')
+  return { root, dist }
+}
+
+function testMapsPublishedQuietWhenScriptUploads() {
+  console.log('\nTest: maps-published stays quiet when a package.json script runs fsl upload-sourcemaps')
+  const { root } = mapsProject()
+  writeJson(path.join(root, 'package.json'), { scripts: { deploy: 'npm run build && fsl upload-sourcemaps && firebase deploy' } })
+  assert('maps-published does not fire', !findingIds(runDoctor({ projectRoot: root })).includes('maps-published'))
+  cleanup([root])
+}
+
+function testMapsPublishedQuietWhenPredeployUploads() {
+  console.log('\nTest: maps-published stays quiet when hosting predeploy runs fsl upload-sourcemaps')
+  const { root } = mapsProject()
+  writeJson(path.join(root, 'firebase.json'), {
+    functions: { source: 'functions' },
+    hosting: { public: 'dist', predeploy: ['npm run build', 'fsl upload-sourcemaps'] },
+  })
+  assert('maps-published does not fire', !findingIds(runDoctor({ projectRoot: root })).includes('maps-published'))
+  cleanup([root])
+}
+
+function testMapsPublishedQuietWhenHostingIgnoresMaps() {
+  console.log('\nTest: maps-published stays quiet when hosting ignore excludes .map files')
+  const { root } = mapsProject()
+  writeJson(path.join(root, 'firebase.json'), {
+    functions: { source: 'functions' },
+    hosting: { public: 'dist', ignore: ['**/*.map'] },
+  })
+  assert('maps-published does not fire', !findingIds(runDoctor({ projectRoot: root })).includes('maps-published'))
+  cleanup([root])
+}
+
+function testMapsPublishedFiresDespiteUnrelatedConfig() {
+  console.log('\nTest: maps-published still fires when scripts and hosting config mention nothing about maps')
+  const { root } = mapsProject()
+  writeJson(path.join(root, 'package.json'), { scripts: { build: 'vite build' } })
+  writeJson(path.join(root, 'firebase.json'), {
+    functions: { source: 'functions' },
+    hosting: { public: 'dist', predeploy: 'npm run build', ignore: ['firebase.json', '**/*.js.map'] },
+  })
+  assert('maps-published fires as an error', findingIds(runDoctor({ projectRoot: root })).includes('maps-published'))
+  cleanup([root])
+}
+
 // --- node-version ---
 
 function testNodeVersionFires() {
@@ -397,6 +445,10 @@ function testCloudRunSetupSummary() {
 function run() {
   testMapsPublishedFires()
   testMapsPublishedQuiet()
+  testMapsPublishedQuietWhenScriptUploads()
+  testMapsPublishedQuietWhenPredeployUploads()
+  testMapsPublishedQuietWhenHostingIgnoresMaps()
+  testMapsPublishedFiresDespiteUnrelatedConfig()
   testNodeVersionFires()
   testNodeVersionQuiet()
   testNodeVersionNotStatedIsNotAnError()

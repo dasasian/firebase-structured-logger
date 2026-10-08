@@ -71,6 +71,8 @@ interface FirebaseFunctionsConfig {
 
 interface FirebaseHostingConfig {
   public?: string
+  predeploy?: string | string[]
+  ignore?: string[]
 }
 
 interface FirebaseJson {
@@ -155,7 +157,28 @@ function findMapFiles(dir: string): string[] {
   return results
 }
 
-function checkMapsPublished(distDirs: string[], findings: DoctorFinding[]): void {
+const UPLOAD_SOURCEMAPS_COMMAND = /\bfsl\s+upload-sourcemaps\b/
+const HOSTING_IGNORE_EVERY_MAP = '**/*.map'
+
+function packageScriptUploadsMaps(projectRoot: string): boolean {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf-8')) as { scripts?: Record<string, unknown> }
+    return Object.values(pkg.scripts ?? {}).some((script) => typeof script === 'string' && UPLOAD_SOURCEMAPS_COMMAND.test(script))
+  } catch {
+    return false
+  }
+}
+
+function hostingUploadsOrIgnoresMaps(hosting: FirebaseHostingConfig | FirebaseHostingConfig[] | undefined): boolean {
+  return allOf(hosting).some((config) => {
+    const predeploy = allOf(config.predeploy)
+    const ignore = allOf(config.ignore)
+    return predeploy.some((command) => UPLOAD_SOURCEMAPS_COMMAND.test(command)) || ignore.includes(HOSTING_IGNORE_EVERY_MAP)
+  })
+}
+
+function checkMapsPublished(projectRoot: string, hosting: FirebaseHostingConfig | FirebaseHostingConfig[] | undefined, distDirs: string[], findings: DoctorFinding[]): void {
+  if (packageScriptUploadsMaps(projectRoot) || hostingUploadsOrIgnoresMaps(hosting)) return
   for (const dist of distDirs) {
     const maps = findMapFiles(dist)
     if (maps.length === 0) continue
@@ -452,7 +475,7 @@ export function runDoctor(options: DoctorOptions): DoctorReport {
   const firebaseJson = readFirebaseJson(options.projectRoot)
   const firebaseRuntime = firebaseJson.ok === true ? firstOf(firebaseJson.config.functions)?.runtime : undefined
 
-  checkMapsPublished(distDirs, findings)
+  checkMapsPublished(options.projectRoot, firebaseJson.ok === true ? firebaseJson.config.hosting : undefined, distDirs, findings)
   checkNodeVersion(backendDir, firebaseRuntime, findings)
   const callable = checkCallable(kind, backendDir, findings)
   checkDuplicateStorage(backendDir, findings)

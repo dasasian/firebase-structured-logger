@@ -7,10 +7,6 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed
-
-- **`fsl --help`, `-h` and `help`, and `--help` or `-h` after any command, print the usage and exit 0** instead of running the command (`install-skills --help` ran the install). **`fsl install-skills` with no terminal and no `--force`** no longer answers N for you: it asks nothing, installs what needs no answer, names on stderr what it left and the `--force` that does it, and exits 1.
-
 ### Added
 
 - **`withLogging` wraps `onSchedule` and `onTaskDispatched`** as well as `onCall`: pass `ScheduledEvent` or `Request<Data>` as the second type argument. `userId` comes from `auth.uid` when the event has one. `CAPABILITIES.md` no longer lists `onRequest(`, which `withLogging` cannot wrap.
@@ -28,6 +24,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`fsl doctor` `maps-published`** is an error only when nothing removes the maps before a deploy: no `fsl upload-sourcemaps` in a `package.json` script or hosting `predeploy`, and no `**/*.map` in hosting `ignore`. A plain `npm run build` no longer fails doctor.
+- **`fsl --help`, `-h` and `help`, and `--help` or `-h` after any command, print the usage and exit 0** instead of running the command (`install-skills --help` ran the install). **`fsl install-skills` with no terminal and no `--force`** no longer answers N for you: it asks nothing, installs what needs no answer, names on stderr what it left and the `--force` that does it, and exits 1.
 - **`/fsl-review` and `CAPABILITIES.md`** no longer flag a `data-fsl-view` value from a fixed set of code names, no longer raise `maxInstances` from code alone, and name both versions when a whole-app review finds two installs that differ.
 
 ### Removed

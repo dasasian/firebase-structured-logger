@@ -406,7 +406,7 @@ Setup: Firebase — functions in ./functions, web build in ./dist
 
 | Id | Level | Means |
 |---|---|---|
-| `maps-published` | error | `.map` files are in the folder hosting serves — your source code is public |
+| `maps-published` | error | `.map` files are in the folder hosting serves and nothing removes them before a deploy (no `fsl upload-sourcemaps` in a `package.json` script or hosting `predeploy`, no `**/*.map` in hosting `ignore`) — your source code is public |
 | `node-version` | error | the backend's Node is below 22 |
 | `callable-without-firebase-functions` | error | `firebase.json` has functions, but `firebase-functions` is not installed there |
 | `could-not-check` | error | doctor could not read something it needed — including "run `npm install` first" |
