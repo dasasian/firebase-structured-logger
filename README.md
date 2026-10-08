@@ -195,7 +195,9 @@ logger.info('checkout started', { orderId })
 logger.error(err, { screen: 'camera' }, context, { photo: blob }) // attachments optional
 ```
 
-Debug logs are suppressed in production automatically.
+In production, only `WARNING` and above are sent: `logger.info` above is dropped, and so are
+`DEBUG` and `NOTICE`. Set `minSeverity` on the client and on the function to send more
+(see [Volume controls](#volume-controls)).
 
 ### Logging from your Cloud Functions
 
