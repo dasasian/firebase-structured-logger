@@ -344,8 +344,8 @@ beforeEach(() => {
   capture.clear()
 })
 
-test('logs the probe', async () => {
-  await logger.info('probe')
+test('logs the probe', () => {
+  logger.info('probe')
   const entry = capture.entries.findLast((e) => e.message === 'probe')
   expect(entry?.labels.appId).toBe('test')
 })
@@ -353,7 +353,6 @@ test('logs the probe', async () => {
 
 ### Mistakes
 - `capture.entries[0]` or `entries.at(-1)` → the logger also sends its own entries, and a rate-limited entry is missing → find by message with `findLast`.
-- A log call without `await` → the entry has not reached `logFunction` yet → `await` it.
 - No `resetSession()` in `beforeEach` → the 50-crumb trail and 50-entry budget carry over between tests → call it before each test.
 - A test of `data-fsl-view` in a node environment → views need a DOM → use jsdom.
 - `/testing` imported from application code → it is for test files only → import it in tests.
