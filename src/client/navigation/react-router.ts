@@ -1,4 +1,5 @@
 import { setCurrentRoute } from '../breadcrumbs'
+import { getClientLogger } from '../logger'
 import { createAdjuster, registerAdapterStop, clearAdapterStop } from './adapterShared'
 import type { NavigationLabels } from '../../shared/types'
 
@@ -15,6 +16,7 @@ export interface ReactRouterStateLike {
   location: { pathname: string; key: string }
   matches: ReactRouteMatchLike[]
   initialized: boolean
+  errors: Record<string, unknown> | null
 }
 
 export interface ReactRouterLike {
@@ -47,6 +49,31 @@ function deepestHandleScreen(matches: ReactRouteMatchLike[]): string | undefined
   return undefined
 }
 
+interface ErrorResponseLike {
+  status: number
+  statusText?: string
+}
+
+function asErrorResponse(value: unknown): ErrorResponseLike | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const { status, internal } = value as { status?: unknown; internal?: unknown }
+  return typeof status === 'number' && typeof internal === 'boolean' ? (value as ErrorResponseLike) : undefined
+}
+
+function logRouteError(routeId: string, thrown: unknown): void {
+  const logger = getClientLogger()
+  const labels = { errorType: 'RouteError' }
+  const response = asErrorResponse(thrown)
+  if (!response) {
+    logger.error(thrown, labels, { routeId })
+    return
+  }
+  const message = `Route error ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`
+  const context = { routeId, status: response.status }
+  if (response.status >= 500) logger.error(new Error(message), labels, context)
+  else logger.warning(message, labels, context)
+}
+
 function labelsFromState(state: ReactRouterStateLike): NavigationLabels {
   const route = joinRoutePath(state.matches)
   return { route, screen: deepestHandleScreen(state.matches) ?? route, path: state.location.pathname }
@@ -57,7 +84,11 @@ function labelsFromState(state: ReactRouterStateLike): NavigationLabels {
  * One crumb per page: the first once the router is initialized, then one per
  * `location.key`, so a loader `redirect()` — on first load too — records only the page
  * it ends on, while a `<Navigate>` element records both pages.
- * `path` keeps the `basename`; `route` never has it. A second call stops the first.
+ * `path` keeps the `basename`; `route` never has it.
+ * Also logs each new entry in `router.state.errors` once, after recording the page: an
+ * `Error` or a 5xx response as an `ERROR`, a 4xx response as a `WARNING`, both with
+ * `errorType` `RouteError`. A second call stops the first, and the function returned
+ * stops both listeners.
  */
 export function enableReactRouterNavigation(
   router: ReactRouterLike,
@@ -73,7 +104,7 @@ export function enableReactRouterNavigation(
     setCurrentRoute(adjustLabels(labelsFromState(state)))
   }
 
-  const unsubscribe = router.subscribe((state) => {
+  function recordPageOnce(state: ReactRouterStateLike): void {
     if (!sawInitialized) {
       if (!state.initialized) return
       sawInitialized = true
@@ -84,6 +115,25 @@ export function enableReactRouterNavigation(
     if (state.location.key === lastKey) return
     lastKey = state.location.key
     recordPage(state)
+  }
+
+  const loggedErrors = new Map<string, unknown>()
+
+  function logNewRouteErrors(errors: Record<string, unknown> | null): void {
+    const current = errors ?? {}
+    for (const routeId of [...loggedErrors.keys()]) {
+      if (!(routeId in current)) loggedErrors.delete(routeId)
+    }
+    for (const [routeId, thrown] of Object.entries(current)) {
+      if (loggedErrors.has(routeId) && loggedErrors.get(routeId) === thrown) continue
+      loggedErrors.set(routeId, thrown)
+      logRouteError(routeId, thrown)
+    }
+  }
+
+  const unsubscribe = router.subscribe((state) => {
+    recordPageOnce(state)
+    logNewRouteErrors(state.errors)
   })
 
   function stop(): void {
@@ -97,6 +147,7 @@ export function enableReactRouterNavigation(
 
   if (sawInitialized) {
     recordPage(router.state)
+    logNewRouteErrors(router.state.errors)
   }
 
   return stop

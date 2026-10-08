@@ -1,4 +1,5 @@
 import { setCurrentRoute } from '../breadcrumbs'
+import { getClientLogger } from '../logger'
 import { createAdjuster, registerAdapterStop, clearAdapterStop } from './adapterShared'
 import type { NavigationLabels } from '../../shared/types'
 
@@ -17,6 +18,7 @@ export interface VueRouterLike {
   afterEach(
     guard: (to: VueRouteLocationLike, from: VueRouteLocationLike, failure: unknown) => void,
   ): () => void
+  onError(handler: (error: unknown, to: VueRouteLocationLike) => void): () => void
   currentRoute: { value: VueRouteLocationLike }
 }
 
@@ -43,7 +45,9 @@ function labelsFromRoute(to: VueRouteLocationLike): NavigationLabels {
  * Listens with `router.afterEach`; never wraps `history`. Skips a navigation that
  * failed (`failure` truthy) — a blocked or cancelled one records no crumb. `path` is
  * always `to.path`, never `fullPath`, so a query string or hash never reaches a label.
- * A second call stops the first.
+ * Also logs what `router.onError` reports — a guard that throws, a lazy route that fails to
+ * load — as an `ERROR` with `errorType` `RouteError` and the attempted `path` in context.
+ * A second call stops the first, and the function returned stops both listeners.
  */
 export function enableVueRouterNavigation(
   router: VueRouterLike,
@@ -57,10 +61,15 @@ export function enableVueRouterNavigation(
     setCurrentRoute(adjustLabels(labelsFromRoute(to)))
   })
 
+  const unregisterError = router.onError((error, to) => {
+    getClientLogger().error(error, { errorType: 'RouteError' }, { path: to.path })
+  })
+
   function stop(): void {
     if (stopped) return
     stopped = true
     unregister()
+    unregisterError()
     clearAdapterStop(stop)
   }
 

@@ -8,6 +8,7 @@ Each section below has the same four headings: Gives, Fits when, Add, Mistakes. 
 
 ### Gives
 - Uncaught errors and unhandled rejections from the browser, written to Cloud Logging with the source file and line resolved from source maps.
+- Errors React or Vue catch, which never reach `window`: `onCaughtError: handleReactError` on `createRoot` and `app.config.errorHandler = handleVueError`, each logged once as an `ERROR`.
 - Labels on every entry: `appId`, `releaseId`, `screen`, `platform`, `browser`, `errorType`, `userId` (after `setUser`), the last 50 breadcrumbs.
 - Rate limits: 50-log burst per tab, 3 full copies of a repeated error, then a counted summary.
 
@@ -15,6 +16,7 @@ Each section below has the same four headings: Gives, Fits when, Add, Mistakes. 
 - The app imports from `firebase/functions` or has a `fetch` to its own backend, and has no `initLogger(` call.
 - `window.onerror`, `addEventListener('error'` or `unhandledrejection` handlers that only `console.error`.
 - `catch` blocks that swallow an error and log nothing.
+- `createRoot(` with no `onCaughtError` (any React app: a data router always adds its own error boundary), or `createApp(` with no `app.config.errorHandler`.
 
 ### Add
 ```ts
@@ -30,10 +32,21 @@ export const logger = initLogger({
 
 setupGlobalErrorHandler()
 ```
+React 19 and Vue 3 catch errors before `window` sees them. Hand them to fsl where the framework catches them:
+```ts
+import { handleReactError, handleVueError } from '@dasasian/firebase-structured-logger/client'
+
+createRoot(document.getElementById('root')!, { onCaughtError: handleReactError }).render(<App />)
+
+app.config.errorHandler = handleVueError
+```
 The receiving end is `createClientLogFunction` or `createHttpLogHandler` from `@dasasian/firebase-structured-logger/functions`.
 
 ### Mistakes
 - `initLogger(` without `minSeverity` in a Vite app whose config has `define: { 'process.env': {} }` → `NODE_ENV` reads undefined and the floor becomes `DEBUG` in production → pass `minSeverity` explicitly.
+- `createRoot(` without `onCaughtError` → React's default error page, every `errorElement` and every `ErrorBoundary` catch the error, so `window` never sees it and nothing is logged → pass `onCaughtError: handleReactError`.
+- An `errorElement` or error boundary that calls `logger.error` → the error is also logged by `onCaughtError`, so it appears twice → show the UI and do not log.
+- `createApp(` without `app.config.errorHandler` → Vue's component errors are not logged → assign `app.config.errorHandler = handleVueError`.
 - A second `new Logger(` or a second `initLogger(` expected to be independent → the client logger is one session singleton → call `initLogger` once and import the returned logger.
 - `logger.info(` expected in production logs with no `minSeverity: 'INFO'` → the default floor in production is `WARNING` on the client and on the function → set `minSeverity` on both sides.
 - `minLogLevel`, `bucketName`, `triggerTestLog(`, `rateLimitOptions.sessionLimit`, `refillPerMinute`, `errorReserve` → renamed in 1.0, removed in 2.0 → use `minSeverity`, `bucket`, `sendTestLog`, `burstLimit`, `rechargeSecondsPerLog`, `reservedForErrors`.
@@ -70,6 +83,7 @@ bc.handledError('draft_save_failed', { attempt: 1 })
 ### Gives
 - One `nav` breadcrumb per page change, and the labels `screen`, `route` (pattern, e.g. `/orders/:id/items`), `path` (real path, e.g. `/orders/1042/items`) on every entry.
 - Query string never recorded; fragment recorded only when it is a route.
+- Route errors, logged once each after the page is recorded, with the labels of the page they happened on: with React Router, a loader or action that throws or returns an error response (an `Error` or 5xx as `ERROR`, a 4xx such as 404 as `WARNING`); with Vue Router, a guard that throws or a lazy route that fails to load (`ERROR`). `errorType` is `RouteError`.
 - Two ways in, one source runs at a time: `enableNavigation()` wraps `history.pushState` and `replaceState`; a router adapter listens to the router. An adapter wins over `enableNavigation()`.
 
 ### Fits when
@@ -107,6 +121,7 @@ enableNavigation()
 - `setScreen(` or `logger.setScreen(` while navigation is on → same, ignored with a warning → delete the call and name the screen with `handle: { screen }` (React Router) or the route `name` (Vue Router).
 - A `<Navigate>` redirect with a hand-written `bc.action(` or `navigatedTo(` beside it → the adapter already records the page that holds the `<Navigate>` and the page it ends on, so the hand-written call adds a third breadcrumb → delete the call.
 - Per-route hand-written `navigatedTo(` calls in an app with a router → the adapter already sees every route change → use the adapter and remove them.
+- Route errors expected from `<BrowserRouter>` or `enableNavigation()` → they have no loaders or actions, so there is nothing to log → use a data router (`createBrowserRouter`) with the adapter.
 - `enableNavigation()` and an adapter both called → the adapter wins and a warning is printed → keep only the adapter.
 - `enableReactRouterNavigation(` called with `<BrowserRouter>` (no data router) → the adapter reads `router.subscribe` and `router.state`, which only a data router has → use `enableNavigation()`, or move to `createBrowserRouter` and then use the adapter.
 - A `labelsFor` passed together with an adapter → `labelsFor` does not apply to adapters → use the adapter's `adjust` option.

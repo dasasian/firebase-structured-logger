@@ -5,6 +5,6 @@ export { initLogger, getClientLogger, sendFeedback, sendTestLog, triggerTestLog 
 // instance. A second `new Logger(...)` would share all of them while looking
 // independent. Use initLogger() / getClientLogger(); annotate with Logger<T>.
 export type { Logger, InitLoggerConfig, FeedbackOptions, RateLimitConfig } from './logger'
-export { setupGlobalErrorHandler, handleReactError } from './errorHandler'
+export { setupGlobalErrorHandler, handleReactError, handleVueError } from './errorHandler'
 export { addBreadcrumb, bc } from './breadcrumbs'
 export type { LogSeverity, LogPayload, BreadcrumbEntry, BaseLabels } from '../shared/types'

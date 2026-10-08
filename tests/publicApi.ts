@@ -32,6 +32,7 @@ const EXPECTED: Record<string, string[]> = {
     'bc',
     'getClientLogger',
     'handleReactError',
+    'handleVueError',
     'initLogger',
     'sendFeedback',
     'sendTestLog',

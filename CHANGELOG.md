@@ -18,6 +18,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`fsl doctor` finding `skill-out-of-date`** (warning): a skill's `fsl-version` differs from the fsl running doctor. Skills without `fsl-version` are skipped.
 - **`BaseLabels`** declares every label fsl writes, each with a one-line comment: `repeatKey`, `repeatOf`, `repeatCount`, `firstSeen`, `lastSeen`, `sentLate`, `truncated`, `hasAttachments`, `logId`, `functionName`, `trace`, `run`, `slow`, `step`, `feedback`.
 
+- **Errors a framework catches are logged where it catches them.** `createRoot(el, { onCaughtError: handleReactError })` and `app.config.errorHandler = handleVueError` (new) send React and Vue render errors, `handleReactError` now accepts what React 19 passes, and the React Router and Vue Router adapters log their router's errors on their own (`errorType` `RouteError`: a loader or action error or 5xx response as `ERROR`, a 4xx response as `WARNING`; a guard that throws or a lazy route that fails to load as `ERROR`). The function an adapter returns stops its error listener too.
 - **`/testing` `capture.settled()`** waits for every send already started, so a test can read `entries` after a log call with attachments or after a repeat summary; log methods still return `void`.
 
 ### Removed

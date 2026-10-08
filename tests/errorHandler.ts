@@ -9,7 +9,7 @@
 import { dispatchErrorEvent, dispatchRejectionEvent, listenerCount } from './browserStubs.js'
 
 import { initLogger } from '../src/client/logger.js'
-import { setupGlobalErrorHandler, handleReactError } from '../src/client/errorHandler.js'
+import { setupGlobalErrorHandler, handleReactError, handleVueError } from '../src/client/errorHandler.js'
 import { resetRateLimiter, configureRateLimiter } from '../src/client/rateLimiter.js'
 import { clearBreadcrumbs } from '../src/client/breadcrumbs.js'
 import type { LogPayload } from '../src/shared/types.js'
@@ -125,6 +125,20 @@ async function testHandleReactError() {
   assert('the component stack is not in the error payload', !payload?.jsonPayload?.error?.stack?.includes('at ProductCard'))
 }
 
+async function testHandleVueError() {
+  console.log('\nTest: handleVueError logs a VueError with Vue\'s info in context')
+  reset()
+
+  handleVueError(new Error('setup failed'), {}, 'setup function')
+  await flush()
+
+  assert('exactly one log was sent', captured.length === 1, `got: ${captured.length}`)
+  const payload = captured[0]
+  assert('it is an ERROR', payload?.severity === 'ERROR')
+  assert('errorType is VueError', payload?.labels.errorType === 'VueError', `got: ${payload?.labels.errorType}`)
+  assert('info is in context', (payload?.jsonPayload?.context as { info?: string })?.info === 'setup function')
+}
+
 // --- Interaction with the rate limiter ---
 
 async function testDuplicateCrashesAreSuppressed() {
@@ -221,6 +235,7 @@ async function run() {
   await testUnhandledRejection()
   await testRejectionWithNonError()
   await testHandleReactError()
+  await testHandleVueError()
   await testDuplicateCrashesAreSuppressed()
   await testCrossOriginScriptError()
   await testCrossOriginErrorsAreNotAllTheSame()

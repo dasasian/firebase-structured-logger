@@ -133,7 +133,7 @@ app.config.errorHandler = handleVueError
 ```
 
 Each caught error is logged once as an `ERROR` (`errorType` `ReactError` or `VueError`) with
-the component stack, and with the page labels when navigation is on. Pass only
+the component stack (React) or Vue's `info`, and with the page labels when navigation is on. Pass only
 `onCaughtError`: an error no boundary catches already reaches `window`. Your own
 `errorElement` or boundary shows the UI and does not log, or the error is logged twice.
 Errors from a router's loaders and actions are the router adapter's job — see
