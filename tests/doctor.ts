@@ -1,5 +1,5 @@
 /**
- * `fsl doctor` — the 7 findings and the setup summary, against fake projects.
+ * `fsl doctor` — the findings and the setup summary, against fake projects.
  *
  * Each fake project lives in its own temp directory, built fresh per test — never
  * `smoke/functions` or `smoke/cloudrun`, which need the maintainer's private setup
@@ -306,6 +306,72 @@ function testEmbeddedMapsWithoutReleaseQuiet() {
   cleanup([root])
 }
 
+// --- skill-out-of-date ---
+
+function writeSkill(root: string, name: string, content: string): void {
+  const dir = path.join(root, '.claude', 'skills', name)
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'SKILL.md'), content)
+}
+
+function stamped(version: string): string {
+  return `---\nname: x\ndescription: y\nfsl-version: ${version}\n---\n\n# x\n`
+}
+
+function testSkillOutOfDateFires() {
+  console.log('\nTest: skill-out-of-date fires when a skill is stamped 1.3.0 and node_modules has 1.4.0')
+  const { root } = firebaseProject()
+  writePackage(root, '@dasasian/firebase-structured-logger', '1.4.0')
+  writeSkill(root, 'fsl-review', stamped('1.3.0'))
+  const report = runDoctor({ projectRoot: root })
+  const finding = report.findings.find((f) => f.id === 'skill-out-of-date')
+  assert('skill-out-of-date fires', finding !== undefined)
+  assert('at warning level', finding?.level === 'warning')
+  assert('names both versions', !!finding && finding.message.includes('1.3.0') && finding.message.includes('1.4.0'))
+  assert('fix is install-skills', finding?.fix === 'npx fsl install-skills')
+  cleanup([root])
+}
+
+function testSkillOutOfDateQuietWhenEqual() {
+  console.log('\nTest: skill-out-of-date stays quiet when the versions are equal')
+  const { root } = firebaseProject()
+  writePackage(root, '@dasasian/firebase-structured-logger', '1.4.0')
+  writeSkill(root, 'fsl-review', stamped('1.4.0'))
+  const report = runDoctor({ projectRoot: root })
+  assert('no finding of any kind about skills', !findingIds(report).includes('skill-out-of-date') && !findingIds(report).includes('could-not-check'))
+  cleanup([root])
+}
+
+function testSkillWithoutStampIsNotOurs() {
+  console.log('\nTest: a skill with no frontmatter, or no fsl-version, is skipped')
+  const { root } = firebaseProject()
+  writePackage(root, '@dasasian/firebase-structured-logger', '1.4.0')
+  writeSkill(root, 'plain', '# no frontmatter\n')
+  writeSkill(root, 'unstamped', '---\nname: mine\ndescription: mine\n---\n')
+  const report = runDoctor({ projectRoot: root })
+  assert('no finding', !findingIds(report).includes('skill-out-of-date') && !findingIds(report).includes('could-not-check'))
+  cleanup([root])
+}
+
+function testStampedSkillWithoutInstalledPackageIsCouldNotCheck() {
+  console.log('\nTest: a stamped skill and no package in node_modules is could-not-check, not a pass')
+  const { root } = firebaseProject()
+  writeSkill(root, 'fsl-review', stamped('1.3.0'))
+  const report = runDoctor({ projectRoot: root })
+  const finding = report.findings.find((f) => f.id === 'could-not-check')
+  assert('could-not-check fires as an error', finding?.level === 'error')
+  assert('says to run npm install', finding?.fix === 'Run npm install.')
+  cleanup([root])
+}
+
+function testNoSkillsAndNoPackageIsQuiet() {
+  console.log('\nTest: with no stamped skills the package need not be installed')
+  const { root } = firebaseProject()
+  const report = runDoctor({ projectRoot: root })
+  assert('no skill finding, no could-not-check', findingIds(report).length === 0, findingIds(report).join(','))
+  cleanup([root])
+}
+
 // --- Setup summaries ---
 
 function testFirebaseSetupSummary() {
@@ -360,6 +426,11 @@ function run() {
   testLogsInsideFunctionsSourceQuietWhenIgnored()
   testLogsInsideFunctionsSourceQuietWithNoJsonl()
   testLogsInsideFunctionsSourceMultiCodebase()
+  testSkillOutOfDateFires()
+  testSkillOutOfDateQuietWhenEqual()
+  testSkillWithoutStampIsNotOurs()
+  testStampedSkillWithoutInstalledPackageIsCouldNotCheck()
+  testNoSkillsAndNoPackageIsQuiet()
   testFirebaseSetupSummary()
   testCloudRunSetupSummary()
   reportResults()

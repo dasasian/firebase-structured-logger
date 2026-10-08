@@ -154,8 +154,24 @@ function testJsonCarriesLogsInsideFunctionsSource() {
   fs.rmSync(root, { recursive: true, force: true })
 }
 
+function testJsonCarriesSkillOutOfDate() {
+  console.log('\nTest: --json carries skill-out-of-date for a stale skill')
+  const { root } = cleanFirebaseProject()
+  writePackage(root, '@dasasian/firebase-structured-logger', '1.4.0')
+  const skillDir = path.join(root, '.claude', 'skills', 'fsl-review')
+  fs.mkdirSync(skillDir, { recursive: true })
+  fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\nname: fsl-review\ndescription: x\nfsl-version: 1.3.0\n---\n')
+  const out = runCli(root, ['--json'])
+  const findings = (JSON.parse(out.stdout.trim()) as { findings: Array<Record<string, unknown>> }).findings
+  const finding = findings.find((f) => f.id === 'skill-out-of-date')
+  assert('skill-out-of-date is present', finding !== undefined, JSON.stringify(findings))
+  assert('at warning level, with the install-skills fix', finding?.level === 'warning' && finding?.fix === 'npx fsl install-skills', JSON.stringify(finding))
+  fs.rmSync(root, { recursive: true, force: true })
+}
+
 function run() {
   testCleanExitsZero()
+  testJsonCarriesSkillOutOfDate()
   testErrorExitsOne()
   testWarningExitsZeroWithoutStrict()
   testWarningExitsOneWithStrict()

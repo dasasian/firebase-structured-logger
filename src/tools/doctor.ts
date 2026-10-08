@@ -2,8 +2,8 @@
  * `fsl doctor` — checks a project's setup from disk and reports how it will behave.
  *
  * Every fact comes from a file with a fixed format: `firebase.json`, `package.json`,
- * each installed package's own `package.json`, `dist/`, and the embedded `.release`
- * marker. Nothing
+ * each installed package's own `package.json`, the frontmatter of installed skills,
+ * `dist/`, and the embedded `.release` marker. Nothing
  * here parses source code or guesses at behavior — a check that cannot read what it
  * needs reports `could-not-check`, never a pass (see CLAUDE.md, "fsl doctor — facts,
  * not guesses"). The finding ids, levels, and the `--json` shape are the README's
@@ -32,6 +32,7 @@ export type FindingId =
   | 'unsupported-peer'
   | 'embedded-maps-without-release'
   | 'logs-inside-functions-source'
+  | 'skill-out-of-date'
 
 export interface DoctorSetup {
   kind: SetupKind
@@ -381,6 +382,50 @@ function checkEmbeddedMapsWithoutRelease(backendDir: string | null, findings: Do
   })
 }
 
+const OWN_PACKAGE_NAME = '@dasasian/firebase-structured-logger'
+
+function readSkillVersion(skillFile: string): string | undefined {
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(fs.readFileSync(skillFile, 'utf-8'))
+  return frontmatter ? /^fsl-version:[ \t]*(\S+)[ \t]*$/m.exec(frontmatter[1])?.[1] : undefined
+}
+
+function stampedSkills(projectRoot: string): { name: string; version: string }[] {
+  const skillsDir = path.join(projectRoot, '.claude', 'skills')
+  if (!fs.existsSync(skillsDir)) return []
+  const stamped: { name: string; version: string }[] = []
+  for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true })) {
+    const skillFile = path.join(skillsDir, entry.name, 'SKILL.md')
+    if (!entry.isDirectory() || !fs.existsSync(skillFile)) continue
+    const version = readSkillVersion(skillFile)
+    if (version) stamped.push({ name: entry.name, version })
+  }
+  return stamped
+}
+
+function checkSkillsOutOfDate(projectRoot: string, findings: DoctorFinding[]): void {
+  const stamped = stampedSkills(projectRoot)
+  if (stamped.length === 0) return
+
+  const installed = readPackageJson(path.join(projectRoot, 'node_modules', ...OWN_PACKAGE_NAME.split('/')))
+  if (!installed.ok || typeof installed.pkg.version !== 'string') {
+    findings.push(couldNotCheck(
+      `${stamped.length} installed skill(s) carry an fsl-version, but ${OWN_PACKAGE_NAME} is not readable in node_modules, so they cannot be compared.`,
+      'Run npm install.',
+    ))
+    return
+  }
+
+  for (const skill of stamped) {
+    if (skill.version === installed.pkg.version) continue
+    findings.push({
+      id: 'skill-out-of-date',
+      level: 'warning',
+      message: `.claude/skills/${skill.name} was installed by fsl ${skill.version}; node_modules has ${installed.pkg.version}.`,
+      fix: 'npx fsl install-skills',
+    })
+  }
+}
+
 /** This package's own `package.json`, read at runtime — never copied into doctor. */
 function readOwnPackageJson(): Record<string, unknown> {
   const read = readPackageJson(path.join(__dirname, '..', '..'))
@@ -433,6 +478,7 @@ export function runDoctor(options: DoctorOptions): DoctorReport {
     checkLogsInsideFunctionsSource(options.projectRoot, allOf(firebaseJson.config.functions), findings)
   }
   checkEmbeddedMapsWithoutRelease(backendDir, findings)
+  checkSkillsOutOfDate(options.projectRoot, findings)
 
   const setup = describeSetup(options.projectRoot, { kind, backendDir, distDirs }, searchDirs, callable)
 

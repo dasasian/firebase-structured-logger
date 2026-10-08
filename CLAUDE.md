@@ -213,6 +213,13 @@ checked. The finding ids and `--json` fields are public API from 1.0.
 The skills and the CLI are read by a coding agent far more often than by a person, and
 they are designed for that reader.
 
+`CAPABILITIES.md` is written for an agent reader, never a person: every capability has the
+same four headings in the same order (Gives, Fits when, Add, Mistakes); each section stands alone,
+with no "see above" and no pointer to another section; Fits when lists things to grep for
+(imports, calls, markup), not situations; Add is one entry point and one minimal example
+that `tests/capabilities.ts` checks against the real exports; each mistake reads
+pattern → why it is wrong → the fix. No motivation, no history. Keep that shape when you edit it.
+
 **Facts live in the package; skills hold only steps.** `install-skills` copies a skill
 into the app, and the copy does not change when the app updates fsl — POUR5 ran a copy
 that still taught `bc.nav` for months. So what fsl can do is in `CAPABILITIES.md`, which

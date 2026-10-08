@@ -13,11 +13,15 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`fsl logs schema`** lists every label in the logs with counts and sample values (none for `userId` or keys containing `email`, `name`, `phone`), and keeps labels your code writes with `--add`. **`fsl logs attachments <logId>`** downloads an entry's files.
 - **The logs folder ignores itself in git.** Every folder fsl creates for logs (`logLocalDir`, `.fsl-logs/`) gets a `.gitignore` of `*` unless one exists, so the README's `.gitignore` step is gone. `fsl logs` now says on stderr when 0 entries matched, and `fsl logs schema` keeps samples for fsl's own `functionName`.
 - **`/fsl-logs` skill** for coding agents, installed by `fsl install-skills`.
+- **`/fsl-review [scope]` skill** and **`CAPABILITIES.md`**. The skill reads `CAPABILITIES.md` from the installed package and the code in the scope (the app, a folder or a file), and proposes how fsl could best serve that code. It proposes and stops. `CAPABILITIES.md` ships in the package: for each capability, what it gives, the code signals it fits, how to add it, and the mistakes to avoid.
+- **`fsl install-skills` writes `fsl-version`** (the package version) into each skill's frontmatter, and asks before removing an installed `logs` or `query-logs`; `--force` answers yes.
+- **`fsl doctor` finding `skill-out-of-date`** (warning): a skill's `fsl-version` differs from the fsl in `node_modules`. Skills without `fsl-version` are skipped; stamped skills with fsl missing from `node_modules` report `could-not-check`.
 - **`BaseLabels`** declares every label fsl writes, each with a one-line comment: `repeatKey`, `repeatOf`, `repeatCount`, `firstSeen`, `lastSeen`, `sentLate`, `truncated`, `hasAttachments`, `logId`, `functionName`, `trace`, `run`, `slow`, `step`, `feedback`.
 
 ### Removed
 
 - **`/query-logs` skill**, which depended on `firebase-mcp-server`. `fsl install-skills` offers to remove an installed copy.
+- **`/logs` skill**, replaced by `/fsl-review`: it carried facts in its own copy, which went stale. `fsl install-skills` offers to remove an installed copy.
 
 ## [1.3.0] — 2026-10-07
 

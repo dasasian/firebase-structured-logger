@@ -122,7 +122,7 @@ Commands:
   fsl install-skills [--global] [--force]
       Copy skills/ to .claude/skills/ (project) or ~/.claude/skills/ (--global).
       Prompts before overwriting existing skills, and before removing a skill this
-      package no longer ships (query-logs). Use --force to skip prompts.
+      package no longer ships (logs, query-logs). Use --force to skip prompts.
 
   fsl logs [--where field=value]... [--select a,b] [--group-by f] [--order-by "f desc"]
            [--limit N] [--distinct f] [--since 1h] [--local] [--project <id>] [--repeats <repeatKey>]
