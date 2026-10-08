@@ -13,6 +13,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`withLogging` wraps `onSchedule` and `onTaskDispatched`** as well as `onCall`: pass `ScheduledEvent` or `Request<Data>` as the second type argument. `userId` comes from `auth.uid` when the event has one. `CAPABILITIES.md` no longer lists `onRequest(`, which `withLogging` cannot wrap.
 - **`fsl logs`** reads production logs through `gcloud logging read`, or `.fsl-logs/` with `--local`, with flags named after SQL clauses (`--where`, `--select`, `--group-by`, `--order-by`, `--limit`, `--distinct`, `--since`, `--repeats`). One JSON entry per line; a field or flag it does not know is an error that names the valid ones.
 - **`fsl logs schema`** lists every label in the logs with counts and sample values (none for `userId` or keys containing `email`, `name`, `phone`), and keeps labels your code writes with `--add`. **`fsl logs attachments <logId>`** downloads an entry's files.
 - **The logs folder ignores itself in git.** Every folder fsl creates for logs (`logLocalDir`, `.fsl-logs/`) gets a `.gitignore` of `*` unless one exists, so the README's `.gitignore` step is gone. `fsl logs` now says on stderr when 0 entries matched, and `fsl logs schema` keeps samples for fsl's own `functionName`.

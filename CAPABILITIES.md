@@ -410,7 +410,7 @@ logError(err, { orderId })
 - `createClientLogFunction` is a ready callable that receives browser logs. `createHttpLogHandler` is an `(req, res)` handler for Express or any Node server on Google Cloud, for backends that are not Cloud Functions.
 
 ### Fits when
-- `onCall(` or `onRequest(` handlers whose body is not wrapped in `withLogging(`.
+- `onCall(`, `onSchedule(` or `onTaskDispatched(` handlers whose body is not wrapped in `withLogging(`.
 - `export const logFrontendEvent` absent from the functions entry file, while the client sets `logFunction: httpsCallable(`.
 - `express()` or `new Hono()` servers on Cloud Run with a client `fetch` to a `/log` path.
 
@@ -421,6 +421,13 @@ import { withLogging, logInfo, createClientLogFunction } from '@dasasian/firebas
 
 export const checkout = onCall(
   withLogging({ functionName: 'checkout' }, async (request) => {
+    logInfo('started')
+  }),
+)
+
+export const nightly = onSchedule(
+  'every day 02:00',
+  withLogging<AppLabels, ScheduledEvent>({ functionName: 'nightly' }, async (event) => {
     logInfo('started')
   }),
 )
@@ -438,7 +445,9 @@ app.post('/log', createHttpLogHandler({ authorize: async (req) => isSignedIn(req
 ### Mistakes
 - `createHttpLogHandler({` without `authorize` → required; an open endpoint writes to the log bill on anyone's say-so → pass a function, or `'unauthenticated'` only when a gateway or IAM already gates it.
 - `createHttpLogHandler` mounted before `express.json()` → body parsing is the app's job → mount the parser first, with a limit that fits attachments.
+- `withLogging` inside `onSchedule(` or `onTaskDispatched(` without the event type → `request` is typed as `CallableRequest` and `tsc` rejects it → pass `ScheduledEvent` (from `firebase-functions/v2/scheduler`) or `Request<Data>` (from `firebase-functions/v2/tasks`) as the second type argument.
+- `withLogging` around an `onRequest(` handler → it takes one argument and `onRequest` handlers take `(req, res)` → leave it unwrapped.
 - `withLogging` used outside Cloud Functions → it is a Cloud Functions tool → use `logInfo` and friends directly.
-- `userId` passed as a label inside `withLogging` → taken from `request.auth.uid` already → remove it.
+- `userId` passed as a label inside `withLogging` → taken from `request.auth.uid` already (absent in a schedule) → remove it.
 - A handler that calls `logInfo(` with no `withLogging(` around it → entries carry no `functionName` or `userId` → wrap it.
 - `maxInstances` raised on `createClientLogFunction` from reading the code alone → `maxInstances: 1` is the cost guard → raise it only when logs show dropped client entries.
