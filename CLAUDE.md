@@ -267,9 +267,8 @@ contains `email`, `name` or `phone`, so the file can be pasted into an issue; ke
 `BASE_LABEL_KEYS` other than `userId` are fsl's own and keep theirs (`functionName` is a
 code name, not a person's). The cache is `.fsl-logs/schema.json`, per machine, and ignored
 by git because every folder fsl creates for logs holds a `.gitignore` of `*`
-(`makeSelfIgnoringFolder`, node-only, never overwrites): apps that skip the README's old
-step would otherwise commit dev logs and downloaded attachments, which can hold user data.
-The file lives in `src/shared` but imports `fs`, so nothing under `src/client` may import it.
+(`makeSelfIgnoringFolder`, which never overwrites one): dev logs and downloaded
+attachments can hold user data, and a setup step an app must remember is one it forgets.
 
 **`install-skills` asks before it removes a skill**, and `--force` answers yes. It
 removes only skills this package used to ship (`logs`, `query-logs`), never anything an
