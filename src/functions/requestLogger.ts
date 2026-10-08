@@ -11,13 +11,13 @@ interface RequestLoggerOptions<AppLabels extends Record<string, string | undefin
 }
 
 function writerFor<AppLabels extends Record<string, string | undefined>>(
-  request: CallableRequest,
+  request: object,
   extra?: RequestLoggerOptions<AppLabels>,
 ): LogWriter {
   return createLogWriter(
     cleanLabels({
       functionName: extra?.functionName,
-      userId: request.auth?.uid,
+      userId: (request as { auth?: { uid?: string } }).auth?.uid,
       appId: extra?.appId,
       ...extra?.labels,
     }),
@@ -25,7 +25,7 @@ function writerFor<AppLabels extends Record<string, string | undefined>>(
 }
 
 /**
- * Wrap an onCall handler so every log inside it carries the request's labels.
+ * Wrap an onCall, onSchedule or onTaskDispatched handler so every log inside it carries the request's labels.
  *
  * This is the correct way to scope a request logger. The store is bound with
  * `AsyncLocalStorage.run()`, which restores the previous context when the
@@ -38,6 +38,10 @@ function writerFor<AppLabels extends Record<string, string | undefined>>(
  *   }),
  * )
  *
+ * For the other triggers, name the event type: `withLogging<AppLabels, ScheduledEvent>`
+ * inside `onSchedule`, `withLogging<AppLabels, Request<Data>>` inside `onTaskDispatched`.
+ * `userId` comes from `auth.uid` when the event has one; a schedule has none.
+ *
  * Labels that depend on the request are computed per call:
  *
  * @example
@@ -48,8 +52,8 @@ function writerFor<AppLabels extends Record<string, string | undefined>>(
  */
 export function withLogging<
   AppLabels extends Record<string, string | undefined> = Record<string, string | undefined>,
-  Req extends CallableRequest = CallableRequest,
-  Res = unknown,
+  Req extends object = CallableRequest,
+  Res = any,
 >(
   options:
     | RequestLoggerOptions<AppLabels>

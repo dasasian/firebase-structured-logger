@@ -20,6 +20,7 @@ if (process.env.FUNCTIONS_EMULATOR !== 'true') {
 const LOG_DIR = './test-requestlogger-output'
 
 import type { CallableRequest } from 'firebase-functions/v2/https'
+import type { ScheduledEvent } from 'firebase-functions/v2/scheduler'
 import { initLogger } from '../src/functions/logger.js'
 import { withLogging, getLogger } from '../src/functions/requestLogger.js'
 import { assert, reportResults, readLastEntry, clearLog } from './testHelpers.js'
@@ -37,6 +38,24 @@ function makeCallableRequest(uid?: string): CallableRequest {
 
 function lastLabels(): Record<string, string> {
   return (readLastEntry(LOG_DIR)?.labels ?? {}) as Record<string, string>
+}
+
+async function testScheduleHandlerHasLabelsAndNoUserId() {
+  console.log('\nTest: a schedule handler gets the labels and no userId')
+  clearLog(LOG_DIR)
+
+  const event = { scheduleTime: '2026-01-01T00:00:00Z' } as ScheduledEvent
+  await withLogging<Record<string, string | undefined>, ScheduledEvent>(
+    { functionName: 'nightly', labels: { job: 'cleanup' } },
+    async () => {
+      getLogger().info('tick')
+    },
+  )(event)
+
+  const labels = lastLabels()
+  assert('functionName is seeded', labels.functionName === 'nightly')
+  assert('custom label is seeded', labels.job === 'cleanup')
+  assert('userId is absent', !('userId' in labels))
 }
 
 // --- Label seeding ---
@@ -313,6 +332,7 @@ async function run() {
   await testCustomLabelsAreSeeded()
   await testUndefinedLabelsAreStripped()
   await testPerCallLabelsOverrideSeeded()
+  await testScheduleHandlerHasLabelsAndNoUserId()
   await testGetLoggerReturnsTheRequestWriter()
   await testScopeSurvivesAwait()
   await testSequentialRequestsAreIndependent()
