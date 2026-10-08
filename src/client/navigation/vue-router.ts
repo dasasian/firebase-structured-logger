@@ -1,5 +1,5 @@
 import { setCurrentRoute } from '../breadcrumbs'
-import { getClientLogger } from '../logger'
+import { getLoggerForFrameworkHook } from '../logger'
 import { createAdjuster, registerAdapterStop, clearAdapterStop } from './adapterShared'
 import type { NavigationLabels } from '../../shared/types'
 
@@ -62,7 +62,7 @@ export function enableVueRouterNavigation(
   })
 
   const unregisterError = router.onError((error, to) => {
-    getClientLogger().error(error, { errorType: 'RouteError' }, { path: to.path })
+    getLoggerForFrameworkHook()?.error(error, { errorType: 'RouteError' }, { path: to.path })
   })
 
   function stop(): void {

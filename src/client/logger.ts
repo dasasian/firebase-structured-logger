@@ -495,6 +495,23 @@ export function initLogger<
   return instance as Logger<AppLabels>
 }
 
+let warnedLoggerMissingInHook = false
+
+/**
+ * For code that runs inside a framework's or router's own error path (`handleReactError`,
+ * `handleVueError`, the router adapters), where a throw would turn an error the framework
+ * handled into an exception in the app. Returns `undefined` before `initLogger()`, saying
+ * once on the console that errors are not being logged. Not exported from any entry point.
+ */
+export function getLoggerForFrameworkHook(): Logger<Record<string, string | undefined>> | undefined {
+  if (instance) return instance
+  if (!warnedLoggerMissingInHook) {
+    warnedLoggerMissingInHook = true
+    console.warn('[fsl] Framework error not logged: initLogger() has not run')
+  }
+  return undefined
+}
+
 export function getClientLogger<
   AppLabels extends Record<string, string | undefined> = Record<string, string | undefined>,
 >(): Logger<AppLabels> {

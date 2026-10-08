@@ -136,6 +136,8 @@ Each caught error is logged once as an `ERROR` (`errorType` `ReactError` or `Vue
 the component stack (React) or Vue's `info`, and with the page labels when navigation is on. Pass only
 `onCaughtError`: an error no boundary catches already reaches `window`. Your own
 `errorElement` or boundary shows the UI and does not log, or the error is logged twice.
+Before `initLogger()` has run these hooks log nothing and say so once on the console; they
+never throw into your framework.
 Errors from a router's loaders and actions are the router adapter's job — see
 [Navigation, automatically](#navigation-automatically).
 

@@ -1,5 +1,5 @@
 import { setCurrentRoute } from '../breadcrumbs'
-import { getClientLogger } from '../logger'
+import { getLoggerForFrameworkHook } from '../logger'
 import { createAdjuster, registerAdapterStop, clearAdapterStop } from './adapterShared'
 import type { NavigationLabels } from '../../shared/types'
 
@@ -61,7 +61,8 @@ function asErrorResponse(value: unknown): ErrorResponseLike | undefined {
 }
 
 function logRouteError(routeId: string, thrown: unknown): void {
-  const logger = getClientLogger()
+  const logger = getLoggerForFrameworkHook()
+  if (!logger) return
   const labels = { errorType: 'RouteError' }
   const response = asErrorResponse(thrown)
   if (!response) {

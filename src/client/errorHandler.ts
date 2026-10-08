@@ -1,4 +1,4 @@
-import { getClientLogger } from './logger'
+import { getClientLogger, getLoggerForFrameworkHook } from './logger'
 
 /**
  * A script loaded cross-origin without CORS has its error withheld by the
@@ -60,7 +60,7 @@ export function handleReactError(
   error: unknown,
   errorInfo: { componentStack?: string | null },
 ): void {
-  getClientLogger().error(
+  getLoggerForFrameworkHook()?.error(
     error,
     { errorCategory: 'crash', errorType: 'ReactError' },
     { componentStack: errorInfo.componentStack },
@@ -69,7 +69,7 @@ export function handleReactError(
 
 /** Assign to `app.config.errorHandler`. `info` is Vue's name for where the error happened. */
 export function handleVueError(error: unknown, _instance: unknown, info: string): void {
-  getClientLogger().error(
+  getLoggerForFrameworkHook()?.error(
     error,
     { errorCategory: 'crash', errorType: 'VueError' },
     { info },
