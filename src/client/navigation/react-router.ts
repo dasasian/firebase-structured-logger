@@ -55,7 +55,8 @@ function labelsFromState(state: ReactRouterStateLike): NavigationLabels {
 /**
  * Needs a data router (`createBrowserRouter`, `createHashRouter`, `createMemoryRouter`).
  * One crumb per page: the first once the router is initialized, then one per
- * `location.key`, so a loader `redirect()` — on first load too — records only the page it ends on, while a `<Navigate>` element records both pages.
+ * `location.key`, so a loader `redirect()` — on first load too — records only the page
+ * it ends on, while a `<Navigate>` element records both pages.
  * `path` keeps the `basename`; `route` never has it. A second call stops the first.
  */
 export function enableReactRouterNavigation(
@@ -67,7 +68,7 @@ export function enableReactRouterNavigation(
   let lastKey = router.state.location.key
   let sawInitialized = router.state.initialized
 
-  function record(state: ReactRouterStateLike): void {
+  function recordPage(state: ReactRouterStateLike): void {
     if (state.matches.length === 0) return
     setCurrentRoute(adjustLabels(labelsFromState(state)))
   }
@@ -77,12 +78,12 @@ export function enableReactRouterNavigation(
       if (!state.initialized) return
       sawInitialized = true
       lastKey = state.location.key
-      record(state)
+      recordPage(state)
       return
     }
     if (state.location.key === lastKey) return
     lastKey = state.location.key
-    record(state)
+    recordPage(state)
   })
 
   function stop(): void {
@@ -95,7 +96,7 @@ export function enableReactRouterNavigation(
   registerAdapterStop(stop)
 
   if (sawInitialized) {
-    record(router.state)
+    recordPage(router.state)
   }
 
   return stop
