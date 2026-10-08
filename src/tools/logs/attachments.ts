@@ -1,5 +1,6 @@
 import * as fs from 'fs'
 import * as path from 'path'
+import { makeSelfIgnoringFolder } from '../../shared/ignoredFolder.js'
 import { ATTACHMENT_PREFIX } from '../../shared/paths.js'
 import { LOCAL_LOG_DIR } from './entry.js'
 import { UsageError } from './flags.js'
@@ -29,6 +30,7 @@ export async function downloadAttachments(run: GcloudRunner, bucket: string, log
   const listing = await run(['storage', 'ls', `${source}/`])
   const names = listing.split('\n').map((line) => line.trim()).filter(Boolean).map((url) => url.slice(url.lastIndexOf('/') + 1))
   const folder = attachmentFolder(cwd, logId)
+  makeSelfIgnoringFolder(path.join(cwd, LOCAL_LOG_DIR))
   fs.mkdirSync(folder, { recursive: true })
   if (names.length > 0) await run(['storage', 'cp', `${source}/*`, folder])
   return { names, folder }

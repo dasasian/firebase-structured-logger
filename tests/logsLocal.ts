@@ -75,9 +75,21 @@ async function testCliProcessReadsLocalFiles() {
   assert('schema.json is not created by a failed run', !fs.existsSync(path.join(cwd, '.fsl-logs', 'schema.json')))
 }
 
+async function testEmulatorFolderIgnoresItself() {
+  console.log('\nTest: the emulator logger gives logLocalDir a .gitignore of * and keeps an existing one')
+  const cwd = tempProject()
+  const dir = path.join(cwd, 'custom-logs')
+  withoutConsole(() => initLogger({ appId: 'local-app', logLocalDir: dir }))
+  assert('.gitignore is *', fs.readFileSync(path.join(dir, '.gitignore'), 'utf-8') === '*\n')
+  fs.writeFileSync(path.join(dir, '.gitignore'), 'mine\n')
+  withoutConsole(() => initLogger({ appId: 'local-app', logLocalDir: dir }))
+  assert('an existing .gitignore is not overwritten', fs.readFileSync(path.join(dir, '.gitignore'), 'utf-8') === 'mine\n')
+}
+
 async function main() {
   await testLocalReadsWhatTheEmulatorWrote()
   await testCliProcessReadsLocalFiles()
+  await testEmulatorFolderIgnoresItself()
   reportResults()
 }
 

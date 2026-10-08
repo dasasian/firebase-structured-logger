@@ -262,9 +262,14 @@ read only what a file's fixed format says.
 **`fsl logs schema` keeps two kinds of knowledge apart.** `fromLogs` is what the logs
 show — keys, counts, up to three sample values — and `--refresh` rewrites it. `fromCode`
 is what an agent found by reading the app, added with `--add name [meaning]`, and
-`--refresh` leaves it alone. Samples are skipped for `userId` and for any key whose name
-contains `email`, `name` or `phone`, so the file can be pasted into an issue. The cache
-is `.fsl-logs/schema.json`, per machine, already ignored by git.
+`--refresh` leaves it alone. Samples are skipped for `userId` and for any app-added key whose name
+contains `email`, `name` or `phone`, so the file can be pasted into an issue; keys in
+`BASE_LABEL_KEYS` other than `userId` are fsl's own and keep theirs (`functionName` is a
+code name, not a person's). The cache is `.fsl-logs/schema.json`, per machine, and ignored
+by git because every folder fsl creates for logs holds a `.gitignore` of `*`
+(`makeSelfIgnoringFolder`, node-only, never overwrites): apps that skip the README's old
+step would otherwise commit dev logs and downloaded attachments, which can hold user data.
+The file lives in `src/shared` but imports `fs`, so nothing under `src/client` may import it.
 
 **`install-skills` asks before it removes a skill**, and `--force` answers yes. It
 removes only skills this package used to ship (`logs`, `query-logs`), never anything an

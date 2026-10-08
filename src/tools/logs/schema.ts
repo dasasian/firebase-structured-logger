@@ -1,5 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
+import { makeSelfIgnoringFolder } from '../../shared/ignoredFolder.js'
+import { BASE_LABEL_KEYS } from '../../shared/types.js'
 import type { LogEntry } from './entry.js'
 import { LOCAL_LOG_DIR } from './entry.js'
 
@@ -47,13 +49,15 @@ export function readSchemaCache(cwd: string): SchemaCache {
 }
 
 export function writeSchemaCache(cwd: string, cache: SchemaCache): void {
-  fs.mkdirSync(path.dirname(schemaCachePath(cwd)), { recursive: true })
+  makeSelfIgnoringFolder(path.dirname(schemaCachePath(cwd)))
   fs.writeFileSync(schemaCachePath(cwd), JSON.stringify(cache, null, 2) + '\n')
 }
 
 export function hasNoSamples(labelKey: string): boolean {
+  if (labelKey === 'userId') return true
+  if ((BASE_LABEL_KEYS as readonly string[]).includes(labelKey)) return false
   const lowered = labelKey.toLowerCase()
-  return labelKey === 'userId' || PRIVATE_KEY_PARTS.some((part) => lowered.includes(part))
+  return PRIVATE_KEY_PARTS.some((part) => lowered.includes(part))
 }
 
 export function isFresh(fromLogs: SchemaFromLogs | undefined, source: SchemaSource, now: Date): boolean {
@@ -61,7 +65,7 @@ export function isFresh(fromLogs: SchemaFromLogs | undefined, source: SchemaSour
   return now.getTime() - new Date(fromLogs.readAt).getTime() < SCHEMA_CACHE_MILLISECONDS
 }
 
-/** Counts every label key in `entries` and keeps up to three sample values per key, none for keys that name a person. */
+/** Counts every label key in `entries` and keeps up to three sample values per key, none for `userId` or for app keys that name a person. */
 export function schemaFromEntries(entries: LogEntry[], source: SchemaSource, now: Date): SchemaFromLogs {
   const labels: Record<string, LabelFromLogs> = {}
   for (const entry of entries) {

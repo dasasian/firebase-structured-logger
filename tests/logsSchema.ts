@@ -108,6 +108,33 @@ async function testSchemaLabelsBecomeValidQueryFields() {
   assert('pushed to the server', run.cloudRequests[0].filter.includes('labels.venueId="v_10"'))
 }
 
+async function testFslOwnNameLabelKeepsSamples() {
+  console.log('\nTest: functionName (fsl\'s own label) keeps samples; userId and an app customerName do not')
+  const cwd = tempProject()
+  withFirebaserc(cwd)
+  const entries = [
+    cloudEntry({ labels: { functionName: 'checkout', userId: 'u_1', customerName: 'Ada' } }),
+    cloudEntry({ labels: { functionName: 'refund', userId: 'u_2', customerName: 'Bo' } }),
+  ]
+  const run = await runFsl(['schema', '--json'], { cwd, cloud: entries })
+  const { labels } = schemaOf(run.stdout).fromLogs
+  assert('functionName has its samples', labels.functionName.samples.join() === 'checkout,refund', labels.functionName.samples.join())
+  assert('userId has none', labels.userId.samples.length === 0)
+  assert('customerName has none', labels.customerName.samples.length === 0)
+}
+
+async function testSchemaFolderIgnoresItself() {
+  console.log('\nTest: the schema cache folder gets a .gitignore of * and keeps an existing one')
+  const cwd = tempProject()
+  withFirebaserc(cwd)
+  await runFsl(['schema'], { cwd, cloud: personalLabelEntries })
+  const ignoreFile = path.join(cwd, '.fsl-logs', '.gitignore')
+  assert('.fsl-logs/.gitignore is *', fs.readFileSync(ignoreFile, 'utf-8') === '*\n')
+  fs.writeFileSync(ignoreFile, 'mine\n')
+  await runFsl(['schema', '--refresh'], { cwd, cloud: personalLabelEntries })
+  assert('an existing .gitignore is not overwritten', fs.readFileSync(ignoreFile, 'utf-8') === 'mine\n')
+}
+
 async function main() {
   await testCountsForAllSamplesOnlyForVenueId()
   await testSamplesAreCappedAtThreeAndForty()
@@ -115,6 +142,8 @@ async function main() {
   await testHumanOutputNamesTheSourceOnEachLine()
   await testCacheIsUsedForADayThenRefreshed()
   await testSchemaLabelsBecomeValidQueryFields()
+  await testFslOwnNameLabelKeepsSamples()
+  await testSchemaFolderIgnoresItself()
   reportResults()
 }
 

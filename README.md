@@ -453,13 +453,10 @@ to query your dev logs from Claude exactly as you would query Cloud Logging.
 
 ### Keep the logs out of git
 
-Add one line to `.gitignore`:
-
-```
-.fsl-logs/
-```
-
-The logger creates the folder on its first entry.
+Nothing to add. The logger creates the folder on its first entry, with a `.gitignore`
+inside it that holds `*`, so the folder ignores itself, whatever `logLocalDir` points at
+(the same trick pytest and ruff use for their cache folders). A `.gitignore` already
+there is left alone. `fsl logs schema` and `fsl logs attachments` do the same for `.fsl-logs/`.
 
 ### Rotation
 
@@ -1195,7 +1192,7 @@ npx fsl logs --local --where severity=ERROR --group-by labels.screen --select la
 | `--local` | read `.fsl-logs/*.jsonl` instead of Cloud Logging |
 | `--project <id>` | the Google Cloud project; read from `.firebaserc` when not given |
 
-It prints one JSON entry per line. When `--limit` cut the result, a line on stderr says how
+It prints one JSON entry per line. When nothing matches, stdout stays empty and one line on stderr says so (`0 entries matched in the last 1h.`), so "no matches" is not mistaken for "broken". When `--limit` cut the result, a line on stderr says how
 many more there were. A flag it does not know is an error that names the valid ones; a field
 it does not know also names the nearest one and points at `fsl logs schema`. `--select` with
 no value prints the fields. A production query reads the newest 5000 entries in the window and
@@ -1220,8 +1217,9 @@ npx fsl logs attachments <logId>               # bucket: --bucket <name>, else F
 
 `schema` reads the last 500 entries and keeps what it found in `.fsl-logs/schema.json`
 for a day, in two parts: `fromLogs`, which `--refresh` rewrites, and `fromCode`, which
-`--add` fills and `--refresh` leaves alone. `userId`, and any key whose name contains
-`email`, `name` or `phone`, is listed with a count and no sample values. The meaning of
+`--add` fills and `--refresh` leaves alone. `userId`, and any key you added whose name contains
+`email`, `name` or `phone`, is listed with a count and no sample values; the labels fsl
+writes itself (`functionName` among them) keep theirs. The meaning of
 each label fsl writes itself is on `BaseLabels` in `dist/shared/types.d.ts`.
 
 ### Skills for your coding agent

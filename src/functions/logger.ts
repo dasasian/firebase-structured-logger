@@ -7,6 +7,7 @@ import { SEVERITY_ORDER, SEVERITIES, isLogSeverity, isFeedback } from "../shared
 import { toError, toErrorPayload } from "../shared/error";
 import { getAttachmentBucket, getAttachmentPrefix } from "./sourceMapCache";
 import { attachmentPath } from "../shared/paths.js";
+import { makeSelfIgnoringFolder } from "../shared/ignoredFolder.js";
 import { traceField } from "./traceContext";
 import type { Bucket } from "@google-cloud/storage";
 
@@ -256,7 +257,7 @@ export function initLogger(config: FunctionsLoggerConfig): void {
   currentRecordCount = 0;
 
   if (IS_EMULATOR && config.logLocalDir) {
-    fs.mkdirSync(config.logLocalDir, { recursive: true });
+    makeSelfIgnoringFolder(config.logLocalDir);
     rotateLogFile(config.logLocalDir, config.logMaxRotatedFiles ?? 5);
   }
 }

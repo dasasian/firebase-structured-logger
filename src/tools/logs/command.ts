@@ -84,6 +84,13 @@ function printResult(rows: unknown[], moreRows: number, hitScanCap: boolean, dep
   if (hitScanCap) deps.printErrorLine(`scanned: only the newest ${MAX_CLOUD_ENTRIES} entries in the window were read. Narrow with --since or --where.`)
 }
 
+function describeNoMatch(flags: ParsedFlags, query: Query, sinceText: string): string {
+  const noun = query.groupBy.length > 0 || query.distinct !== undefined ? 'groups' : 'entries'
+  const place = flags.switches.has('local') ? ` in ${LOCAL_LOG_DIR}/*.jsonl` : ''
+  const window = /^\d+[mhd]$/.test(sinceText) ? `in the last ${sinceText}` : `since ${sinceText}`
+  return `0 ${noun} matched${place} ${window}.`
+}
+
 function schemaLabelKeys(cache: SchemaCache): string[] {
   return [...Object.keys(cache.fromLogs?.labels ?? {}), ...Object.keys(cache.fromCode)]
 }
@@ -98,7 +105,8 @@ async function runQueryCommand(argv: string[], deps: LogsDependencies): Promise<
   }
   const repeatKey = flags.values.repeats?.[0]
   const query = buildQuery(flags)
-  const since = parseSince(flags.values.since?.[0] ?? (repeatKey ? DEFAULT_REPEATS_SINCE : DEFAULT_SINCE), deps.now())
+  const sinceText = flags.values.since?.[0] ?? (repeatKey ? DEFAULT_REPEATS_SINCE : DEFAULT_SINCE)
+  const since = parseSince(sinceText, deps.now())
   const fetched = await fetchEntries(flags, deps, { since, query, knownLabelKeys, repeatKey, scanLimit: MAX_CLOUD_ENTRIES })
   const keysInData = labelKeysIn(fetched.entries)
   checkFields(query, knownLabelKeysFrom(knownLabelKeys, keysInData))
@@ -109,6 +117,7 @@ async function runQueryCommand(argv: string[], deps: LogsDependencies): Promise<
   }
   const { rows, moreRows } = runQuery(fetched.entries, query)
   printResult(rows, moreRows, fetched.hitScanCap, deps)
+  if (rows.length === 0) deps.printErrorLine(describeNoMatch(flags, query, sinceText))
 }
 
 function printRepeats(fetched: Fetched, query: Query, repeatKey: string, deps: LogsDependencies): void {

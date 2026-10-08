@@ -246,11 +246,36 @@ async function testAttachments() {
   assert('prints each file with where it went', parsedLines(run.stdout).map((r) => r.name).join() === 'screenshot.png,state.json', run.stdout.join())
   assert('listed, then copied', run.gcloudCalls[0][1] === 'ls' && run.gcloudCalls[1][1] === 'cp')
   assert('into .fsl-logs/attachments/<logId>/', fs.existsSync(path.join(cwd, '.fsl-logs', 'attachments', '01JABC')))
+  const ignoreFile = path.join(cwd, '.fsl-logs', '.gitignore')
+  assert('.fsl-logs/.gitignore is *', fs.readFileSync(ignoreFile, 'utf-8') === '*\n')
+  assert('no .gitignore inside the logId folder', !fs.existsSync(path.join(cwd, '.fsl-logs', 'attachments', '01JABC', '.gitignore')))
+  fs.writeFileSync(ignoreFile, 'mine\n')
+  await runFsl(['attachments', '01JABC'], { cwd, env: { FIREBASE_STORAGE_BUCKET: FAKE_BUCKET } })
+  assert('an existing .gitignore is not overwritten', fs.readFileSync(ignoreFile, 'utf-8') === 'mine\n')
   assert('the bucket is never printed', !run.stdout.concat(run.stderr).join('\n').includes(FAKE_BUCKET))
   const noBucket = await runFsl(['attachments', '01JABC'], { cwd })
   assert('no bucket is an error', noBucket.code === 1 && noBucket.stderr[0].includes('--bucket'))
   const badId = await runFsl(['attachments', '../etc'], { cwd, env: { FIREBASE_STORAGE_BUCKET: FAKE_BUCKET } })
   assert('a logId that is not an id is refused', badId.code === 1)
+}
+
+async function testZeroResultSaysSo() {
+  console.log('\nTest: no match prints one line on stderr and nothing on stdout')
+  const cwd = tempProject()
+  withFirebaserc(cwd)
+  const plain = await runFsl(['--since', '2h'], { cwd, cloud: [] })
+  assert('stdout is empty', plain.stdout.length === 0)
+  assert('stderr says 0 entries in the real window', plain.stderr.join('\n') === '0 entries matched in the last 2h.', plain.stderr.join('\n'))
+  const defaulted = await runFsl([], { cwd, cloud: [] })
+  assert('the default window is named', defaulted.stderr[0] === '0 entries matched in the last 1h.', defaulted.stderr.join())
+  const grouped = await runFsl(['--group-by', 'severity', '--select', 'severity,count'], { cwd, cloud: [] })
+  assert('group-by says 0 groups', grouped.stdout.length === 0 && grouped.stderr[0] === '0 groups matched in the last 1h.', grouped.stderr.join())
+  const distinct = await runFsl(['--distinct', 'severity', '--since', '2026-03-01T00:00:00Z'], { cwd, cloud: [] })
+  assert('distinct with an ISO time says since', distinct.stderr[0] === '0 groups matched since 2026-03-01T00:00:00Z.', distinct.stderr.join())
+  const local = await runFsl(['--local'], { cwd: (() => { const d = tempProject(); fs.mkdirSync(path.join(d, '.fsl-logs')); return d })() })
+  assert('local names what was read', local.stderr[0] === '0 entries matched in .fsl-logs/*.jsonl in the last 1h.', local.stderr.join())
+  const hit = await runFsl([], { cwd, cloud: [cloudEntry({})] })
+  assert('a match prints no such line', hit.stdout.length === 1 && hit.stderr.length === 0, hit.stderr.join())
 }
 
 async function testNoLocalFolderIsAnError() {
@@ -275,6 +300,7 @@ async function main() {
   await testRepeatsCountsTheTruth()
   await testServerFilterQuoting()
   await testAttachments()
+  await testZeroResultSaysSo()
   await testNoLocalFolderIsAnError()
   reportResults()
 }
