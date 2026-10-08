@@ -41,7 +41,6 @@ function loadEnvFile(filePath: string): void {
 async function main() {
   const args = parseArgs(rawArgs)
 
-  // Auto-load .env.local from cwd if present
   loadEnvFile('.env.local')
 
   switch (command) {
@@ -52,8 +51,6 @@ async function main() {
         warnDeprecated('--functions', '--backend')
       }
       const backend = args.backend ?? args.functions
-      // A bucket is only required when something is going to be uploaded.
-      // Embed-only is the whole flow for a backend that has no bucket — see #34.
       if (!bucket && !embed) {
         console.error('Usage: fsl upload-sourcemaps [--bucket=<name>] [--backend=<path>] [--embed-sourcemaps] [--release=<id>] [--dist=<path>] [--prefix=<path>]')
         console.error('Bucket can also be set via VITE_FIREBASE_STORAGE_BUCKET or FIREBASE_STORAGE_BUCKET env var (loaded from .env.local automatically).')
@@ -68,8 +65,6 @@ async function main() {
         embedSourcemaps: embed,
         prefix: args.prefix,
       })
-      // Distinct code so a deploy chain can choose to continue:
-      //   npx fsl upload-sourcemaps … || [ $? -eq 3 ]
       if (!result.uploaded) process.exit(EXIT_UPLOAD_FAILED_BUT_EMBEDDED)
       break
     }

@@ -20,7 +20,6 @@ function prompt(question: string): Promise<string> {
 
 export async function installSkills(options: InstallSkillsOptions = {}): Promise<void> {
   const { force = false } = options
-  // Skills directory in this package
   const packageSkillsDir = path.join(__dirname, '..', '..', 'skills')
 
   if (!fs.existsSync(packageSkillsDir)) {
@@ -28,7 +27,6 @@ export async function installSkills(options: InstallSkillsOptions = {}): Promise
     process.exit(1)
   }
 
-  // Target: project-level by default, global with --global flag
   const targetDir = options.global
     ? path.join(os.homedir(), '.claude', 'skills')
     : path.join(process.cwd(), '.claude', 'skills')
