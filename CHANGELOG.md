@@ -7,6 +7,16 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-10-08
+
+Tools for agents. `fsl logs` lets a coding agent read production logs with flags named
+after SQL clauses, one JSON entry per line, and an error that names the valid fields when
+it guesses one. `/fsl-review` reads `CAPABILITIES.md` from the installed package and
+proposes how fsl could serve the code in front of it. Errors a framework catches are now
+logged where it catches them, so a React boundary or a router no longer hides them. And
+`withLogging` wraps scheduled and task handlers too. A production app ran each release
+candidate before this release.
+
 ### Added
 
 - **`withLogging` wraps `onSchedule` and `onTaskDispatched`** as well as `onCall`: pass `ScheduledEvent` or `Request<Data>` as the second type argument. `userId` comes from `auth.uid` when the event has one. `CAPABILITIES.md` no longer lists `onRequest(`, which `withLogging` cannot wrap.
@@ -18,7 +28,6 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`fsl install-skills` writes `fsl-version`** (the package version) into each skill's frontmatter, and asks before removing an installed `logs` or `query-logs`; `--force` answers yes.
 - **`fsl doctor` finding `skill-out-of-date`** (warning): a skill's `fsl-version` differs from the fsl running doctor. Skills without `fsl-version` are skipped.
 - **`BaseLabels`** declares every label fsl writes, each with a one-line comment: `repeatKey`, `repeatOf`, `repeatCount`, `firstSeen`, `lastSeen`, `sentLate`, `truncated`, `hasAttachments`, `logId`, `functionName`, `trace`, `run`, `slow`, `step`, `feedback`.
-
 - **Errors a framework catches are logged where it catches them.** `createRoot(el, { onCaughtError: handleReactError })` and `app.config.errorHandler = handleVueError` (new) send React and Vue render errors, `handleReactError` now accepts what React 19 passes, and the React Router and Vue Router adapters log their router's errors on their own (`errorType` `RouteError`: a loader or action error or 5xx response as `ERROR`, a 4xx response as `WARNING`; a guard that throws or a lazy route that fails to load as `ERROR`). The function an adapter returns stops its error listener too.
 - **`/testing` `capture.settled()`** waits for every send already started, so a test can read `entries` after a log call with attachments or after a repeat summary; log methods still return `void`.
 
@@ -338,7 +347,8 @@ The README is reorganised around what you get rather than how the machine is bui
 - **Emulator mode** — under `FUNCTIONS_EMULATOR=true`, entries are written to a local `dev.jsonl` with rotation instead of Cloud Logging, so local development needs no live credentials.
 - **`fsl` CLI** — source map upload to Storage, deploy packing, and skill installation.
 
-[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/dasasian/firebase-structured-logger/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/dasasian/firebase-structured-logger/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/dasasian/firebase-structured-logger/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/dasasian/firebase-structured-logger/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/dasasian/firebase-structured-logger/compare/v1.0.0...v1.1.0
