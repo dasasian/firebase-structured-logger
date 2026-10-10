@@ -72,11 +72,10 @@ export interface InitLoggerConfig<
  */
 function defaultMinLevel(): LogSeverity {
   try {
-    if (process.env.NODE_ENV === 'production') return 'WARNING'
+    return process.env.NODE_ENV === 'production' ? 'WARNING' : 'DEBUG'
   } catch {
     return 'DEBUG'
   }
-  return 'DEBUG'
 }
 
 // Order matters — first match wins.
