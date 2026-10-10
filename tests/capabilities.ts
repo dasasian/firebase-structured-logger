@@ -196,6 +196,14 @@ function testReviewSkillShape() {
   assert('fsl-version placeholder', /^fsl-version: <version>$/m.test(frontmatter))
   const backticked = [...skill.matchAll(/`([^`]+)`/g)].map((m) => m[1])
   assert('only allowed identifiers in backticks', backticked.every((b) => ALLOWED_SKILL_CODE.includes(b)), backticked.join(' | '))
+  assert('groups many places by user flow and asks which flows matter', /by user flow/.test(skill) && /which flows matter most/.test(skill))
+}
+
+function testMarkedActionsSaysWhichToMarkFirst() {
+  console.log('\nTest: Marked actions says which controls to mark first')
+  const capabilities = fs.readFileSync(path.join(ROOT, 'CAPABILITIES.md'), 'utf-8')
+  const section = capabilities.split('\n## ').find((s) => s.startsWith('Marked actions')) ?? ''
+  assert('names the flows to mark first', /where a failure costs the user most first/.test(section))
 }
 
 function testPackaging() {
@@ -213,5 +221,6 @@ testExamplesImportRealSymbols()
 testKnownMistakesAreNamed()
 testFixtureApps()
 testReviewSkillShape()
+testMarkedActionsSaysWhichToMarkFirst()
 testPackaging()
 reportResults()

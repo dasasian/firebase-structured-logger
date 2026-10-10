@@ -14,6 +14,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - **Repeats are told apart by the user's last actions on the screen.** An error's repeat signature now includes the names of the last 3 `bc.action` breadcrumbs since the last navigation, so the same error reached by two different paths on one screen gets its own full copies and its own summary. An app with no action breadcrumbs gets the signature it always had.
+- **`/fsl-review` proposes by user flow when a capability fits many places, and asks which flows matter.** Past about ten places it groups them by what the user is trying to do, gives the count for each flow, names the flow it would do first, and ends with one question. `CAPABILITIES.md` says which controls to mark first: payment, sign-in and saving work. The review still proposes and stops.
 
 ### Removed
 

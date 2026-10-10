@@ -21,4 +21,8 @@ The scope is the app, a folder or a file. If none is given, it is the whole app.
 5. Propose, as a short list, how fsl could best serve this code. Additions and fixes, in
    the order you would do them. Fold in doctor's findings if you ran it. Say nothing
    about code that is already right.
+   When one capability fits more than about ten places in the scope, do not list the places.
+   Group them by user flow, meaning what the user is trying to do, and give the count for
+   each flow. Say in a few words which flow you would do first and why. End the proposal
+   with one question that asks which flows matter most to the user.
 6. Stop. Make no edits and open no issues; the user trims the list and decides what next.

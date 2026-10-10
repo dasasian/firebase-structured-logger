@@ -208,6 +208,7 @@ enableActions()
 <form data-fsl-action="checkout_submitted">…</form>
 ```
 Mark the element that gets the event, once, in the shared button or form component, and pass the name in as a prop.
+Mark the controls of the flows where a failure costs the user most first: payment, sign-in and saving work.
 
 ### Mistakes
 - `` data-fsl-action={`apply ${code}`} `` or any mark whose value is a code, name, email, id or free text → the value reaches every error's trail as user data → use a fixed name such as `apply_discount`; for data, call `bc.action('apply_discount', { code })` in the handler.
