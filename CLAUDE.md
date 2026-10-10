@@ -152,6 +152,14 @@ own id, is keyed by signature + `releaseId` + `userId`, and is removed by the ta
 sends it; a rare double-send is visible by that id. Anything added there needs the same
 treatment: an id, an owner, a size cap and an expiry.
 
+**fsl sends repeat summaries itself, and the logger has no method for it.** Sending is two
+steps: counts become queued summaries when the tab goes hidden or their hour is up, and
+the queue is then sent, also once after `initLogger` for a previous visit's. One step
+offered as a public method reads as the whole job and sends nothing by itself.
+`tests/publicApi.ts` pins the client logger's public members, so a method that becomes
+public by accident fails the typecheck. A test sends summaries the way a browser does:
+`setVisibility('hidden')`.
+
 **The client logger is a session singleton.** `Logger` is exported as a *type
 only* — annotate with `Logger<AppLabels>`, construct via `initLogger()`. A
 second instance would silently share breadcrumbs, screen, activity and the
