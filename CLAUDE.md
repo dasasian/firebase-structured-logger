@@ -144,6 +144,7 @@ What is legitimately module-scoped here, and why:
 | the client `Logger` singleton | see below |
 | source-map and TraceMap caches | pure caches, keyed by content |
 | `AsyncLocalStorage` in `requestLogger` | per-request by design, not global |
+| the set of errors a backend logger has written | a `WeakSet` keyed by the error object itself: no config, no size, gone with the error |
 
 **Repeat summaries live in `localStorage`, and that is shared across tabs.** The budget
 and duplicate counts are per tab (`sessionStorage`), but a pending summary has to survive
@@ -371,6 +372,40 @@ adapter: the root exists before the router. Route labels need no extra work, bec
 navigation already puts them on every entry. A `redirect()` is a page change, never an error;
 an adapter called again, or stopped, takes its error listener with it, so an app that makes
 a new router at each sign-in does not log twice.
+
+## A backend handler's throw is logged by `withLogging`
+
+Logging is an aspect: a handler reads the same with logging or without it. So a handler
+needs no `try`/`catch` only to log. `withLogging` already wraps the handler, which makes it
+the one place that can log a throw with the request's labels, and it then throws the same
+value again, unchanged — the caller's result, a schedule's failure and a task's retry are
+what they were.
+
+The severity follows the rule the React Router adapter uses for responses. An error that
+carries an HTTP status below 500 is an answer to the caller, not a fault, and is a
+`WARNING` with its code and status and no stack: `permission-denied`, `not-found`,
+`invalid-argument`. Anything else is an `ERROR` with the full error payload: a plain
+`Error`, a status of 500 or more. The status is read from the error's own
+`httpErrorCode.status`, the shape of the Firebase `HttpsError`, so nothing imports
+`firebase-functions` for it.
+
+An error is logged once. Every backend `error()` call remembers the object it was given,
+and `withLogging` skips a throw it finds there. So a handler that still has
+`catch (err) { logError(err); throw err }` keeps one entry, and an app removes those blocks
+when it wants to. A handler that logs one error and throws a different one gets two
+entries, because they are two errors.
+
+There is no option to turn this off. A handler that wants silence catches the error and
+does not throw it again; a refusal that is not a fault is an `HttpsError` with a 4xx code.
+
+Firebase also logs: for a callable that throws anything but an `HttpsError`, the SDK writes
+its own `Unhandled error` entry at `ERROR`, with none of fsl's labels. fsl leaves it there.
+The only way to stop it is to throw a different error from the one the app threw, and fsl
+never changes an app's error. So such a throw is two `ERROR` entries: ours, which the
+labels find, and Firebase's.
+
+Only `withLogging` does this. `createHttpLogHandler` receives a browser's logs and wraps
+no handler of the app's.
 
 ## Views are read when an entry is written
 
