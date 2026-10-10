@@ -32,28 +32,28 @@
   <rect class="bg" x="0" y="0" width="1280" height="420"/>
 
   <g transform="translate(0,-20)">
-    <rect class="box" x="72" y="110" width="300" height="250" rx="7" stroke-width="1.5"/>
-    <text class="title" x="96" y="154">Browser</text>
-    <text class="text" x="96" y="204">no credentials</text>
-    <text class="text" x="96" y="236">no source maps</text>
+    <rect class="box" x="102" y="110" width="300" height="250" rx="7" stroke-width="1.5"/>
+    <text class="title" x="126" y="154">Browser</text>
+    <text class="text" x="126" y="204">no credentials</text>
+    <text class="text" x="126" y="236">no source maps</text>
 
-    <rect class="box" x="500" y="110" width="380" height="250" rx="7" stroke-width="1.5"/>
-    <text class="title" x="524" y="154">Your Cloud Functions</text>
-    <rect class="row-src" x="524" y="170" width="332" height="80" rx="7" stroke-width="1.5"/>
-    <text class="code code-src" x="548" y="203">logFrontendEvent()</text>
-    <text class="text" x="548" y="231">credentials + source maps</text>
-    <rect class="row" x="524" y="266" width="332" height="70" rx="7" stroke-width="1.5"/>
-    <text class="text" x="548" y="296">your own functions</text>
-    <text class="code" x="548" y="322">withLogging()</text>
+    <rect class="box" x="490" y="110" width="380" height="250" rx="7" stroke-width="1.5"/>
+    <text class="title" x="514" y="154">Your Cloud Functions</text>
+    <rect class="row-src" x="514" y="170" width="332" height="80" rx="7" stroke-width="1.5"/>
+    <text class="code code-src" x="538" y="203">logFrontendEvent()</text>
+    <text class="text" x="538" y="231">credentials + source maps</text>
+    <rect class="row" x="514" y="266" width="332" height="70" rx="7" stroke-width="1.5"/>
+    <text class="text" x="538" y="296">your own functions</text>
+    <text class="code" x="538" y="322">withLogging()</text>
 
-    <rect class="box" x="988" y="110" width="220" height="250" rx="7" stroke-width="1.5"/>
-    <text class="title" x="1012" y="154">Cloud Logging</text>
-    <text class="text" x="1012" y="204">your project</text>
-    <text class="text" x="1012" y="236">one stream</text>
-    <text class="text" x="1012" y="268">one query</text>
+    <rect class="box" x="958" y="110" width="220" height="250" rx="7" stroke-width="1.5"/>
+    <text class="title" x="982" y="154">Cloud Logging</text>
+    <text class="text" x="982" y="204">your project</text>
+    <text class="text" x="982" y="236">one stream</text>
+    <text class="text" x="982" y="268">one query</text>
 
-    <line class="line" x1="372" y1="210" x2="522" y2="210" stroke-width="2" marker-end="url(#arrowhead)"/>
-    <line class="line" x1="856" y1="210" x2="986" y2="210" stroke-width="2" marker-end="url(#arrowhead)"/>
-    <line class="line" x1="856" y1="301" x2="986" y2="301" stroke-width="2" marker-end="url(#arrowhead)"/>
+    <line class="line" x1="402" y1="210" x2="512" y2="210" stroke-width="2" marker-end="url(#arrowhead)"/>
+    <line class="line" x1="846" y1="210" x2="956" y2="210" stroke-width="2" marker-end="url(#arrowhead)"/>
+    <line class="line" x1="846" y1="301" x2="956" y2="301" stroke-width="2" marker-end="url(#arrowhead)"/>
   </g>
 </svg>
