@@ -307,13 +307,14 @@ async function testResetSessionClearsPendingSummaries() {
 // --- Not in the core bundle ---
 
 async function testTestingCodeIsNotInAnyClientBundle() {
-  console.log('\nTest: /client, /client/navigation* and /client/views contain none of /testing, in source and in the built CJS dist')
+  console.log('\nTest: /client, /client/navigation*, /client/views and /client/actions contain none of /testing, in source and in the built CJS dist')
   const entries = [
     './src/client/index',
     './src/client/navigation',
     './src/client/navigation/vue-router',
     './src/client/navigation/react-router',
     './src/client/views',
+    './src/client/actions',
   ]
 
   for (const entry of entries) {
@@ -341,6 +342,7 @@ async function testTestingCodeIsNotInAnyClientBundle() {
     ['dist/client/navigation/vue-router.js', path.join(process.cwd(), 'dist', 'client', 'navigation', 'vue-router.js')],
     ['dist/client/navigation/react-router.js', path.join(process.cwd(), 'dist', 'client', 'navigation', 'react-router.js')],
     ['dist/client/views.js', path.join(process.cwd(), 'dist', 'client', 'views.js')],
+    ['dist/client/actions.js', path.join(process.cwd(), 'dist', 'client', 'actions.js')],
   ]
 
   for (const [name, entry] of builtEntries) {

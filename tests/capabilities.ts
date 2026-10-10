@@ -18,6 +18,7 @@ import * as reactRouterNavigation from '../src/client/navigation/react-router.js
 import * as vueRouterNavigation from '../src/client/navigation/vue-router.js'
 import * as timing from '../src/client/timing.js'
 import * as views from '../src/client/views.js'
+import * as actions from '../src/client/actions.js'
 import * as functions from '../src/functions/index.js'
 import * as testing from '../src/testing.js'
 
@@ -32,6 +33,7 @@ const ENTRY_POINTS: Record<string, Record<string, unknown>> = {
   'client/navigation/vue-router': vueRouterNavigation,
   'client/timing': timing,
   'client/views': views,
+  'client/actions': actions,
   functions,
   testing,
 }
@@ -84,6 +86,7 @@ const CAPABILITY_TITLES = [
   'Navigation',
   'Pages without a URL change',
   'Views',
+  'Marked actions',
   'User and labels',
   'Release ids and source maps',
   'Attachments',

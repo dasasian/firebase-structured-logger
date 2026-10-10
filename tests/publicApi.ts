@@ -24,6 +24,7 @@ import * as functions from '../src/functions/index.js'
 import * as vueRouterNavigation from '../src/client/navigation/vue-router.js'
 import * as reactRouterNavigation from '../src/client/navigation/react-router.js'
 import * as views from '../src/client/views.js'
+import * as actions from '../src/client/actions.js'
 import * as testing from '../src/testing.js'
 
 const EXPECTED: Record<string, string[]> = {
@@ -59,6 +60,7 @@ const EXPECTED: Record<string, string[]> = {
   'client/navigation/vue-router': ['enableVueRouterNavigation'],
   'client/navigation/react-router': ['enableReactRouterNavigation'],
   'client/views': ['enableViews'],
+  'client/actions': ['enableActions'],
   testing: ['captureEntries', 'resetSession'],
 }
 
@@ -102,6 +104,7 @@ function testNoEntryPointExportsSetSendWatcher() {
     'client/navigation/vue-router': vueRouterNavigation,
     'client/navigation/react-router': reactRouterNavigation,
     'client/views': views,
+    'client/actions': actions,
     testing,
   }
   for (const [name, mod] of Object.entries(modules)) {
@@ -115,6 +118,7 @@ function run() {
   checkSurface('client/navigation/vue-router', vueRouterNavigation)
   checkSurface('client/navigation/react-router', reactRouterNavigation)
   checkSurface('client/views', views)
+  checkSurface('client/actions', actions)
   checkSurface('testing', testing)
   testNoEntryPointExportsSetSendWatcher()
   testClientLoggerIsNotConstructible()

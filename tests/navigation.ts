@@ -555,6 +555,45 @@ async function testViewsCodeIsNotInTheCoreOrNavigationBundles() {
   }
 }
 
+/**
+ * Marked actions (#52) is its own entry point too — the core, navigation and
+ * views must not contain it. Same two views as the views check: TS source, and
+ * the built CommonJS dist.
+ */
+async function testActionsCodeIsNotInTheCoreNavigationOrViewsBundles() {
+  console.log('\nTest: /client, /client/navigation* and /client/views contain none of the actions code')
+  for (const entry of ['./src/client/index', './src/client/navigation', './src/client/navigation/vue-router', './src/client/navigation/react-router', './src/client/views']) {
+    const result = await build({
+      stdin: {
+        contents: `export * from '${entry}'`,
+        resolveDir: path.join(process.cwd()),
+        loader: 'ts',
+      },
+      bundle: true,
+      format: 'esm',
+      platform: 'browser',
+      write: false,
+      logLevel: 'silent',
+    })
+    const code = result.outputFiles[0].text
+    assert(`${entry}: enableActions is absent`, !code.includes('enableActions'), `found enableActions in ${entry}`)
+    assert(`${entry}: the data-fsl-action attribute is absent`, !code.includes('data-fsl-action'), `found data-fsl-action in ${entry}`)
+  }
+
+  execFileSync('npx', ['tsc'], { cwd: process.cwd(), stdio: 'pipe' })
+  const builtEntries = [
+    ['dist/client/index.js', path.join(process.cwd(), 'dist', 'client', 'index.js')],
+    ['dist/client/navigation.js', path.join(process.cwd(), 'dist', 'client', 'navigation.js')],
+    ['dist/client/views.js', path.join(process.cwd(), 'dist', 'client', 'views.js')],
+  ] as const
+  for (const [name, entry] of builtEntries) {
+    assert(`the build produced ${name}`, fs.existsSync(entry), entry)
+    const code = await buildMinifiedCjs(entry)
+    assert(`${name}: enableActions is absent`, !code.includes('enableActions'), `found enableActions in ${name}`)
+    assert(`${name}: the data-fsl-action attribute is absent`, !code.includes('data-fsl-action'), `found data-fsl-action in ${name}`)
+  }
+}
+
 async function run() {
   testIdRule()
   testDefaultLabelsFor()
@@ -580,6 +619,7 @@ async function run() {
   await testRouterAdaptersAreNotInTheNavigationOrCoreBundle()
   await testBuiltCommonJsAdaptersNeverRequireTheHistoryWrapper()
   await testViewsCodeIsNotInTheCoreOrNavigationBundles()
+  await testActionsCodeIsNotInTheCoreNavigationOrViewsBundles()
   reportResults()
 }
 

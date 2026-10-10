@@ -1,6 +1,6 @@
 # fsl capabilities
 
-Package: `@dasasian/firebase-structured-logger`. Entry points: `/client`, `/client/navigation`, `/client/navigation/react-router`, `/client/navigation/vue-router`, `/client/views`, `/client/timing`, `/functions`, `/testing`, and the `fsl` CLI.
+Package: `@dasasian/firebase-structured-logger`. Entry points: `/client`, `/client/navigation`, `/client/navigation/react-router`, `/client/navigation/vue-router`, `/client/views`, `/client/actions`, `/client/timing`, `/functions`, `/testing`, and the `fsl` CLI.
 
 Each section below has the same four headings: Gives, Fits when, Add, Mistakes. A section is complete on its own.
 
@@ -62,6 +62,7 @@ The receiving end is `createClientLogFunction` or `createHttpLogHandler` from `@
 - Click or submit handlers that call something that can fail (`await`, `fetch(`, `httpsCallable(`) with no `bc.action(` before it.
 - `catch` blocks that handle an error, do not log it, and continue.
 - Existing `bc.nav(` or `bc.error(` calls.
+- `<button`, `<form`, `<select` or `onClick=` / `@click=` handlers whose action matters to the path and carries no data: mark them with `data-fsl-action` instead of calling `bc.action(`.
 
 ### Add
 ```ts
@@ -182,6 +183,41 @@ Put the mark in the one shared modal component and pass the name in as a prop, s
 - `enableViews` imported from `/client` → it lives in its own entry point → import from `/client/views`.
 - Marks inside a web component's shadow root → not found → move the mark outside the shadow root.
 - `enableViews()` never called but `data-fsl-view` present → the marks are ignored → call it once at startup.
+
+## Marked actions
+
+### Gives
+- One `action` breadcrumb per user action on an element marked `data-fsl-action`, with the attribute's value as its name and no `data`. The same breadcrumb `bc.action(name)` records, recorded before the app's own handler runs.
+- The marked element decides its event: `<form>` on submit, `<select>`, `<input>` and `<textarea>` on change, anything else on click. Enter on a button is a click.
+- The nearest mark wins: a click on an icon inside a marked button records the button's name. Marks inside open shadow roots are found.
+
+### Fits when
+- `<button`, `<a `, `<form`, `<select`, `<input`, `<textarea` and `role="button"` elements with `onClick=`, `@click=`, `(click)=`, `onSubmit=`, `@submit=`, `onChange=` or `@change=` handlers.
+- Handlers that start something that can fail (`await`, `fetch(`, `httpsCallable(`) and carry no data worth recording.
+- No `data-fsl-action` attribute anywhere in the markup.
+
+### Add
+```ts
+import { enableActions } from '@dasasian/firebase-structured-logger/client/actions'
+
+enableActions()
+```
+```html
+<button data-fsl-action="apply_discount">Apply</button>
+<select data-fsl-action="choose_shipping">…</select>
+<form data-fsl-action="checkout_submitted">…</form>
+```
+Mark the element that gets the event, once, in the shared button or form component, and pass the name in as a prop.
+
+### Mistakes
+- `` data-fsl-action={`apply ${code}`} `` or any mark whose value is a code, name, email, id or free text → the value reaches every error's trail as user data → use a fixed name such as `apply_discount`; for data, call `bc.action('apply_discount', { code })` in the handler.
+- A mark on a wrapper around a `<form>`, `<select>` or `<input>` → the wrapper counts on click while the control counts on change, so the change is not the wrapper's action → put the mark on the control or the form itself.
+- A mark on a `<form>` plus marks on its submit button → the submit is recorded for the form and the button's click is recorded as a second action → mark the form only.
+- A mark on every row, option or key press of a list → the 50-entry trail fills with repeats and pushes out the steps that matter → mark the controls that start something.
+- `bc.action('x')` in a handler for an element that is also marked with `data-fsl-action="x"` → the action is recorded twice → keep only the mark, or keep `bc.action` for a call that has data.
+- `enableActions` imported from `/client` → it lives in its own entry point → import from `/client/actions`.
+- Marks inside a closed shadow root → not found → move the mark outside the closed root, or open the root.
+- `enableActions()` never called but `data-fsl-action` present → the marks are ignored → call it once at startup.
 
 ## User and labels
 

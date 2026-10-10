@@ -32,7 +32,8 @@ import { enableNavigation } from '../src/client/navigation.js'
 import { enableVueRouterNavigation } from '../src/client/navigation/vue-router.js'
 import { enableReactRouterNavigation } from '../src/client/navigation/react-router.js'
 import { enableViews } from '../src/client/views.js'
-import { getCurrentRoute, getActiveView } from '../src/client/breadcrumbs.js'
+import { enableActions } from '../src/client/actions.js'
+import { getCurrentRoute, getActiveView, getLastBreadcrumbs, clearBreadcrumbs } from '../src/client/breadcrumbs.js'
 import { captureEntries } from '../src/testing.js'
 import { initLogger as initClientLogger } from '../src/client/logger.js'
 import { configureTraces as configureClientTraces, startTrace as startClientTrace } from '../src/client/timing.js'
@@ -262,6 +263,27 @@ function testEnableViewsTwiceNoSecondReader() {
 }
 
 /**
+ * enableActions — a second call adds no second set of listeners: one click on a
+ * marked button is one action crumb, not two. #52.
+ */
+function testEnableActionsTwiceRecordsOneCrumbPerClick() {
+  console.log('\nTest: enableActions — second call adds no second listener')
+  const button = jsdomWindow.document.createElement('button')
+  button.setAttribute('data-fsl-action', 'apply_discount')
+  jsdomWindow.document.body.appendChild(button)
+  clearBreadcrumbs()
+
+  enableActions()
+  enableActions()
+  button.click()
+  const names = getLastBreadcrumbs(50).map((crumb) => crumb.name)
+  assert('one click is one crumb', names.join(',') === 'apply_discount', names.join(','))
+
+  jsdomWindow.document.body.removeChild(button)
+  clearBreadcrumbs()
+}
+
+/**
  * captureEntries() — "called twice" means two separate test files (or two tests in
  * one file) each getting their own capture, never one capture leaking into the
  * other's `entries`. #64.
@@ -319,6 +341,7 @@ async function run() {
   await testConfigureClientTracesTwiceReplaces()
   await testConfigureServerTracesTwiceReplaces()
   testEnableViewsTwiceNoSecondReader()
+  testEnableActionsTwiceRecordsOneCrumbPerClick()
   await testCaptureEntriesTwiceGivesIndependentCaptures()
   await testCaptureEntriesTwiceBothSettleWaitForSends()
   fs.rmSync(LOG_DIR, { recursive: true, force: true })

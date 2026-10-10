@@ -7,6 +7,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`enableActions()` records marked user actions.** From `@dasasian/firebase-structured-logger/client/actions`, an element marked `data-fsl-action="apply_discount"` becomes an `action` breadcrumb on click, submit (`<form>`) or change (`<select>`, `<input>`, `<textarea>`), with no code per handler, so it also tells repeats apart by path.
+
 ### Changed
 
 - **Repeats are told apart by the user's last actions on the screen.** An error's repeat signature now includes the names of the last 3 `bc.action` breadcrumbs since the last navigation, so the same error reached by two different paths on one screen gets its own full copies and its own summary. An app with no action breadcrumbs gets the signature it always had.
