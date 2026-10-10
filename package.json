@@ -18,7 +18,7 @@
     "cloud-run",
     "error-reporting"
   ],
-  "homepage": "https://dasasian.com/firebase-structured-logger",
+  "homepage": "https://fsl.dasasian.com/",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/dasasian/firebase-structured-logger.git"
