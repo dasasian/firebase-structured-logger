@@ -84,7 +84,6 @@ let cacheBytes = 0
 function cacheGet(key: string): CacheEntry | undefined {
   const entry = cache.get(key)
   if (!entry) return undefined
-  // Map iterates in insertion order, so delete + re-insert makes it LRU.
   cache.delete(key)
   cache.set(key, entry)
   return entry
@@ -98,7 +97,6 @@ function cacheSet(key: string, map: EncodedSourceMap | null, bytes: number): voi
   cache.set(key, { map, bytes: size })
   cacheBytes += size
 
-  // Evict oldest first, skipping negative entries — they are free and useful.
   for (const [k, entry] of cache) {
     if (cacheBytes <= MAX_CACHE_BYTES) break
     if (k === key || entry.map === null) continue
@@ -192,6 +190,9 @@ export function resetAttachmentConfig(): void {
  * The return type is spelled out rather than inferred: without it the emitted
  * `.d.ts` would need to name `Bucket` from a path inside `node_modules`, which
  * TypeScript 7 rejects as non-portable (TS2883).
+ *
+ * firebase-admin throws from here, synchronously, when there is no initialised app
+ * or no default bucket; callers on the per-error path treat that as a miss.
  */
 export function getBucket(bucketName = defaultBucket): Bucket | null {
   const admin = resolveAdminStorage()
@@ -258,14 +259,16 @@ function readEmbeddedRelease(): string | null {
 
 function readEmbeddedSourceMap(fileName: string): EncodedSourceMap | null {
   try {
-    // Resolved against the process working directory — the deployed backend's,
-    // whether that is Cloud Functions or anything else that ships the directory.
     const mapPath = embeddedMapPath(process.cwd(), fileName)
     if (!fs.existsSync(mapPath)) return null
     return JSON.parse(fs.readFileSync(mapPath, 'utf-8')) as EncodedSourceMap
   } catch {
     return null
   }
+}
+
+function storageMapCacheKey(releaseId: string, fileName: string, bucketName?: string, prefix?: string): string {
+  return `${bucketName ?? defaultBucket ?? ''}/${prefix ?? ''}/${releaseId}/${fileName}`
 }
 
 /**
@@ -277,19 +280,12 @@ async function loadStorageSourceMap(
   bucketName?: string,
   prefix?: string,
 ): Promise<EncodedSourceMap | null> {
-  // The bucket is part of the key: the same release/file in two buckets is two
-  // different maps, and caching them under one key would serve the wrong one.
-  // The prefix is part of the key for the same reason the bucket is: the same
-  // release and file under two prefixes are two different objects.
-  const cacheKey = `${bucketName ?? defaultBucket ?? ''}/${prefix ?? ''}/${releaseId}/${fileName}`
+  const cacheKey = storageMapCacheKey(releaseId, fileName, bucketName, prefix)
   const hit = cacheGet(cacheKey)
   if (hit) return hit.map
 
   try {
-    // Inside the try: firebase-admin throws here, synchronously, when there is no
-    // initialised app or no default bucket — a miss, not a crash.
     const bucket = getBucket(bucketName)
-    // No Storage at all: not a miss to cache — warnNoStorage has already said why.
     if (!bucket) return null
 
     const file = bucket.file(storageMapPath(releaseId, fileName, prefix))
@@ -302,9 +298,8 @@ async function loadStorageSourceMap(
 
     const [content] = await file.download()
     const sourceMap = JSON.parse(content.toString()) as EncodedSourceMap
-    // content.length is the byte size we already hold — no re-serialising a
-    // half-megabyte object just to measure it.
-    cacheSet(cacheKey, sourceMap, content.length)
+    const downloadedBytes = content.length
+    cacheSet(cacheKey, sourceMap, downloadedBytes)
     return sourceMap
   } catch (err) {
     console.warn(`[fsl] Failed to load Storage map for ${releaseId}/${fileName}:`, err)
@@ -332,7 +327,13 @@ async function loadStorageSourceMap(
  *   differs                       -> Storage, falling back to embedded on a miss
  *
  * That is strictly better than preferring embedded in every case, and it leaves
- * the unversioned setup working exactly as before.
+ * the unversioned setup working exactly as before. Deploys from before markers
+ * existed have no marker, so the release cannot be compared and embedded is used
+ * as it always was.
+ *
+ * Embedded maps are read from `sourcemaps/current/` under the process working
+ * directory, which is the deployed backend's, on Cloud Functions or anywhere else
+ * that ships the directory.
  */
 export async function getSourceMap(
   releaseId: string,
@@ -343,9 +344,8 @@ export async function getSourceMap(
   const embedded = loadEmbeddedSourceMap(fileName)
   const marker = readEmbeddedRelease()
 
-  // No marker means we cannot tell whether this stack belongs to the embedded
-  // release. Older deploys have none, so keep the previous behaviour.
-  if (embedded && (marker === null || marker === releaseId)) return embedded
+  const embeddedReleaseUnknown = marker === null
+  if (embedded && (embeddedReleaseUnknown || marker === releaseId)) return embedded
 
   const stored = await loadStorageSourceMap(releaseId, fileName, bucketName, prefix)
   if (stored) return stored
