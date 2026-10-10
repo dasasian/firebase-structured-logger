@@ -172,6 +172,7 @@ export class Logger<
     clearBreadcrumbs()
   }
 
+  /** @deprecated Use `enableNavigation()`, or `navigatedTo()` without URL routing. */
   setScreen(screen: string): void {
     setCurrentScreen(screen)
   }

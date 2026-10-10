@@ -20,6 +20,7 @@ if (process.env.FUNCTIONS_EMULATOR !== 'true') {
 // both at module load.
 import { withFrozenTime } from './browserStubs.js'
 
+import { readFileSync } from 'node:fs'
 import { initializeApp } from 'firebase-admin/app'
 import { initLogger, triggerTestLog, sendTestLog } from '../src/client/logger.js'
 import { allow, configureRateLimiter, resetRateLimiter } from '../src/client/rateLimiter.js'
@@ -411,6 +412,35 @@ async function testTriggerTestLogWarnsOnce() {
   assert('triggerTestLog warned once', warnings.filter((w) => w.includes('"triggerTestLog"')).length === 1, JSON.stringify(warnings))
 }
 
+const DEPRECATED_DECLARATIONS: ReadonlyArray<{ name: string; file: string; declaration: string }> = [
+  { name: 'minLogLevel', file: 'src/client/logger.ts', declaration: 'minLogLevel?:' },
+  { name: 'bucketName', file: 'src/functions/logHandler.ts', declaration: 'bucketName?: string\n  cors' },
+  { name: 'sessionLimit', file: 'src/client/rateLimiter.ts', declaration: 'sessionLimit?:' },
+  { name: 'refillPerMinute', file: 'src/client/rateLimiter.ts', declaration: 'refillPerMinute?:' },
+  { name: 'errorReserve', file: 'src/client/rateLimiter.ts', declaration: 'errorReserve?:' },
+  { name: 'ClientLogRequest', file: 'src/functions/logHandler.ts', declaration: 'export type ClientLogRequest' },
+  { name: 'triggerTestLog', file: 'src/client/logger.ts', declaration: 'export function triggerTestLog' },
+  { name: 'routeFor', file: 'src/client/navigation.ts', declaration: 'routeFor?:' },
+  { name: 'cleanPath', file: 'src/client/navigation.ts', declaration: 'cleanPath?:' },
+  { name: 'path: false', file: 'src/client/navigation.ts', declaration: 'path?: false' },
+  { name: 'routeSource', file: 'src/shared/types.ts', declaration: "routeSource?: 'router'" },
+  { name: 'bc.nav', file: 'src/client/breadcrumbs.ts', declaration: 'nav: (screen: string)' },
+  { name: 'bc.error', file: 'src/client/breadcrumbs.ts', declaration: 'error: (type: string' },
+  { name: 'Logger.setScreen', file: 'src/client/logger.ts', declaration: 'setScreen(screen: string)' },
+]
+
+function testEveryDeprecatedNameCarriesTheTag() {
+  console.log('\nTest: every deprecated name carries @deprecated in its doc comment')
+  for (const { name, file, declaration } of DEPRECATED_DECLARATIONS) {
+    const source = readFileSync(file, 'utf8')
+    const at = source.indexOf(declaration)
+    const precedingComment = at < 0 ? '' : source.slice(source.lastIndexOf('/**', at), at)
+    const textAfterComment = precedingComment.slice(precedingComment.indexOf('*/') + 2)
+    const tagged = at >= 0 && precedingComment.includes('@deprecated') && textAfterComment.trim() === ''
+    assert(`${name} (${file}) carries @deprecated`, tagged)
+  }
+}
+
 async function run() {
   await testMinLogLevelActsLikeMinSeverity()
   await testMinLogLevelWarnsOnce()
@@ -448,6 +478,8 @@ async function run() {
   testClientLogRequestIsUsableAsLogRequest()
   await testTriggerTestLogCallsSendTestLog()
   await testTriggerTestLogWarnsOnce()
+
+  testEveryDeprecatedNameCarriesTheTag()
 
   reportResults()
 }
