@@ -497,6 +497,24 @@ however often `initLogger` runs, and leave alone any wrapper another tool instal
 before or after it. Prefer observing to wrapping wherever the browser offers it
 (`popstate`, `PerformanceObserver`); a wrapper is the exception that needs a reason.
 
+## Docs for people live on the site, not in this repo
+
+`https://fsl.dasasian.com/` is the product site (Starlight, in the `dasasian-web` repo).
+It holds every page a person reads. This repo holds three things: a short `README.md`,
+`CAPABILITIES.md` for agents, and the code with its doc comments.
+
+The README says what fsl is, how to install it, and where the docs are. It is the page
+npm and GitHub show, so it stays short enough to read in one look, and it explains
+nothing the site explains: two copies of one explanation drift, and the README was where
+1.4.0's examples that did not compile lived. Its links end with a slash, because the
+site redirects an address without one.
+
+Text for people never moves into `CAPABILITIES.md`; that file keeps its shape for its
+reader. A deprecation is stated in the code, with a `@deprecated` tag that names the
+replacement: the `.d.ts` files are the only place in the package that can say it. When
+a change needs a page changed, tell the `dasasian-web` session what changed; this repo
+does not hold the page.
+
 ## Releasing
 
 A library → **npm only** (no registry, no `server.json`, no tag-triggered publish workflow).
@@ -514,5 +532,5 @@ Full process + gotchas: `../PUBLISHING.md`. The short version:
    `npm view` can 404 for ~2 min after a *successful* publish (confirm with
    `npm access list packages`, don't re-publish).
 6. `git tag vX.Y.Z && git push origin vX.Y.Z`; `gh release create vX.Y.Z` with the CHANGELOG notes.
-7. Update the `dasasian.com/firebase-structured-logger` page in `dasasian-web`. Only
+7. Update the pages of `fsl.dasasian.com` in `dasasian-web`. Only
    `npm publish` and the release need your credentials; an agent drives the rest.
