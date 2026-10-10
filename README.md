@@ -173,6 +173,10 @@ to your project's default bucket.
 
 `fsl upload-sourcemaps` reads the bucket from `VITE_FIREBASE_STORAGE_BUCKET` (or `FIREBASE_STORAGE_BUCKET`) after loading `.env.local`. It uploads source maps to Cloud Storage, embeds a copy in `functions/sourcemaps/current/` for fast lookup, and deletes them from `dist/` so they are **not** served to browsers.
 
+`--embed-sourcemaps` needs `--backend`: with no backend folder there is nowhere to embed, so
+the command stops before it touches `dist/`. The release id comes from `--release`, then
+`VITE_RELEASE_ID`, then `RELEASE_ID`; with none of them, the command stops.
+
 > **`VITE_RELEASE_ID`** ties a build to its source maps — the client tags every entry with it, and `upload-sourcemaps` stores maps under the matching path. Use the same value in both places (the deploy script above sets it once from the git SHA). Locally it defaults to `'dev'`, and no maps are uploaded — symbolication isn't needed in development.
 
 **4. Verify it works** — prove the round trip before you trust it:
