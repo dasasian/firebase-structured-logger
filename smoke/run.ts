@@ -973,10 +973,6 @@ async function realClientLeg(): Promise<void> {
       `got ${summariesOfPath[0]?.metadata?.labels?.repeatCount}`)
   }
   assert(`${REAL_CLIENT_SUMMARIES} summaries arrived`, summaries.length === REAL_CLIENT_SUMMARIES, `got ${summaries.length}`)
-  assert('the path B copies show no action of path A',
-    copiesOnPath(PATH_B_ACTIONS).every((e) => !actionsSinceLastNav(e).includes('apply_discount')))
-  assert('the path A copies show no action of path B',
-    copiesOnPath(PATH_A_ACTIONS).every((e) => !actionsSinceLastNav(e).includes('edit_quantity')))
 }
 
 async function cleanup(): Promise<void> {

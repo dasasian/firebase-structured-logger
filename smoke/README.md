@@ -113,9 +113,6 @@ and the release through its environment and exits non-zero if a send failed; `ru
 scrubs the URL from anything the child printed. The leg runs last, so the entries it
 adds under the run id do not change what the older legs wait for.
 
-Without a cloud, point `FSL_SMOKE_CALLABLE_URL` (and the other `FSL_SMOKE_*` variables
-`realClient.ts` reads) at a local HTTP server that answers 200 and count the payloads.
-
 ## What the deployed fixture covers
 
 `functions/sourcemaps/current/` ships an embedded map for release
