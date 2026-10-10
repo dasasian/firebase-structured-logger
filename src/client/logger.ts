@@ -72,11 +72,10 @@ export interface InitLoggerConfig<
  */
 function defaultMinLevel(): LogSeverity {
   try {
-    if (process.env.NODE_ENV === 'production') return 'WARNING'
+    return process.env.NODE_ENV === 'production' ? 'WARNING' : 'DEBUG'
   } catch {
-    // Not Node and not folded: development.
+    return 'DEBUG'
   }
-  return 'DEBUG'
 }
 
 // Order matters — first match wins.
@@ -121,6 +120,25 @@ async function blobToBase64(blob: Blob): Promise<string> {
 async function assetToBase64(asset: Blob | File | string): Promise<string> {
   if (typeof asset === 'string') return asset
   return blobToBase64(asset)
+}
+
+async function convertReadableAttachmentsKeepingTheEntry(
+  attachments: Record<string, Blob | File | string>,
+): Promise<{ converted: Record<string, string> | undefined; failedNames: string[] }> {
+  const converted: Record<string, string> = {}
+  const failedNames: string[] = []
+  for (const [name, attachment] of Object.entries(attachments)) {
+    try {
+      converted[name] = await assetToBase64(attachment)
+    } catch (err) {
+      failedNames.push(name)
+      console.warn(
+        `[fsl] Could not read attachment "${name}" — sending the log without it:`,
+        err instanceof Error ? err.message : err,
+      )
+    }
+  }
+  return { converted: Object.keys(converted).length > 0 ? converted : undefined, failedNames }
 }
 
 export class Logger<
@@ -225,12 +243,16 @@ export class Logger<
    * user hits send: "the discount didn't apply" is a complaint, the same
    * sentence plus the trail is a reproduction.
    *
+   * Exempt from the severity floor and the rate limiter: both control events the
+   * system emits, and feedback is a person sending a message, rare by nature. The
+   * exemption keys on the record being feedback, not on its NOTICE severity.
+   *
    * Headless — the app owns the UI. Returns nothing: a reference number is
    * meaningless to a user with no portal to check it against. An app wanting
    * correlation passes its own id as a label, which it knows before sending.
    */
   sendFeedback(text: string, extras?: FeedbackOptions<AppLabels>): void {
-    const exemptFromSeverityFloorAndRateLimiter = true
+    const isFeedback = true
     this.send(
       text,
       'NOTICE',
@@ -239,7 +261,7 @@ export class Logger<
       extras?.attachments,
       undefined,
       undefined,
-      exemptFromSeverityFloorAndRateLimiter,
+      isFeedback,
     )
   }
 
@@ -256,22 +278,11 @@ export class Logger<
     attachments?: Record<string, Blob | File | string>,
     error?: ErrorPayload,
     signature?: string,
-    // Both gates below are volume and cost controls for events the SYSTEM
-    // emits. Feedback is a person sending a message that happens to travel the
-    // same pipe — it is rare by nature and there is nothing to throttle. The
-    // exemption keys on the record being feedback, not on its severity, so a
-    // NOTICE emitted for anything else still behaves normally.
-    bypassVolumeControls = false,
-    // A repeat summary spends no budget and is never itself a duplicate — but
-    // it still respects the severity floor, unlike feedback above.
-    skipBudget = false,
+    isFeedback = false,
+    isRepeatSummary = false,
     timestamp?: string,
-    // Returns whether the entry actually reached `logFunction` — the floor,
-    // the rate limiter, and a rejected `logFunction` all resolve to `false`.
-    // A repeat summary is only removed from its queue once this is `true`;
-    // see `sendRepeatSummary`.
   ): Promise<boolean> {
-    if (!bypassVolumeControls && SEVERITY_ORDER[severity] > this.minLevel) return false
+    if (!isFeedback && SEVERITY_ORDER[severity] > this.minLevel) return false
 
     const nav = getCurrentRoute()
 
@@ -290,14 +301,8 @@ export class Logger<
       ...labels,
     }
 
-    // One gate for every severity. Passing a signature opts this log into
-    // duplicate suppression; the check and the budget spend are one operation,
-    // so a log can neither be counted twice nor checked without being counted.
-    // Once a signature passes `duplicateLimit`, further occurrences are
-    // "counted", not refused outright — the rate limiter keeps a running
-    // count toward the next repeat summary.
     const decision =
-      bypassVolumeControls || skipBudget
+      isFeedback || isRepeatSummary
         ? ({ allowed: true } as const)
         : allow({ severity, signature, labels: allLabels })
     if (!decision.allowed) {
@@ -311,43 +316,19 @@ export class Logger<
       return false
     }
 
-    // Ties this full copy to the summary its repeats will eventually become.
-    // The client has no server logId to put in the summary's `repeatOf` — see
-    // README, "Repeats are counted, not dropped" — so this client-side id is
-    // the join key instead, carried by every full copy of the signature.
-    if ('repeatKey' in decision && decision.repeatKey) {
-      allLabels.repeatKey = decision.repeatKey
+    const keyJoiningFullCopiesToTheirRepeatSummary = 'repeatKey' in decision ? decision.repeatKey : undefined
+    if (keyJoiningFullCopiesToTheirRepeatSummary) {
+      allLabels.repeatKey = keyJoiningFullCopiesToTheirRepeatSummary
     }
 
     try {
-      // Each attachment is converted in its own try. A Blob or File can fail to
-      // read — a user picks a file from <input type="file">, moves or deletes it,
-      // then submits, and the browser raises NotReadableError. Previously one
-      // such failure escaped to the outer catch and the ENTIRE entry was lost:
-      // message, labels, breadcrumbs and all. The message and breadcrumbs are
-      // the valuable part; an attachment is a bonus.
       let base64Attachments: Record<string, string> | undefined
-      const failedAttachments: string[] = []
       if (attachments && Object.keys(attachments).length > 0) {
-        const converted: Record<string, string> = {}
-        for (const [name, attachment] of Object.entries(attachments)) {
-          try {
-            converted[name] = await assetToBase64(attachment)
-          } catch (err) {
-            failedAttachments.push(name)
-            console.warn(
-              `[fsl] Could not read attachment "${name}" — sending the log without it:`,
-              err instanceof Error ? err.message : err,
-            )
-          }
+        const conversion = await convertReadableAttachmentsKeepingTheEntry(attachments)
+        base64Attachments = conversion.converted
+        if (conversion.failedNames.length > 0) {
+          allLabels.attachmentsFailed = conversion.failedNames.join(',')
         }
-        if (Object.keys(converted).length > 0) base64Attachments = converted
-      }
-
-      // Without this the absence of hasAttachments is a mystery. Labels are
-      // promoted to Cloud Logging entry labels, so this is filterable.
-      if (failedAttachments.length > 0) {
-        allLabels.attachmentsFailed = failedAttachments.join(',')
       }
 
       const payload: LogPayload = {
@@ -371,21 +352,16 @@ export class Logger<
     }
   }
 
-  // Guards against sending the same queued summary twice when a flush is
-  // triggered again (interval, visibilitychange) before a previous attempt's
-  // `logFunction` call has resolved — `peekPendingSummaries` does not remove
-  // anything, so without this a slow or slow-to-fail send could be picked up
-  // more than once.
-  private readonly summariesInFlight = new Set<string>()
+  private readonly summaryIdsStillAwaitingTheirSend = new Set<string>()
 
   /** Send whatever repeat summaries are due, from this visit or an earlier one. */
   sendPendingSummaries(): void {
     for (const summary of peekPendingSummaries()) {
-      if (this.summariesInFlight.has(summary.id)) continue
-      this.summariesInFlight.add(summary.id)
+      if (this.summaryIdsStillAwaitingTheirSend.has(summary.id)) continue
+      this.summaryIdsStillAwaitingTheirSend.add(summary.id)
       const sending = this.sendRepeatSummary(summary)
       sendWatcher?.(sending)
-      void sending.finally(() => this.summariesInFlight.delete(summary.id))
+      void sending.finally(() => this.summaryIdsStillAwaitingTheirSend.delete(summary.id))
     }
   }
 
@@ -420,7 +396,7 @@ export class Logger<
       repeat: { count: summary.repeatCount, firstSeen: summary.firstSeen, lastSeen: summary.lastSeen },
     }
 
-    const sent = await this.deliver(
+    const reachedLogFunction = await this.deliver(
       `Repeated ${summary.repeatCount} more times: ${summary.message}`,
       'WARNING',
       labels,
@@ -432,7 +408,7 @@ export class Logger<
       true,
       summary.lastSeen,
     )
-    if (sent) acknowledgeSummary(summary.id)
+    if (reachedLogFunction) acknowledgeSummary(summary.id)
   }
 }
 
@@ -479,18 +455,18 @@ export function triggerTestLog(): void {
 // Module-level singleton
 let instance: Logger<Record<string, string | undefined>> | null = null
 
+function sendPreviousVisitSummariesOnceInitHasFinished(): void {
+  if (typeof setTimeout !== 'undefined') {
+    setTimeout(() => instance?.sendPendingSummaries(), 0)
+  }
+}
+
 export function initLogger<
   AppLabels extends Record<string, string | undefined> = Record<string, string | undefined>,
 >(config: InitLoggerConfig<AppLabels>): Logger<AppLabels> {
   instance = new Logger(config) as Logger<Record<string, string | undefined>>
 
-  // A previous visit's queued summaries (README, "the next visit sends
-  // them") would otherwise wait for the first `visibilitychange: hidden` or
-  // the first 60s interval tick — a short delay so init itself can finish
-  // first, not a wait for either of those.
-  if (typeof setTimeout !== 'undefined') {
-    setTimeout(() => instance?.sendPendingSummaries(), 0)
-  }
+  sendPreviousVisitSummariesOnceInitHasFinished()
 
   return instance as Logger<AppLabels>
 }

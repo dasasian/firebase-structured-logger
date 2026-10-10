@@ -316,6 +316,60 @@ async function testFailedSummarySendKeepsItQueued() {
   assert('the summary was sent exactly once', summariesSent.length === 1, `got: ${summariesSent.length}`)
 }
 
+async function testConcurrentFlushesSendAQueuedSummaryOnce() {
+  console.log('\nTest: a flush triggered while a summary send is still pending does not send it again')
+  configureRateLimiter({ burstLimit: 500, duplicateLimit: 1, storageKey: 'fsl_ratelimit', summaryIntervalMinutes: 60 })
+  resetRateLimiter()
+  localStorageStub.setItem('fsl_pending_summaries', '[]')
+
+  const summariesSent: LogPayload[] = []
+  let finishSummarySend: () => void = () => {}
+  const logger = initLogger({
+    appId: 'test-app',
+    releaseId: 'test-release',
+    logFunction: async (data) => {
+      if (data.labels.repeatOf === undefined) return
+      summariesSent.push(data)
+      await new Promise<void>((resolve) => { finishSummarySend = resolve })
+    },
+  })
+
+  const t0 = Date.now()
+  withFrozenTime(t0, () => {
+    logger.error(new Error('slow-boom'))
+    logger.error(new Error('slow-boom'))
+  })
+  withFrozenTime(t0 + 61 * 60_000, () => {
+    flushDueSummaries(true)
+    logger.sendPendingSummaries()
+    logger.sendPendingSummaries()
+  })
+  await new Promise((r) => setTimeout(r, 0))
+
+  assert('the summary reached logFunction once although two flushes ran', summariesSent.length === 1, `got: ${summariesSent.length}`)
+  finishSummarySend()
+  await new Promise((r) => setTimeout(r, 0))
+}
+
+async function testInitSendsAPreviousVisitsQueuedSummary() {
+  console.log('\nTest: initLogger sends a previous visit’s queued summary without waiting for a flush trigger')
+  configureRateLimiter({ burstLimit: 500, duplicateLimit: 1, storageKey: 'fsl_ratelimit', summaryIntervalMinutes: 60 })
+  resetRateLimiter()
+  localStorageStub.setItem('fsl_pending_summaries', '[]')
+  const t0 = Date.now()
+  withFrozenTime(t0, () => {
+    const earlier = makeLogger().logger
+    earlier.error(new Error('left-over-boom'))
+    earlier.error(new Error('left-over-boom'))
+  })
+  withFrozenTime(t0 + 61 * 60_000, () => flushDueSummaries(true))
+
+  const { allPayloads } = makeLogger()
+  await new Promise((r) => setTimeout(r, 10))
+
+  assert('the left-over summary was sent after init', allPayloads().some((p) => p.labels.repeatOf !== undefined))
+}
+
 async function testDroppedLogConsoleMessages() {
   console.log('\nTest: the three console messages a dropped log produces')
   // burstLimit 3, reserve 1/3 -> the last 1 unit is ERROR-only.
@@ -401,6 +455,8 @@ async function run() {
   await testTwoHundredErrorsThroughTheLoggerSendThreeCopiesAndASummary()
   await testRepeatSignatureUsesTheSameScreenAsTheLabelWithNavigationOn()
   await testFailedSummarySendKeepsItQueued()
+  await testConcurrentFlushesSendAQueuedSummaryOnce()
+  await testInitSendsAPreviousVisitsQueuedSummary()
   await testDroppedLogConsoleMessages()
   await testDefaultFloorFollowsNodeEnv()
 
