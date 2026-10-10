@@ -5,9 +5,10 @@
  * query them back. Never published — `files` in the root package.json is
  * ["dist", "skills"], so `smoke/` stays out of the tarball.
  *
- * They depend on the PUBLISHED package, not the local build, so a run exercises
- * the artifact a consumer actually installs: the exports map, the files
- * contents, and the peer dependencies.
+ * They depend on a tarball packed from the working tree at deploy time
+ * (`npm run smoke:deploy`), so a run tests the code about to ship, before it
+ * reaches npm. What a consumer installs from npm (the exports map, the files in
+ * the tarball, the peer dependencies) is `npm run smoke:install`'s job.
  *
  * All project-specific values come from the environment — see .env.example.
  * Nothing identifying is committed.

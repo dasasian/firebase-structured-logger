@@ -96,13 +96,25 @@ One user reaches the same error on one screen by two paths, four times each:
 | A | `apply_discount` | `bc.action()` in code |
 | B | `edit_quantity` | a click on a `data-fsl-action` button, with `enableActions()` |
 
-Both paths end with `tap_place_order`. Then the tab goes hidden, which is what sends
-repeat summaries in a browser. The leg asserts 6 full copies under 2 `repeatKey`s,
-3 each; 2 summaries, each `repeatOf` one of those keys; and on every full copy the
-breadcrumbs of its own path.
+Both paths end with `tap_place_order`. Every attempt starts by arriving on the screen
+(`navigatedTo('Checkout')`), as a user does: the signature holds the last 3 `action`
+breadcrumbs since the last `nav` one, so without the arrival the actions of attempt 1
+and attempts 2 to 4 differ (measured: 4 full copies, 2 keys, no summary for one path).
+Then the tab goes hidden, which is what sends repeat summaries in a browser. The leg
+asserts 6 full copies under 2 `repeatKey`s, 3 each; 2 summaries with `repeatCount` "1",
+each `repeatOf` one of those keys; and, on every full copy, the actions since its last
+`nav` breadcrumb are its own path's (the trail itself also holds the earlier path's
+crumbs, so path B's copies are read from their last arrival on).
 
-jsdom's globals stay out of the process the other legs run in: a `window` there
-changes how other libraries behave.
+`smoke/realClient.ts` is that user, run by `run.ts` as a child process. jsdom's
+globals stay out of the process the other legs run in: a `window` there changes how
+the Google libraries and `fetch` behave. The child gets the callable's URL, the run id
+and the release through its environment and exits non-zero if a send failed; `run.ts`
+scrubs the URL from anything the child printed. The leg runs last, so the entries it
+adds under the run id do not change what the older legs wait for.
+
+Without a cloud, point `FSL_SMOKE_CALLABLE_URL` (and the other `FSL_SMOKE_*` variables
+`realClient.ts` reads) at a local HTTP server that answers 200 and count the payloads.
 
 ## What the deployed fixture covers
 

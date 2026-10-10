@@ -18,7 +18,8 @@
 
 import fs from 'fs'
 import path from 'path'
-import { execSync } from 'child_process'
+import { execSync, execFile } from 'child_process'
+import { promisify } from 'util'
 import { fileURLToPath } from 'url'
 import { Logging } from '@google-cloud/logging'
 import { GoogleAuth } from 'google-auth-library'
@@ -30,6 +31,7 @@ import { runDoctor } from '../src/tools/doctor.js'
 // --- config ---------------------------------------------------------------
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
+const execFileAsync = promisify(execFile)
 
 function loadEnv(): Record<string, string> {
   const file = path.join(HERE, '.env.local')
@@ -632,6 +634,7 @@ async function main(): Promise<void> {
   await cloudRunLeg()
   await bigEntryLeg()
   await repeatSummaryLeg()
+  await realClientLeg()
 }
 
 // --- Cloud Run: the backend without firebase-functions or firebase-admin (#39) ---
@@ -869,6 +872,111 @@ async function repeatSummaryLeg(): Promise<void> {
   assert('the plain WARNING arrived', plain !== undefined)
   assert('a non-summary keeps the server\'s time, not the one it sent',
     Math.abs(plainTime - sentAt) < 5 * 60 * 1000, `got: ${plain?.metadata?.timestamp}, sent stamp: ${stamp}`)
+}
+
+// --- The real client logger, end to end (#77) ---
+
+const PATH_A_ACTIONS = ['apply_discount', 'tap_place_order']
+const PATH_B_ACTIONS = ['edit_quantity', 'tap_place_order']
+const REAL_CLIENT_FULL_COPIES = 6
+const REAL_CLIENT_SUMMARIES = 2
+
+interface ChildRun {
+  exitCode: number
+  output: string
+}
+
+/**
+ * Runs `smoke/realClient.ts` in its own process, so jsdom's `window` never exists where
+ * the Google client libraries run. The callable's URL holds the project id, so it goes in
+ * through the environment and is scrubbed from anything the child printed.
+ */
+async function runRealClientScript(callableUrl: string, errorMessage: string): Promise<ChildRun> {
+  const childEnv = {
+    ...process.env,
+    FSL_SMOKE_CALLABLE_URL: callableUrl,
+    FSL_SMOKE_APP_ID: env.FSL_SMOKE_APP_ID ?? 'smoke-app',
+    FSL_SMOKE_RELEASE_ID: RELEASE_ID,
+    FSL_SMOKE_RUN_ID: RUN_ID,
+    FSL_SMOKE_ERROR_MESSAGE: errorMessage,
+  }
+  const scrub = (text: string) => text.split(callableUrl).join('<callable url>')
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      ['--import', 'tsx', path.join(HERE, 'realClient.ts')],
+      { env: childEnv, encoding: 'utf-8' },
+    )
+    return { exitCode: 0, output: scrub(stdout + stderr) }
+  } catch (err) {
+    const failed = err as { code?: number; stdout?: string; stderr?: string }
+    return { exitCode: typeof failed.code === 'number' ? failed.code : 1, output: scrub(`${failed.stdout ?? ''}${failed.stderr ?? ''}`) }
+  }
+}
+
+function actionsSinceLastNav(entry: SmokeEntry): string[] {
+  const crumbs = entry.data?.breadcrumbs ?? []
+  const lastNavIndex = crumbs.map((crumb) => crumb.type).lastIndexOf('nav')
+  return crumbs
+    .slice(lastNavIndex + 1)
+    .filter((crumb) => crumb.type === 'action')
+    .map((crumb) => crumb.name)
+}
+
+/**
+ * The real working-tree `/client` logger, run in jsdom by `smoke/realClient.ts`, sends
+ * through the deployed `fslSmokeClient`. One user reaches one error on one screen by two
+ * paths, four times each, then the tab goes hidden. What the client decided (which copy is
+ * a repeat, what a summary carries, which breadcrumbs go with an entry) is asserted where
+ * it ends up. Runs last: its entries carry the run id, so the earlier legs' counts would
+ * otherwise include them.
+ */
+async function realClientLeg(): Promise<void> {
+  console.log('\n  --- the real client, end to end ---')
+  const errorMessage = `[fsl-verify] real client checkout failed ${RUN_ID}`
+  const child = await runRealClientScript(functionUrl('fslSmokeClient'), errorMessage)
+  for (const line of child.output.split('\n').filter(Boolean)) console.log(`  child: ${line}`)
+  assert('the real client process sent every entry and exited 0', child.exitCode === 0, `exit code ${child.exitCode}`)
+
+  const wanted = REAL_CLIENT_FULL_COPIES + REAL_CLIENT_SUMMARIES
+  const filter = `labels.smokeRunId="${RUN_ID}" AND jsonPayload.message:"${errorMessage}"`
+  let entries: SmokeEntry[] = []
+  const started = Date.now()
+  let delay = 4_000
+  while (Date.now() - started < 240_000 && entries.length < wanted) {
+    entries = await listEntriesRest(filter)
+    if (entries.length < wanted) {
+      await new Promise((r) => setTimeout(r, delay))
+      delay = Math.min(delay * 1.4, 15_000)
+    }
+  }
+
+  const keyOf = (entry: SmokeEntry) => entry.metadata?.labels?.repeatKey
+  const fullCopies = entries.filter((e) => keyOf(e) !== undefined)
+  const summaries = entries.filter((e) => e.metadata?.labels?.repeatOf !== undefined)
+  const sameActions = (a: string[], b: string[]) => a.join() === b.join()
+  const copiesOnPath = (actions: string[]) => fullCopies.filter((e) => sameActions(actionsSinceLastNav(e), actions))
+  const distinctKeys = (copies: SmokeEntry[]) => [...new Set(copies.map(keyOf))]
+
+  assert(`${REAL_CLIENT_FULL_COPIES} full copies arrived`, fullCopies.length === REAL_CLIENT_FULL_COPIES, `got ${fullCopies.length}`)
+  assert('they carry 2 distinct repeatKeys', distinctKeys(fullCopies).length === 2, `got ${distinctKeys(fullCopies).length}`)
+  for (const [name, actions] of [['A', PATH_A_ACTIONS], ['B', PATH_B_ACTIONS]] as const) {
+    const copies = copiesOnPath(actions)
+    const keys = distinctKeys(copies)
+    assert(`path ${name}: 3 full copies, one repeatKey, breadcrumbs show ${actions.join(' then ')}`,
+      copies.length === 3 && keys.length === 1,
+      `got ${copies.length} copies under ${keys.length} keys; actions seen: ${JSON.stringify(fullCopies.map(actionsSinceLastNav))}`)
+    const summariesOfPath = summaries.filter((e) => e.metadata?.labels?.repeatOf === keys[0])
+    assert(`path ${name}: one summary points at its repeatKey`, keys.length === 1 && summariesOfPath.length === 1,
+      `got ${summariesOfPath.length}`)
+    assert(`path ${name}: the summary counts 1 repeat`, summariesOfPath[0]?.metadata?.labels?.repeatCount === '1',
+      `got ${summariesOfPath[0]?.metadata?.labels?.repeatCount}`)
+  }
+  assert(`${REAL_CLIENT_SUMMARIES} summaries arrived`, summaries.length === REAL_CLIENT_SUMMARIES, `got ${summaries.length}`)
+  assert('the path B copies show no action of path A',
+    copiesOnPath(PATH_B_ACTIONS).every((e) => !actionsSinceLastNav(e).includes('apply_discount')))
+  assert('the path A copies show no action of path B',
+    copiesOnPath(PATH_A_ACTIONS).every((e) => !actionsSinceLastNav(e).includes('edit_quantity')))
 }
 
 async function cleanup(): Promise<void> {
