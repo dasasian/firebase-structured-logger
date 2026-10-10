@@ -228,6 +228,18 @@ with no "see above" and no pointer to another section; Fits when lists things to
 that `tests/capabilities.ts` checks against the real exports; each mistake reads
 pattern → why it is wrong → the fix. No motivation, no history. Keep that shape when you edit it.
 
+**An example in `CAPABILITIES.md` must work as written, because an agent copies it.** Two
+have a reason that the example cannot show. A labels type is a `type` alias: the limit on
+`AppLabels` is `Record<string, string | undefined>`, an `interface` has no index signature,
+and `initLogger<MyAppLabels>` then fails with TS2344. `tests/` type-checks both forms, so
+the Mistakes line about it stays true. And `createHttpLogHandler` is mounted with `app.all`:
+the handler answers the browser's `OPTIONS` request itself, and under `app.post` Express
+answers it first, with no CORS headers, so the browser blocks every log from another origin.
+
+**A comment names no README section and no page of the site.** Doc comments reach apps
+through the `.d.ts` files, and agents read them there; a section can be cut and a page
+address can change. A comment says by itself what a caller must know.
+
 **Facts live in the package; skills hold only steps.** `install-skills` copies a skill
 into the app, and the copy does not change when the app updates fsl — POUR5 ran a copy
 that still taught `bc.nav` for months. So what an app can add to its code and config is in
