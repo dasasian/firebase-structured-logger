@@ -7,7 +7,7 @@ import { sessionStorageStub, localStorageStub, withFrozenTime, setVisibility } f
 import { initLogger } from '../src/client/logger.js'
 import { configureRateLimiter, resetRateLimiter, flushDueSummaries } from '../src/client/rateLimiter.js'
 import { setNavigationEnabled, setCurrentRoute, setCurrentScreen, clearBreadcrumbs, addBreadcrumb, resetBreadcrumbSession } from '../src/client/breadcrumbs.js'
-import type { LogPayload } from '../src/shared/types.js'
+import type { BreadcrumbEntry, LogPayload } from '../src/shared/types.js'
 import type { Logger } from '../src/client/logger.js'
 import { assert, reportResults } from './testHelpers.js'
 
@@ -358,7 +358,7 @@ function resetForPathTests(duplicateLimit: number) {
   resetBreadcrumbSession()
 }
 
-type Step = [type: 'nav' | 'action' | 'state', name: string, data?: Record<string, unknown>]
+type Step = [type: BreadcrumbEntry['type'], name: string, data?: Record<string, unknown>]
 
 function failAfter(logger: Logger, message: string, steps: Step[]) {
   for (const [type, name, data] of steps) addBreadcrumb(type, name, data)
