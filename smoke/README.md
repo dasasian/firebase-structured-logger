@@ -35,7 +35,7 @@ free tier.
 ## Running
 
 ```
-npm run smoke:deploy       # builds against the PUBLISHED package, then deploys
+npm run smoke:deploy       # packs the WORKING TREE, deploys the functions
 npm run smoke:deploy:run   # packs the WORKING TREE, deploys the Cloud Run service
 npm run smoke              # invokes, waits for ingestion, asserts, cleans up
 npm run smoke:install      # no cloud: installs the tarball with no optional peers
@@ -96,15 +96,11 @@ through to Storage rather than reusing whatever shipped.
 
 ## Notes on the design
 
-**The functions depend on the published package**, not the local build. A run
-therefore exercises the artifact a consumer installs — the exports map, the
-files contents, the peer dependencies. To smoke an unreleased change, publish a
-prerelease first:
-
-```
-npm version prerelease && npm publish --tag beta
-cd smoke/functions && npm i @dasasian/firebase-structured-logger@beta
-```
+**Both deploys pack the working tree**, so a run tests the code about to ship,
+before it reaches npm. What a consumer installs from npm (the exports map, the
+files in the tarball, the peer dependencies) is `npm run smoke:install`'s job:
+it packs the tarball and installs it in an empty directory with no cloud. The
+functions keep no lockfile, because a local tarball's hash changes at every pack.
 
 **Every run generates a ULID** and tags every entry with it. Without that, a
 second run would match the first run's entries and pass for the wrong reason.

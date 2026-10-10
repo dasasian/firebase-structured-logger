@@ -19,6 +19,7 @@ dist/
 *.json
 !package.json
 !package-lock.json
+smoke/functions/package-lock.json
 !tsconfig.json
 !tsconfig.check.json
 !firebase.json
