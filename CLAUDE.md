@@ -507,13 +507,16 @@ The README is the front page: the one npm and GitHub show, and the one a visitor
 the package by in a few seconds. It holds what answers "what is this and why would I
 click": the pitch, the picture of how it works (`assets/how-it-works.svg`, whose `alt`
 text says the same in words), six results that each link to their page, the install
-line, a quick start for both halves, and a map of every page of the site. It explains
-nothing more. Two copies of one explanation drift, and the long README was where 1.4.0's
+line, a quick start for both halves, the idea in one table ("Say it once, where it
+happens": where, what you write, what you get), and a map of every page of the site.
+Those are its parts. It explains nothing more, and a new part needs a reason this
+paragraph can state: the long README grew one good section at a time. Two copies of one explanation drift, and the long README was where 1.4.0's
 examples that did not compile lived.
 
 So the quick start is compiled. Its two code blocks are the text of two files under
 `tests/`, which the typecheck covers, and a test fails when the README and those files
-differ. A page list has no such check: when the site adds, moves or removes a page, the
+differ. Every name in code type in the "Say it once" table must exist in `src/`; the
+same test fails on one that does not, and on one it has no check for. A page list has no such check: when the site adds, moves or removes a page, the
 `dasasian-web` session says so, and the map changes here. README links to the site end
 with a slash, because the site redirects an address without one.
 
