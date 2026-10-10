@@ -296,7 +296,7 @@ private smoke setup. Only `npm run smoke` needs a real project.
 A page with a URL change is navigation (`enableNavigation`); a page without one is
 `navigatedTo`; anything inside or on top of a page is a view (`enableViews()` and
 `data-fsl-view` markup), a label and never a breadcrumb; what the user did is `bc.action` or markup
-(`data-fsl-action`, #52). Each produces one breadcrumb or label, never two for the same
+(`data-fsl-action` with `enableActions()`). Each produces one breadcrumb or label, never two for the same
 event — that is why `bc.nav` and `setScreen` are ignored once navigation is on.
 `labelsFor` customises the default `history` wrapper only. A router adapter
 (`/client/navigation/vue-router`, `/client/navigation/react-router`) is a second source
@@ -381,6 +381,19 @@ stays collapsed. Never `data`, timestamps, `state` breadcrumbs (an app can emit 
 loop) or network breadcrumbs (their URLs carry ids). There is no option: an app with no
 actions gets the signature it always had. No label shows the path on a summary;
 `repeatKey` joins it to a full copy, whose breadcrumbs do.
+
+## Marked actions are recorded where the browser delivers them
+
+`/client/actions` adds three listeners on the document, all in the capture phase:
+`click`, `submit` and `change`. Capture, so a crumb is recorded before the app's handler
+runs (an error that handler throws carries the click) and `stopPropagation` in the app
+cannot hide it. Each event finds the nearest `[data-fsl-action]` on `composedPath()`, so a
+mark inside an open shadow root counts. The marked element decides which event is its
+action, so nothing is recorded twice: `<form>` on `submit`; `<select>`, `<input>`,
+`<textarea>` on `change`; anything else on `click`. An event whose nearest mark expects a
+different event is ignored. Only the attribute's value is read, and it becomes an `action`
+breadcrumb through `addBreadcrumb`; never the element's text, value or other attributes,
+which can hold personal data. Observe only: no browser API is wrapped.
 
 ## Optional client helpers are separate entry points
 

@@ -691,7 +691,8 @@ get there, which is usually the part you need to reproduce it. Breadcrumbs are t
 a rolling record of the last steps, attached automatically to every error and every piece
 of feedback, with no correlation work on your side.
 
-Turn on navigation, drop a `bc.action` before anything that can fail, and `total is wrong`
+Turn on navigation, mark the controls that matter with `data-fsl-action` (or call
+`bc.action` before anything that can fail), and `total is wrong`
 arrives as `Checkout · apply_discount · total_recalculated · tap_place_order`.
 
 The trail is capped at **50 entries** and **5 minutes** — old enough to cover the steps that
@@ -881,6 +882,46 @@ nothing marked visible, there is no `view` label.
 - **Not inside shadow DOM** — marks inside a web component's shadow root are not found.
 
 Calling `enableViews()` again does nothing more.
+
+### Marked actions: what the user did, with no code
+
+A `bc.action` call in every handler is easy to forget. Mark the controls that matter in
+your markup instead, and turn marked actions on once at startup:
+
+```ts
+import { enableActions } from '@dasasian/firebase-structured-logger/client/actions'
+
+enableActions()
+```
+
+```html
+<button data-fsl-action="apply_discount">Apply</button>
+<select data-fsl-action="choose_shipping">…</select>
+<form data-fsl-action="checkout_submitted">…</form>
+```
+
+Each one becomes an `action` breadcrumb, exactly as `bc.action('apply_discount')` would, so
+it also tells repeats apart by path (see "Repeats are counted, not dropped").
+
+- **The marked element decides the event.** A `<form>` counts on submit. A `<select>`,
+  `<input>` or `<textarea>` counts on change, when the value actually changed, not when the
+  list opens. Anything else (a button, a link, a card, a web component) counts on click,
+  and Enter on a button is a click. Each action is recorded once: a click inside a marked
+  form is not the form's action.
+- **The nearest mark wins.** A click on the icon inside a marked button is the button's
+  action.
+- **Recorded before your handler runs.** If the handler throws, the error's trail already
+  holds the click. A handler that stops the event does not hide it.
+- **Names only, fixed words, never values.** `data-fsl-action="apply_discount"`, not
+  `"apply SAVE10"`. Nothing else is read from the element: not its text, not its value,
+  not other attributes. For data, call `bc.action('apply_discount', { code })` in code.
+- **Marks inside web components count**, through open shadow roots. Closed ones stay
+  closed.
+- **Unmarked clicks are ignored.** A button's label can hold personal data ("Pay $42.10 to
+  Jane Smith"), and recording every click would push the steps that matter out of the
+  50-entry trail.
+
+Calling `enableActions()` again does nothing more. Outside a browser it does nothing.
 
 ## Timing: when something is too slow
 
@@ -1321,6 +1362,9 @@ const stop = enableVueRouterNavigation(router, { adjust?: (labels) => labels }) 
 
 import { enableViews } from '@dasasian/firebase-structured-logger/client/views'
 enableViews()                                                    // see "Views: what was on screen"
+
+import { enableActions } from '@dasasian/firebase-structured-logger/client/actions'
+enableActions()                                                  // see "Marked actions"
 
 import { trace, startTrace, configureTraces } from '@dasasian/firebase-structured-logger/client/timing'
 configureTraces({ name: { warnAfterMs?, steps?: { step: ms } } })   // see "Timing"
