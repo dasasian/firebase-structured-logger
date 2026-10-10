@@ -86,7 +86,7 @@ function testClientLoggerIsNotConstructible() {
   )
 }
 
-const CLIENT_LOGGER_MEMBERS: Record<keyof Logger, true> = {
+const CLIENT_LOGGER_MEMBERS_PINNED_BY_TYPECHECK: Record<keyof Logger, true> = {
   setUser: true,
   clearUser: true,
   setScreen: true,
@@ -96,15 +96,6 @@ const CLIENT_LOGGER_MEMBERS: Record<keyof Logger, true> = {
   info: true,
   debug: true,
   sendFeedback: true,
-}
-
-function testClientLoggerMembers() {
-  console.log('\nTest: the client logger has exactly the public members pinned here')
-  assert(
-    'every public member is pinned (a mismatch fails npm run typecheck)',
-    Object.keys(CLIENT_LOGGER_MEMBERS).length === 9,
-    Object.keys(CLIENT_LOGGER_MEMBERS).join(', '),
-  )
 }
 
 function testDoctorCommandSurface() {
@@ -144,7 +135,6 @@ function run() {
   checkSurface('testing', testing)
   testNoEntryPointExportsSetSendWatcher()
   testClientLoggerIsNotConstructible()
-  testClientLoggerMembers()
   testDoctorCommandSurface()
   reportResults()
 }
