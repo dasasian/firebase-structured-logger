@@ -59,6 +59,12 @@ export function readLastEntry(logDir: string): LoggedEntry | undefined {
   return lines.length ? JSON.parse(lines[lines.length - 1]) : undefined
 }
 
+export function readAllEntries(logDir: string): LoggedEntry[] {
+  const file = logFile(logDir)
+  if (!fs.existsSync(file)) return []
+  return fs.readFileSync(file, 'utf-8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as LoggedEntry)
+}
+
 export function clearLog(logDir: string): void {
   const file = logFile(logDir)
   if (fs.existsSync(file)) fs.writeFileSync(file, '')

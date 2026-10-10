@@ -549,6 +549,16 @@ function logAttachmentsToBase64(
   return result;
 }
 
+const objectsGivenToErrorLogging = new WeakSet<object>();
+
+export function rememberErrorWasLogged(raw: unknown): void {
+  if (typeof raw === "object" && raw !== null) objectsGivenToErrorLogging.add(raw);
+}
+
+export function wasErrorAlreadyLogged(raw: unknown): boolean {
+  return typeof raw === "object" && raw !== null && objectsGivenToErrorLogging.has(raw);
+}
+
 /**
  * Convenience wrapper that builds a logger object for a given label set.
  */
@@ -581,6 +591,7 @@ export function createLogWriter(
       context?: Record<string, unknown>,
       attachments?: Record<string, string | Buffer>,
     ): void {
+      rememberErrorWasLogged(raw);
       const error = toError(raw);
       writeLog({
         message: error.message,

@@ -25,7 +25,8 @@ if (process.env.FUNCTIONS_EMULATOR === 'true') {
 }
 
 import { writeLog, initLogger, writeJsonLine } from '../src/functions/logger.js'
-import { getLogger } from '../src/functions/requestLogger.js'
+import { getLogger, withLogging } from '../src/functions/requestLogger.js'
+import { HttpsError } from 'firebase-functions/v2/https'
 import { assert, reportResults } from './testHelpers.js'
 import {
   runWithTrace,
@@ -53,6 +54,29 @@ initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
  * to console.info/debug/warn. Capturing only stdout silently misses every error
  * entry — which is most of what matters here.
  */
+async function captureEntriesAsync(fn: () => Promise<void>): Promise<Record<string, unknown>[]> {
+  const lines: string[] = []
+  const realOut = process.stdout.write.bind(process.stdout)
+  const realErr = process.stderr.write.bind(process.stderr)
+  const grab = ((chunk: unknown) => {
+    lines.push(String(chunk))
+    return true
+  }) as typeof process.stdout.write
+  process.stdout.write = grab
+  process.stderr.write = grab
+  try {
+    await fn()
+  } finally {
+    process.stdout.write = realOut
+    process.stderr.write = realErr
+  }
+  return lines
+    .join('')
+    .split('\n')
+    .filter((l) => l.trim().startsWith('{'))
+    .map((l) => JSON.parse(l) as Record<string, unknown>)
+}
+
 function captureEntries(fn: () => void): Record<string, unknown>[] {
   const lines: string[] = []
   const realOut = process.stdout.write.bind(process.stdout)
@@ -763,6 +787,60 @@ function testBackendErrorsReportToo() {
   initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
 }
 
+async function testWithLoggingWritesWhatTheHandlerThrowsInTheProductionShape() {
+  console.log('\nTest: a throw through withLogging is one production entry, thrown again as the same object')
+  const original = new Error('card declined')
+  original.stack = 'Error: card declined\n    at checkout.ts:12:3'
+  let thrown: unknown
+
+  const entries = await captureEntriesAsync(async () => {
+    try {
+      await withLogging({ functionName: 'checkout' }, async () => { throw original })(
+        { data: {}, auth: { uid: 'alice', token: {} }, rawRequest: {} } as never,
+      )
+    } catch (err) {
+      thrown = err
+    }
+  })
+
+  assert('exactly one entry reached stdout or stderr', entries.length === 1, `got: ${entries.length}`)
+  const [entry] = entries
+  const labels = entry?.['logging.googleapis.com/labels'] as Record<string, string> | undefined
+  assert('it is an ERROR', entry?.severity === 'ERROR', `got: ${entry?.severity}`)
+  assert('functionName is under the promoted labels key', labels?.functionName === 'checkout')
+  assert('userId is under the promoted labels key', labels?.userId === 'alice')
+  assert('the stack is at stack_trace for Error Reporting', entry?.stack_trace === original.stack)
+  assert('the error payload is top level', (entry?.error as { message?: string } | undefined)?.message === 'card declined')
+  assert('there is no nested jsonPayload', !('jsonPayload' in (entry ?? {})))
+  assert('the caller got the same object', thrown === original)
+}
+
+async function testWithLoggingWritesARefusalAsAWarningInTheProductionShape() {
+  console.log('\nTest: a 4xx HttpsError through withLogging is one production WARNING with no stack')
+  const refusal = new HttpsError('permission-denied', 'not your order')
+  let thrown: unknown
+
+  const entries = await captureEntriesAsync(async () => {
+    try {
+      await withLogging({ functionName: 'checkout' }, async () => { throw refusal })(
+        { data: {}, auth: { uid: 'alice', token: {} }, rawRequest: {} } as never,
+      )
+    } catch (err) {
+      thrown = err
+    }
+  })
+
+  assert('exactly one entry', entries.length === 1, `got: ${entries.length}`)
+  const [entry] = entries
+  const labels = entry?.['logging.googleapis.com/labels'] as Record<string, string> | undefined
+  assert('it is a WARNING', entry?.severity === 'WARNING', `got: ${entry?.severity}`)
+  assert('the message is the error message', entry?.message === 'not your order')
+  assert('context is top level with code and status', JSON.stringify(entry?.context) === JSON.stringify({ code: 'permission-denied', status: 403 }), JSON.stringify(entry?.context))
+  assert('no stack_trace and no error payload', !('stack_trace' in (entry ?? {})) && !('error' in (entry ?? {})))
+  assert('the labels are there', labels?.functionName === 'checkout' && labels?.userId === 'alice')
+  assert('the same object is thrown again', thrown === refusal)
+}
+
 function testCallersPayloadIsNotEditedByTheStackMove() {
   console.log("\nTest: moving the stack to stack_trace leaves the caller's payload as it was")
   initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
@@ -868,6 +946,8 @@ async function run() {
   testErrorReportingShape()
   testWhatMustNotBecomeAnErrorGroup()
   testBackendErrorsReportToo()
+  await testWithLoggingWritesWhatTheHandlerThrowsInTheProductionShape()
+  await testWithLoggingWritesARefusalAsAWarningInTheProductionShape()
   testCallersPayloadIsNotEditedByTheStackMove()
   testSummaryTimestampCannotBeReplacedByAPayloadField()
   testTraceIsAttachedOutsideCloudFunctions()

@@ -460,10 +460,12 @@ logError(err, { orderId })
 
 ### Gives
 - `withLogging` binds `functionName`, the verified `userId` and any labels to everything logged inside one handler call; they cannot leak into another request.
+- `withLogging` logs what the handler throws, with those labels, and throws the same value again. A plain `Error` or an error with a status of 500 or more is an `ERROR`; an `HttpsError` with a 4xx code is a `WARNING` with its code and status and no stack. An error already given to `logError(` is not logged again.
 - `createClientLogFunction` is a ready callable that receives browser logs. `createHttpLogHandler` is an `(req, res)` handler for Express or any Node server on Google Cloud, for backends that are not Cloud Functions.
 
 ### Fits when
 - `onCall(`, `onSchedule(` or `onTaskDispatched(` handlers whose body is not wrapped in `withLogging(`.
+- A `catch (` block inside an `onCall(` handler whose only work is `logError(` and `throw`.
 - `export const logFrontendEvent` absent from the functions entry file, while the client sets `logFunction: httpsCallable(`.
 - `express()` or `new Hono()` servers on Cloud Run with a client `fetch` to a `/log` path.
 
@@ -502,6 +504,8 @@ app.all('/log', createHttpLogHandler({ authorize: async (req) => isSignedIn(req)
 - `withLogging` inside `onSchedule(` or `onTaskDispatched(` without the event type → `request` is typed as `CallableRequest` and `tsc` rejects it → pass `ScheduledEvent` (from `firebase-functions/v2/scheduler`) or `Request<Data>` (from `firebase-functions/v2/tasks`) as the second type argument.
 - `withLogging` around an `onRequest(` handler → it takes one argument and `onRequest` handlers take `(req, res)` → leave it unwrapped.
 - `withLogging` used outside Cloud Functions → it is a Cloud Functions tool → use `logInfo` and friends directly.
+- `try { … } catch (err) { logError(err); throw err }` in a handler wrapped by `withLogging` → the block exists only to log, and `withLogging` logs the throw already, once, with the request's labels → remove the `try`/`catch`.
+- A refusal thrown as a plain `Error`, such as `throw new Error('not allowed')` → it is logged as an `ERROR`, and Firebase answers the caller `internal` and writes its own `Unhandled error` entry → throw an `HttpsError` with a 4xx code, such as `permission-denied`; it is logged as a `WARNING` and the caller gets that code.
 - `userId` passed as a label inside `withLogging` → taken from `request.auth.uid` already (absent in a schedule) → remove it.
 - A handler that calls `logInfo(` with no `withLogging(` around it → entries carry no `functionName` or `userId` → wrap it.
 - `maxInstances` raised on `createClientLogFunction` from reading the code alone → `maxInstances: 1` is the cost guard → raise it only when logs show dropped client entries.

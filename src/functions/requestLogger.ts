@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'async_hooks'
 import type { CallableRequest } from 'firebase-functions/v2/https'
-import { createLogWriter, cleanLabels, type LogWriter } from './logger'
+import { toError } from '../shared/error'
+import { createLogWriter, cleanLabels, rememberErrorWasLogged, wasErrorAlreadyLogged, type LogWriter } from './logger'
 
 const storage = new AsyncLocalStorage<LogWriter>()
 
@@ -24,12 +25,36 @@ function writerFor<AppLabels extends Record<string, string | undefined>>(
   )
 }
 
+function clientErrorStatus(thrown: unknown): number | undefined {
+  if (typeof thrown !== 'object' || thrown === null) return undefined
+  const status = (thrown as { httpErrorCode?: { status?: unknown } }).httpErrorCode?.status
+  return typeof status === 'number' && status < 500 ? status : undefined
+}
+
+function logThrown(writer: LogWriter, thrown: unknown): void {
+  if (wasErrorAlreadyLogged(thrown)) return
+  const status = clientErrorStatus(thrown)
+  if (status === undefined) {
+    writer.error(thrown)
+    return
+  }
+  const error = toError(thrown)
+  rememberErrorWasLogged(thrown)
+  writer.warning(error.message, { errorType: error.name }, { code: (thrown as { code?: unknown }).code, status })
+}
+
 /**
  * Wrap an onCall, onSchedule or onTaskDispatched handler so every log inside it carries the request's labels.
  *
  * This is the correct way to scope a request logger. The store is bound with
  * `AsyncLocalStorage.run()`, which restores the previous context when the
  * handler settles — so a request's labels cannot outlive the request.
+ *
+ * What the handler throws is logged with those labels and thrown again, the same value,
+ * so a handler needs no `try`/`catch` only to log. A plain `Error`, or an error whose
+ * `httpErrorCode.status` is 500 or more, is an `ERROR`. A 4xx `HttpsError` is a
+ * `WARNING` with its code and status and no stack. An error already given to `logError`
+ * is not logged a second time.
  *
  * @example
  * export const myFunc = onCall(
@@ -63,7 +88,14 @@ export function withLogging<
   return (request: Req) => {
     const resolved = typeof options === 'function' ? options(request) : options
     const writer = writerFor<AppLabels>(request, resolved)
-    return storage.run(writer, async () => handler(request))
+    return storage.run(writer, async () => {
+      try {
+        return await handler(request)
+      } catch (thrown) {
+        logThrown(writer, thrown)
+        throw thrown
+      }
+    })
   }
 }
 

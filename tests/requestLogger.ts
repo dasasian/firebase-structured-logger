@@ -23,7 +23,9 @@ import type { CallableRequest } from 'firebase-functions/v2/https'
 import type { ScheduledEvent } from 'firebase-functions/v2/scheduler'
 import { initLogger } from '../src/functions/logger.js'
 import { withLogging, getLogger } from '../src/functions/requestLogger.js'
-import { assert, reportResults, readLastEntry, clearLog } from './testHelpers.js'
+import { HttpsError } from 'firebase-functions/v2/https'
+import { logError } from '../src/functions/index.js'
+import { assert, reportResults, readLastEntry, readAllEntries, clearLog } from './testHelpers.js'
 
 fs.mkdirSync(LOG_DIR, { recursive: true })
 initLogger({ appId: 'acme', logLocalDir: LOG_DIR })
@@ -314,6 +316,220 @@ async function testWithLoggingPropagatesErrors() {
   assert('the scope was unwound despite the throw', lastLabels().userId === undefined, `got: ${lastLabels().userId}`)
 }
 
+// --- What the handler throws (#83) ---
+
+async function thrownBy(call: () => Promise<unknown>): Promise<{ threw: boolean; value: unknown }> {
+  try {
+    await call()
+    return { threw: false, value: undefined }
+  } catch (value) {
+    return { threw: true, value }
+  }
+}
+
+function errorPayloadOf(entry: { jsonPayload?: Record<string, unknown> } | undefined): Record<string, unknown> | undefined {
+  return entry?.jsonPayload?.error as Record<string, unknown> | undefined
+}
+
+async function testPlainErrorIsLoggedOnceAndThrownAgain() {
+  console.log('\nTest: a plain Error is one ERROR with the request labels, thrown again as the same object')
+  clearLog(LOG_DIR)
+  const original = new Error('card declined')
+
+  const result = await thrownBy(() =>
+    withLogging({ functionName: 'checkout' }, async () => { throw original })(makeCallableRequest('alice')),
+  )
+
+  const entries = readAllEntries(LOG_DIR)
+  assert('exactly one entry', entries.length === 1, `got: ${entries.length}`)
+  assert('it is an ERROR', entries[0]?.severity === 'ERROR', `got: ${entries[0]?.severity}`)
+  assert('it carries functionName', entries[0]?.labels?.functionName === 'checkout')
+  assert('it carries userId', entries[0]?.labels?.userId === 'alice')
+  assert('it carries the error payload', errorPayloadOf(entries[0])?.message === 'card declined')
+  assert('the caller got a rejection', result.threw)
+  assert('the caller got the same object', result.value === original)
+}
+
+async function testRefusalWithClientStatusIsAWarning() {
+  console.log('\nTest: an HttpsError with a 4xx status is one WARNING with code and status and no stack')
+  clearLog(LOG_DIR)
+  const refusal = new HttpsError('permission-denied', 'not your order')
+
+  const result = await thrownBy(() =>
+    withLogging({ functionName: 'checkout' }, async () => { throw refusal })(makeCallableRequest('alice')),
+  )
+
+  const entries = readAllEntries(LOG_DIR)
+  assert('exactly one entry', entries.length === 1, `got: ${entries.length}`)
+  assert('it is a WARNING', entries[0]?.severity === 'WARNING', `got: ${entries[0]?.severity}`)
+  assert('the message is the error message', entries[0]?.message === 'not your order')
+  const context = entries[0]?.jsonPayload?.context as Record<string, unknown> | undefined
+  assert('the context has the code', context?.code === 'permission-denied', JSON.stringify(context))
+  assert('the context has the status', context?.status === 403, JSON.stringify(context))
+  assert('there is no error payload, so no stack', errorPayloadOf(entries[0]) === undefined)
+  assert('it keeps the request labels', entries[0]?.labels?.functionName === 'checkout' && entries[0]?.labels?.userId === 'alice')
+  assert('the same object is thrown again', result.threw && result.value === refusal)
+}
+
+async function testStatusFiveHundredIsAnError() {
+  console.log('\nTest: an HttpsError with status 500 is an ERROR with the payload')
+  clearLog(LOG_DIR)
+  const fault = new HttpsError('internal', 'ledger unreachable')
+
+  const result = await thrownBy(() =>
+    withLogging({ functionName: 'checkout' }, async () => { throw fault })(makeCallableRequest('alice')),
+  )
+
+  const entries = readAllEntries(LOG_DIR)
+  assert('exactly one entry', entries.length === 1, `got: ${entries.length}`)
+  assert('it is an ERROR', entries[0]?.severity === 'ERROR', `got: ${entries[0]?.severity}`)
+  assert('it has the error payload', errorPayloadOf(entries[0])?.message === 'ledger unreachable')
+  assert('the same object is thrown again', result.threw && result.value === fault)
+}
+
+async function testStatusReadFromTheValuesOwnShape() {
+  console.log('\nTest: any object with a numeric httpErrorCode.status below 500 is a WARNING')
+  clearLog(LOG_DIR)
+  const shaped = Object.assign(new Error('gone'), { code: 'not-found', httpErrorCode: { status: 404 } })
+  await thrownBy(() => withLogging({ functionName: 'f' }, async () => { throw shaped })(makeCallableRequest('alice')))
+  const [entry] = readAllEntries(LOG_DIR)
+  assert('404 is a WARNING', entry?.severity === 'WARNING', `got: ${entry?.severity}`)
+
+  clearLog(LOG_DIR)
+  const stringStatus = Object.assign(new Error('odd'), { httpErrorCode: { status: '403' } })
+  await thrownBy(() => withLogging({ functionName: 'f' }, async () => { throw stringStatus })(makeCallableRequest('alice')))
+  assert('a non-numeric status is an ERROR', readLastEntry(LOG_DIR)?.severity === 'ERROR')
+}
+
+async function testLoggedThenRethrownInsideTheHandlerIsOneEntry() {
+  console.log('\nTest: catch { logError(err); throw err } inside the handler gives one entry')
+  clearLog(LOG_DIR)
+  const original = new Error('card declined')
+
+  const result = await thrownBy(() =>
+    withLogging({ functionName: 'checkout' }, async () => {
+      try {
+        throw original
+      } catch (err) {
+        logError(err, undefined, { orderId: 'o_1' })
+        throw err
+      }
+    })(makeCallableRequest('alice')),
+  )
+
+  const entries = readAllEntries(LOG_DIR)
+  assert('exactly one entry', entries.length === 1, `got: ${entries.length}`)
+  assert("it is the handler's own entry, with its context", (entries[0]?.jsonPayload?.context as { orderId?: string } | undefined)?.orderId === 'o_1')
+  assert('the same object is thrown again', result.threw && result.value === original)
+}
+
+async function testALoggedErrorAndADifferentThrowAreTwoEntries() {
+  console.log('\nTest: logging one error and throwing another gives two entries')
+  clearLog(LOG_DIR)
+  const logged = new Error('first')
+  const thrown = new Error('second')
+
+  const result = await thrownBy(() =>
+    withLogging({ functionName: 'checkout' }, async () => {
+      logError(logged)
+      throw thrown
+    })(makeCallableRequest('alice')),
+  )
+
+  const messages = readAllEntries(LOG_DIR).map((e) => e.message)
+  assert('two entries', messages.length === 2, `got: ${JSON.stringify(messages)}`)
+  assert('one for each error', messages.includes('first') && messages.includes('second'))
+  assert('the second is thrown again', result.value === thrown)
+}
+
+async function testSynchronousThrowIsLoggedAndThrownAgain() {
+  console.log('\nTest: a handler that throws synchronously is logged once and thrown again')
+  clearLog(LOG_DIR)
+  const original = new Error('sync boom')
+
+  const result = await thrownBy(async () =>
+    withLogging({ functionName: 'sync' }, () => { throw original })(makeCallableRequest('alice')),
+  )
+
+  const entries = readAllEntries(LOG_DIR)
+  assert('exactly one entry', entries.length === 1, `got: ${entries.length}`)
+  assert('it is an ERROR with the labels', entries[0]?.severity === 'ERROR' && entries[0]?.labels?.functionName === 'sync')
+  assert('the same object is thrown again', result.threw && result.value === original)
+}
+
+async function testThrownPrimitivesAreLoggedOnceAndThrownAsTheyWere() {
+  console.log('\nTest: a thrown string and a thrown undefined are logged once and thrown as they were')
+  clearLog(LOG_DIR)
+  const fromString = await thrownBy(() =>
+    withLogging({ functionName: 'str' }, async () => { throw 'plain text' })(makeCallableRequest('alice')),
+  )
+  let entries = readAllEntries(LOG_DIR)
+  assert('the string: one ERROR entry', entries.length === 1 && entries[0]?.severity === 'ERROR', `got: ${entries.length}`)
+  assert('the string: the message is the text', entries[0]?.message === 'plain text')
+  assert('the string: thrown again as the same string', fromString.threw && fromString.value === 'plain text')
+
+  clearLog(LOG_DIR)
+  const fromUndefined = await thrownBy(() =>
+    withLogging({ functionName: 'undef' }, async () => { throw undefined })(makeCallableRequest('alice')),
+  )
+  entries = readAllEntries(LOG_DIR)
+  assert('undefined: one ERROR entry', entries.length === 1 && entries[0]?.severity === 'ERROR', `got: ${entries.length}`)
+  assert('undefined: thrown again as undefined', fromUndefined.threw && fromUndefined.value === undefined)
+
+  clearLog(LOG_DIR)
+  await thrownBy(() =>
+    withLogging({ functionName: 'str' }, async () => { throw 'plain text' })(makeCallableRequest('alice')),
+  )
+  await thrownBy(() =>
+    withLogging({ functionName: 'str' }, async () => { throw 'plain text' })(makeCallableRequest('alice')),
+  )
+  assert('the same string thrown by two requests is logged by each', readAllEntries(LOG_DIR).length === 2)
+}
+
+async function testNormalReturnWritesNothing() {
+  console.log('\nTest: a handler that returns normally writes no entry')
+  clearLog(LOG_DIR)
+  await withLogging({ functionName: 'quiet' }, async () => 'fine')(makeCallableRequest('alice'))
+  assert('no entry', readAllEntries(LOG_DIR).length === 0)
+}
+
+async function testScopeIsUnwoundAfterARejectedCall() {
+  console.log('\nTest: after a rejected call, a log call outside carries no request labels')
+  await thrownBy(() =>
+    withLogging({ functionName: 'rejects' }, async () => { throw new Error('boom') })(makeCallableRequest('alice')),
+  )
+  clearLog(LOG_DIR)
+  getLogger().info('outside')
+  const labels = lastLabels()
+  assert('no userId', labels.userId === undefined, `got: ${labels.userId}`)
+  assert('no functionName', labels.functionName === undefined, `got: ${labels.functionName}`)
+}
+
+async function testNestedWithLoggingLogsOnce() {
+  console.log('\nTest: a throw through two nested withLogging is logged once, by the inner one')
+  clearLog(LOG_DIR)
+  const original = new Error('deep')
+  const inner = withLogging({ functionName: 'inner' }, async () => { throw original })
+
+  const result = await thrownBy(() =>
+    withLogging({ functionName: 'outer' }, async (request) => inner(request))(makeCallableRequest('alice')),
+  )
+
+  const entries = readAllEntries(LOG_DIR)
+  assert('exactly one entry', entries.length === 1, `got: ${entries.length}`)
+  assert('it carries the inner labels', entries[0]?.labels?.functionName === 'inner')
+  assert('the same object reaches the caller', result.value === original)
+
+  clearLog(LOG_DIR)
+  const refusal = new HttpsError('not-found', 'nothing here')
+  const innerRefusal = withLogging({ functionName: 'inner' }, async () => { throw refusal })
+  await thrownBy(() =>
+    withLogging({ functionName: 'outer' }, async (request) => innerRefusal(request))(makeCallableRequest('alice')),
+  )
+  const warnings = readAllEntries(LOG_DIR)
+  assert('a nested 4xx is also one entry', warnings.length === 1 && warnings[0]?.severity === 'WARNING', `got: ${warnings.length}`)
+}
+
 // --- Runner ---
 
 async function run() {
@@ -327,6 +543,17 @@ async function run() {
   await testWithLoggingComputesLabelsPerRequest()
   await testWithLoggingReturnsTheHandlerResult()
   await testWithLoggingPropagatesErrors()
+  await testPlainErrorIsLoggedOnceAndThrownAgain()
+  await testRefusalWithClientStatusIsAWarning()
+  await testStatusFiveHundredIsAnError()
+  await testStatusReadFromTheValuesOwnShape()
+  await testLoggedThenRethrownInsideTheHandlerIsOneEntry()
+  await testALoggedErrorAndADifferentThrowAreTwoEntries()
+  await testSynchronousThrowIsLoggedAndThrownAgain()
+  await testThrownPrimitivesAreLoggedOnceAndThrownAsTheyWere()
+  await testNormalReturnWritesNothing()
+  await testScopeIsUnwoundAfterARejectedCall()
+  await testNestedWithLoggingLogsOnce()
 
   await testSeedsRequestLabels()
   await testCustomLabelsAreSeeded()

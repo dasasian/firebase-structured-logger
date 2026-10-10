@@ -393,7 +393,9 @@ An error is logged once. Every backend `error()` call remembers the object it wa
 and `withLogging` skips a throw it finds there. So a handler that still has
 `catch (err) { logError(err); throw err }` keeps one entry, and an app removes those blocks
 when it wants to. A handler that logs one error and throws a different one gets two
-entries, because they are two errors.
+entries, because they are two errors. The `WARNING` for a 4xx remembers its object too, so a
+throw through two nested `withLogging` is one entry, the inner one's, and it carries the
+`errorType` label (the error's `name`) the same as the `ERROR` does.
 
 There is no option to turn this off. A handler that wants silence catches the error and
 does not throw it again; a refusal that is not a fault is an `HttpsError` with a 4xx code.

@@ -13,6 +13,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`withLogging` logs what the handler throws, then throws it again.** After the upgrade an app gets new entries: every throw out of a wrapped handler is logged with the request's `functionName`, `userId` and labels, and the caller, the schedule or the task queue gets the same value as before. A handler needs no `try`/`catch` only to log; an error already given to `logError` is not logged twice. A plain `Error` or an error with a status of 500 or more is an `ERROR`; an `HttpsError` with a 4xx code is a `WARNING` with its code and status and no stack. A plain `Error` from a callable now shows as two `ERROR` entries: fsl's, with the labels, and Firebase's own `Unhandled error`.
 - **Repeats are told apart by the user's last actions on the screen.** An error's repeat signature now includes the names of the last 3 `bc.action` breadcrumbs since the last navigation, so the same error reached by two different paths on one screen gets its own full copies and its own summary. An app with no action breadcrumbs gets the signature it always had.
 - **`/fsl-review` proposes by user flow when a capability fits many places, and asks which flows matter.** Past about ten places it groups them by what the user is trying to do, gives the count for each flow, names the flow it would do first, and ends with one question. `CAPABILITIES.md` says which controls to mark first: payment, sign-in and saving work. The review still proposes and stops.
 
