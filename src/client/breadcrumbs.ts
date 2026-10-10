@@ -162,6 +162,21 @@ export function getLastBreadcrumbs(count: number): BreadcrumbEntry[] {
   return breadcrumbs.slice(Math.max(0, breadcrumbs.length - count))
 }
 
+/**
+ * Names of the last `count` `action` breadcrumbs at most since the last `nav`
+ * breadcrumb (or since the trail began), oldest first. Reads the same trail
+ * and the same age cutoff as `getLastBreadcrumbs`.
+ */
+export function getActionNamesSinceLastNav(count: number): string[] {
+  breadcrumbs = unexpired(breadcrumbs, Date.now())
+  const lastNavIndex = breadcrumbs.map((entry) => entry.type).lastIndexOf('nav')
+  return breadcrumbs
+    .slice(lastNavIndex + 1)
+    .filter((entry) => entry.type === 'action')
+    .slice(-count)
+    .map((entry) => entry.name)
+}
+
 export function clearBreadcrumbs(): void {
   breadcrumbs = []
   currentScreen = undefined

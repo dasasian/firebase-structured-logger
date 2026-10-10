@@ -6,7 +6,7 @@
 import { sessionStorageStub, localStorageStub, withFrozenTime, setVisibility } from './browserStubs.js'
 import { initLogger } from '../src/client/logger.js'
 import { configureRateLimiter, resetRateLimiter, flushDueSummaries } from '../src/client/rateLimiter.js'
-import { setNavigationEnabled, setCurrentRoute, setCurrentScreen, clearBreadcrumbs } from '../src/client/breadcrumbs.js'
+import { setNavigationEnabled, setCurrentRoute, setCurrentScreen, clearBreadcrumbs, addBreadcrumb, resetBreadcrumbSession } from '../src/client/breadcrumbs.js'
 import type { LogPayload } from '../src/shared/types.js'
 import type { Logger } from '../src/client/logger.js'
 import { assert, reportResults } from './testHelpers.js'
@@ -351,6 +351,127 @@ async function testConcurrentFlushesSendAQueuedSummaryOnce() {
   await new Promise((r) => setTimeout(r, 0))
 }
 
+function resetForPathTests(duplicateLimit: number) {
+  configureRateLimiter({ burstLimit: 1000, duplicateLimit, storageKey: 'fsl_ratelimit', summaryIntervalMinutes: 60 })
+  resetRateLimiter()
+  localStorageStub.setItem('fsl_pending_summaries', '[]')
+  resetBreadcrumbSession()
+}
+
+type Step = [type: 'nav' | 'action' | 'state', name: string, data?: Record<string, unknown>]
+
+function failAfter(logger: Logger, message: string, steps: Step[]) {
+  for (const [type, name, data] of steps) addBreadcrumb(type, name, data)
+  logger.error(new Error(message))
+}
+
+async function sentFullCopies(allPayloads: () => LogPayload[], message: string): Promise<LogPayload[]> {
+  await new Promise((r) => setTimeout(r, 10))
+  return allPayloads().filter((p) => p.jsonPayload?.error?.message === message)
+}
+
+async function testTwoPathsToOneErrorOnOneScreenEachGetFullCopiesAndASummary() {
+  console.log('\nTest: two action paths to one error on one screen each get 3 full copies and their own summary')
+  resetForPathTests(3)
+  const { logger, allPayloads } = makeLogger()
+  const pathA: Step[] = [['nav', 'Checkout'], ['action', 'apply_discount'], ['action', 'total_recalculated'], ['action', 'tap_place_order']]
+  const pathB: Step[] = [['nav', 'Checkout'], ['action', 'edit_quantity'], ['action', 'total_recalculated'], ['action', 'tap_place_order']]
+  for (let i = 0; i < 4; i++) {
+    failAfter(logger, 'order failed', pathA)
+    failAfter(logger, 'order failed', pathB)
+  }
+  const copies = await sentFullCopies(allPayloads, 'order failed')
+  assert('6 full copies were sent, 3 per path', copies.length === 6, `got ${copies.length}`)
+  const repeatKeys = new Set(copies.map((p) => p.labels.repeatKey))
+  assert('the two paths have two repeatKeys', repeatKeys.size === 2, `got ${repeatKeys.size}`)
+
+  withFrozenTime(Date.now() + 61 * 60_000, () => setVisibility('hidden'))
+  await new Promise((r) => setTimeout(r, 10))
+  setVisibility('visible')
+  const summaries = allPayloads().filter((p) => p.labels.repeatOf !== undefined)
+  assert('two summaries were sent', summaries.length === 2, `got ${summaries.length}`)
+  assert(
+    'each summary points at a different path’s repeatKey',
+    summaries.every((s) => repeatKeys.has(s.labels.repeatOf)) && new Set(summaries.map((s) => s.labels.repeatOf)).size === 2,
+  )
+  clearBreadcrumbs()
+}
+
+async function testAFloodWithNoNewActionStillCollapses() {
+  console.log('\nTest: the same error with no new action in between collapses after 3')
+  resetForPathTests(3)
+  const { logger, allPayloads } = makeLogger()
+  addBreadcrumb('nav', 'Checkout')
+  addBreadcrumb('action', 'tap_place_order')
+  for (let i = 0; i < 10; i++) logger.error(new Error('flood'))
+  const copies = await sentFullCopies(allPayloads, 'flood')
+  assert('3 full copies were sent', copies.length === 3, `got ${copies.length}`)
+  clearBreadcrumbs()
+}
+
+async function testActionDataDoesNotChangeTheSignature() {
+  console.log('\nTest: actions that differ only in data share one signature')
+  resetForPathTests(1)
+  const { logger, allPayloads } = makeLogger()
+  failAfter(logger, 'data differs', [['nav', 'Cart'], ['action', 'add_item', { sku: 'a1' }]])
+  failAfter(logger, 'data differs', [['nav', 'Cart'], ['action', 'add_item', { sku: 'b2' }]])
+  const copies = await sentFullCopies(allPayloads, 'data differs')
+  assert('only the first was sent in full', copies.length === 1, `got ${copies.length}`)
+  clearBreadcrumbs()
+}
+
+async function testStateAndNavBreadcrumbsDoNotChangeTheSignature() {
+  console.log('\nTest: state breadcrumbs and nav names do not change the signature')
+  resetForPathTests(1)
+  const { logger, allPayloads } = makeLogger()
+  failAfter(logger, 'state and nav', [['nav', 'navigate_Cart'], ['action', 'pay']])
+  failAfter(logger, 'state and nav', [['nav', 'Cart', { route: '/cart' }], ['state', 'spinner_shown'], ['action', 'pay'], ['state', 'spinner_hidden']])
+  const copies = await sentFullCopies(allPayloads, 'state and nav')
+  assert('only the first was sent in full', copies.length === 1, `got ${copies.length}`)
+  clearBreadcrumbs()
+}
+
+async function testOnlyTheLastThreeActionsCount() {
+  console.log('\nTest: with 5 actions on the screen only the last 3 count')
+  resetForPathTests(1)
+  const { logger, allPayloads } = makeLogger()
+  failAfter(logger, 'last three', [['nav', 'S'], ['action', 'a1'], ['action', 'a2'], ['action', 'a3'], ['action', 'a4'], ['action', 'a5']])
+  failAfter(logger, 'last three', [['nav', 'S'], ['action', 'b1'], ['action', 'b2'], ['action', 'a3'], ['action', 'a4'], ['action', 'a5']])
+  let copies = await sentFullCopies(allPayloads, 'last three')
+  assert('same last 3 actions: the second is counted', copies.length === 1, `got ${copies.length}`)
+  failAfter(logger, 'last three', [['nav', 'S'], ['action', 'a1'], ['action', 'a2'], ['action', 'a3'], ['action', 'a4'], ['action', 'a6']])
+  copies = await sentFullCopies(allPayloads, 'last three')
+  assert('a different last action is a new signature', copies.length === 2, `got ${copies.length}`)
+  failAfter(logger, 'last three', [['nav', 'S'], ['action', 'a3'], ['action', 'a4'], ['action', 'a5']])
+  copies = await sentFullCopies(allPayloads, 'last three')
+  assert('exactly those 3 actions match the earlier 5 ending in them', copies.length === 2, `got ${copies.length}`)
+  clearBreadcrumbs()
+}
+
+async function testActionsBeforeTheLastNavDoNotCount() {
+  console.log('\nTest: actions before the last nav breadcrumb do not count')
+  resetForPathTests(1)
+  const { logger, allPayloads } = makeLogger()
+  failAfter(logger, 'before nav', [['action', 'p'], ['action', 'q'], ['nav', 'Pay'], ['action', 'submit']])
+  failAfter(logger, 'before nav', [['action', 'z'], ['nav', 'Pay'], ['action', 'submit']])
+  const copies = await sentFullCopies(allPayloads, 'before nav')
+  assert('only the first was sent in full', copies.length === 1, `got ${copies.length}`)
+  clearBreadcrumbs()
+}
+
+async function testAnAppWithNoActionsKeepsItsOldSignature() {
+  console.log('\nTest: an error with no action breadcrumbs is counted under the 3-element key')
+  resetForPathTests(3)
+  const { logger } = makeLogger()
+  addBreadcrumb('state', 'loaded')
+  logger.error(new Error('no actions'))
+  const state = JSON.parse(sessionStorageStub.peek('fsl_ratelimit') ?? '{}') as { signatures?: Record<string, unknown> }
+  const keys = Object.keys(state.signatures ?? {})
+  const expectedKey = JSON.stringify([JSON.stringify(['Error', 'no actions', '']), 'test-release', ''])
+  assert('the session count is under the key an earlier version wrote', keys.includes(expectedKey), JSON.stringify(keys))
+  clearBreadcrumbs()
+}
+
 async function testInitSendsAPreviousVisitsQueuedSummary() {
   console.log('\nTest: initLogger sends a previous visit’s queued summary without waiting for a flush trigger')
   configureRateLimiter({ burstLimit: 500, duplicateLimit: 1, storageKey: 'fsl_ratelimit', summaryIntervalMinutes: 60 })
@@ -454,6 +575,13 @@ async function run() {
   await testReserveIsHonouredBySeverity()
   await testTwoHundredErrorsThroughTheLoggerSendThreeCopiesAndASummary()
   await testRepeatSignatureUsesTheSameScreenAsTheLabelWithNavigationOn()
+  await testTwoPathsToOneErrorOnOneScreenEachGetFullCopiesAndASummary()
+  await testAFloodWithNoNewActionStillCollapses()
+  await testActionDataDoesNotChangeTheSignature()
+  await testStateAndNavBreadcrumbsDoNotChangeTheSignature()
+  await testOnlyTheLastThreeActionsCount()
+  await testActionsBeforeTheLastNavDoNotCount()
+  await testAnAppWithNoActionsKeepsItsOldSignature()
   await testFailedSummarySendKeepsItQueued()
   await testConcurrentFlushesSendAQueuedSummaryOnce()
   await testInitSendsAPreviousVisitsQueuedSummary()

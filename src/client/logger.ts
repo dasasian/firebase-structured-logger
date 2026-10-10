@@ -11,6 +11,7 @@ import {
   getCurrentRoute,
   getActiveScreen,
   getActiveView,
+  getActionNamesSinceLastNav,
 } from './breadcrumbs'
 import {
   allow,
@@ -25,6 +26,8 @@ import {
 } from './rateLimiter'
 
 export type { RateLimitConfig }
+
+const ACTIONS_IN_SIGNATURE = 3
 
 type LogCallable = (data: LogPayload) => Promise<unknown>
 
@@ -201,7 +204,7 @@ export class Logger<
       context,
       attachments,
       toErrorPayload(error),
-      signatureFor(error, getActiveScreen()),
+      signatureFor(error, getActiveScreen(), getActionNamesSinceLastNav(ACTIONS_IN_SIGNATURE)),
     )
   }
 

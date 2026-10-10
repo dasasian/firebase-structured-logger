@@ -254,6 +254,49 @@ function testSignatureSurvivesColonsAndPipes() {
   assert('releaseId and userId come back', summary?.releaseId === 'r1' && summary?.userId === 'u1')
 }
 
+function testSignatureWithoutActionsIsTheThreeElementKey() {
+  console.log('\nTest: a signature with no actions is the key an earlier version built')
+  assert('Error with a screen', signatureFor(new Error('boom'), 'Home') === JSON.stringify(['Error', 'boom', 'Home']))
+  assert('string with no screen', signatureFor('plain') === JSON.stringify([null, 'plain', '']))
+  assert('an empty action list changes nothing', signatureFor(new Error('boom'), 'Home', []) === signatureFor(new Error('boom'), 'Home'))
+  assert('actions are appended in order', signatureFor(new Error('boom'), 'Home', ['a', 'b']) === JSON.stringify(['Error', 'boom', 'Home', 'a', 'b']))
+  assert('describeSignature ignores the actions', describeSignature(signatureFor(new TypeError('boom'), 'Cart', ['a'])) === 'TypeError: boom | Cart')
+}
+
+function testSummaryQueuedUnderAThreeElementKeyStillParses() {
+  console.log('\nTest: a repeat counted under an earlier version’s 3-element key still becomes a summary')
+  reset()
+  configureRateLimiter({ duplicateLimit: 1 })
+  const oldKey = JSON.stringify(['TypeError', 'old boom', 'Cart'])
+  let summaries: ReturnType<typeof peekPendingSummaries> = []
+  withFrozenTime(1_700_000_000_000, () => {
+    allow({ severity: 'ERROR', signature: oldKey, labels: { releaseId: 'r1', userId: 'u1' } })
+    allow({ severity: 'ERROR', signature: oldKey, labels: { releaseId: 'r1', userId: 'u1' } })
+    flushDueSummaries(true)
+    summaries = peekPendingSummaries()
+  })
+  const [summary] = summaries
+  assert('one summary', summaries.length === 1, `got: ${summaries.length}`)
+  assert('type, message and screen come back', summary?.errorType === 'TypeError' && summary.message === 'old boom' && summary.screen === 'Cart')
+  assert('releaseId and userId come back', summary?.releaseId === 'r1' && summary?.userId === 'u1')
+}
+
+function testSummaryFromAKeyWithActionsRebuildsTypeMessageScreen() {
+  console.log('\nTest: a summary from a key with actions has the same fields as one without')
+  reset()
+  configureRateLimiter({ duplicateLimit: 1 })
+  const key = signatureFor(new TypeError('new boom'), 'Cart', ['add', 'pay'])
+  let summaries: ReturnType<typeof peekPendingSummaries> = []
+  withFrozenTime(1_700_000_000_000, () => {
+    allow({ severity: 'ERROR', signature: key })
+    allow({ severity: 'ERROR', signature: key })
+    flushDueSummaries(true)
+    summaries = peekPendingSummaries()
+  })
+  const [summary] = summaries
+  assert('type, message and screen come back', summary?.errorType === 'TypeError' && summary.message === 'new boom' && summary.screen === 'Cart')
+}
+
 function testForeignSignatureIsDescribedWhole() {
   console.log('\nTest: a string that is not one of our signatures is described whole, not split')
   assert('plain text comes back unchanged', describeSignature('upload failed: timeout | retrying') === 'upload failed: timeout | retrying')
@@ -667,6 +710,9 @@ function run() {
   testTwoReleasesOrTwoUsersGiveTwoSummaries()
   testSummarySentOnceAnHourOrWhenForced()
   testPendingSummarySurvivesAndIsMarkedSentLate()
+  testSignatureWithoutActionsIsTheThreeElementKey()
+  testSummaryQueuedUnderAThreeElementKeyStillParses()
+  testSummaryFromAKeyWithActionsRebuildsTypeMessageScreen()
   testOldSummaryIsDeletedNotSent()
   testMaxPendingSummariesKeepsTheNewest()
   testConfigureMerges()

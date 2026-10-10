@@ -251,14 +251,15 @@ function refill(state: RateLimitState, now: number): void {
 }
 
 /**
- * Build the key used to recognise a repeat of the same problem. Two occurrences
- * count as duplicates only if the message and the screen both match, so the same
- * error from two different screens is not collapsed into one.
+ * Build the key used to recognise a repeat of the same problem: the error
+ * type, the message, the screen, then the `actionNames` the user took on that
+ * screen, in order. Two occurrences are duplicates only if all of them match,
+ * so the same error from two screens, or reached by two different paths on one
+ * screen, is not collapsed into one. With no `actionNames` the key is exactly
+ * the three-element key `[errorType, message, screen]`.
  *
- * This is coarse: the same error reached by two different paths on ONE screen
- * still collapses, and the second path can be suppressed before anyone sees it.
- * See #29 — deriving the path from breadcrumbs would discriminate properly,
- * without the staleness of a span someone has to remember to clear.
+ * The caller chooses which actions count; this module does not read the
+ * breadcrumb trail.
  *
  * The key is a JSON list, not a joined string: a summary rebuilds the name,
  * message and screen from it, and a message containing `:` or `|` ("upload
@@ -267,10 +268,11 @@ function refill(state: RateLimitState, now: number): void {
 export function signatureFor(
   error: Error | string,
   screen?: string,
+  actionNames: readonly string[] = [],
 ): string {
   const errorType = error instanceof Error ? error.name : null
   const message = error instanceof Error ? error.message : String(error)
-  return JSON.stringify([errorType, message, screen ?? ''])
+  return JSON.stringify([errorType, message, screen ?? '', ...actionNames])
 }
 
 /** A signature as a person reads it, for the console: `TypeError: cannot read 'id' | checkout`. */
