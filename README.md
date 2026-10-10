@@ -76,6 +76,20 @@ The handler holds no log code. What it throws is logged with `functionName` and 
 
 The full setup, with source maps, is in [Get started](https://fsl.dasasian.com/start/).
 
+## Say it once, where it happens
+
+Logging is an aspect of your app, not a part of each function. You state each fact one time, in the place where it is true, and fsl puts it on every entry.
+
+| Where | You write | You get |
+|---|---|---|
+| At startup | `setupGlobalErrorHandler()` | Every uncaught error, with its stack resolved to your source. |
+| Where the user signs in | `logger.setUser(uid)` | The user on every entry from then on. |
+| On the button | `data-fsl-action="apply_discount"` | The click, as a step in the trail of any later error. |
+| On the dialog | `data-fsl-view="Attachment"` | Every entry written while the dialog is open says so. |
+| Around the handler | `withLogging({ functionName: 'checkout' }, handler)` | The function name and the caller's verified user id on every entry, and what the handler throws. |
+
+The two attributes need `enableActions()` and `enableViews()` once at startup. A function takes no logger and no context, and it has no try and catch for the sake of a log. [See one function, before and after.](https://fsl.dasasian.com/#logging-stays-out-of-your-business-logic)
+
 ## Docs
 
 [fsl.dasasian.com](https://fsl.dasasian.com/) · [Changelog](CHANGELOG.md)
