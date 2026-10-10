@@ -421,11 +421,11 @@ async function testActionDataDoesNotChangeTheSignature() {
 }
 
 async function testStateAndNavBreadcrumbsDoNotChangeTheSignature() {
-  console.log('\nTest: state breadcrumbs and nav names do not change the signature')
+  console.log('\nTest: state and error breadcrumbs and nav names do not change the signature')
   resetForPathTests(1)
   const { logger, allPayloads } = makeLogger()
   failAfter(logger, 'state and nav', [['nav', 'navigate_Cart'], ['action', 'pay']])
-  failAfter(logger, 'state and nav', [['nav', 'Cart', { route: '/cart' }], ['state', 'spinner_shown'], ['action', 'pay'], ['state', 'spinner_hidden']])
+  failAfter(logger, 'state and nav', [['nav', 'Cart', { route: '/cart' }], ['state', 'spinner_shown'], ['action', 'pay'], ['error', 'card_declined'], ['state', 'spinner_hidden']])
   const copies = await sentFullCopies(allPayloads, 'state and nav')
   assert('only the first was sent in full', copies.length === 1, `got ${copies.length}`)
   clearBreadcrumbs()
