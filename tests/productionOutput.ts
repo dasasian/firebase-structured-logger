@@ -763,6 +763,39 @@ function testBackendErrorsReportToo() {
   initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
 }
 
+function testCallersPayloadIsNotEditedByTheStackMove() {
+  console.log("\nTest: moving the stack to stack_trace leaves the caller's payload as it was")
+  initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
+
+  const stack = 'Error: boom\n    at Checkout.tsx:3:1'
+  const error = { message: 'boom', name: 'Error', stack }
+  const jsonPayload = { error }
+  captureEntries(() =>
+    writeLog({ message: 'boom', severity: 'ERROR', labels: { appId: 'acme' } as never, jsonPayload }),
+  )
+
+  assert('the same error object is still on the payload', jsonPayload.error === error)
+  assert('and it still has its stack', error.stack === stack)
+}
+
+function testSummaryTimestampCannotBeReplacedByAPayloadField() {
+  console.log('\nTest: a payload field named timestamp does not replace the summary timestamp')
+  initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
+
+  const lastSeen = new Date(Date.now() - 60_000).toISOString()
+  const [entry] = captureEntries(() =>
+    writeLog({
+      message: 'Repeated 5 more times: boom',
+      severity: 'WARNING',
+      labels: { appId: 'acme', repeatCount: '5' } as never,
+      jsonPayload: { timestamp: 'from the payload' } as never,
+      timestamp: lastSeen,
+    }),
+  )
+  const ts = entry?.timestamp as { seconds?: number } | undefined
+  assert('the summary timestamp wins', ts?.seconds === Math.floor(Date.parse(lastSeen) / 1000), JSON.stringify(entry?.timestamp))
+}
+
 // --- The fallback writer, for a backend without firebase-functions ---
 
 function captureStreams(fn: () => void): { out: string; err: string } {
@@ -835,6 +868,8 @@ async function run() {
   testErrorReportingShape()
   testWhatMustNotBecomeAnErrorGroup()
   testBackendErrorsReportToo()
+  testCallersPayloadIsNotEditedByTheStackMove()
+  testSummaryTimestampCannotBeReplacedByAPayloadField()
   testTraceIsAttachedOutsideCloudFunctions()
   testTraceHeaderParsing()
   await testTraceProjectFromMetadataServer()

@@ -88,6 +88,13 @@ const MAX_FIELD_BYTES = 8 * 1024;
 const MAX_LABEL_BYTES = 1024;
 const OVERFLOW_ATTACHMENT_NAME = "fsl-overflow.json";
 const STACK_TRUNCATION_MARKER = "    … truncated by fsl";
+const PROMOTED_LABELS_FIELD = "logging.googleapis.com/labels";
+const TRACE_FIELD = "logging.googleapis.com/trace";
+const MAX_SUMMARY_AGE_MS = 8 * 24 * 60 * 60 * 1000;
+const MAX_SUMMARY_CLOCK_SKEW_MS = 5 * 60 * 1000;
+const ELLIPSIS = "…";
+const ELLIPSIS_BYTES = Buffer.byteLength(ELLIPSIS, "utf-8");
+const STACK_LINES_TO_KEEP_IN_TURN = [30, 15, 7, 3, 1];
 
 function entryByteLength(entry: unknown): number {
   return Buffer.byteLength(safeStringify(entry), "utf-8");
@@ -96,16 +103,14 @@ function entryByteLength(entry: unknown): number {
 /** Cut a string to `maxBytes` UTF-8 bytes, ending in "…" when it was cut. */
 function truncateToBytes(text: string, maxBytes: number): string {
   if (Buffer.byteLength(text, "utf-8") <= maxBytes) return text;
-  // Binary search the largest prefix (in UTF-16 code units) whose UTF-8
-  // encoding still fits, leaving room for the ellipsis.
   let lo = 0;
   let hi = text.length;
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2);
-    if (Buffer.byteLength(text.slice(0, mid), "utf-8") <= maxBytes - 3) lo = mid;
+    if (Buffer.byteLength(text.slice(0, mid), "utf-8") <= maxBytes - ELLIPSIS_BYTES) lo = mid;
     else hi = mid - 1;
   }
-  return text.slice(0, lo) + "…";
+  return text.slice(0, lo) + ELLIPSIS;
 }
 
 /** Keep the first `keepLines` lines of a stack, noting that it was cut. */
@@ -124,8 +129,8 @@ const PROTECTED_ENTRY_KEYS = new Set([
   "severity",
   "timestamp",
   "message",
-  "logging.googleapis.com/labels",
-  "logging.googleapis.com/trace",
+  PROMOTED_LABELS_FIELD,
+  TRACE_FIELD,
   "stack_trace",
   "serviceContext",
   "error",
@@ -136,6 +141,29 @@ const PROTECTED_ENTRY_KEYS = new Set([
 /** Keep only the last 10 breadcrumbs, each with its `data` field removed. */
 function shrinkBreadcrumbs(breadcrumbs: BreadcrumbEntry[]): BreadcrumbEntry[] {
   return breadcrumbs.slice(-10).map(({ data: _data, ...rest }) => rest);
+}
+
+function withTruncatedMessageFields(entry: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...entry };
+  if (typeof next.message === "string") next.message = truncateToBytes(next.message, MAX_FIELD_BYTES);
+  const error = next.error as Record<string, unknown> | undefined;
+  if (error) {
+    const nextError = { ...error };
+    if (typeof nextError.message === "string") nextError.message = truncateToBytes(nextError.message, MAX_FIELD_BYTES);
+    if (typeof nextError.cause === "string") nextError.cause = truncateToBytes(nextError.cause, MAX_FIELD_BYTES);
+    next.error = nextError;
+  }
+  return next;
+}
+
+function withTruncatedLabelValues(entry: Record<string, unknown>): Record<string, unknown> {
+  const labels = entry[PROMOTED_LABELS_FIELD] as Record<string, string> | undefined;
+  if (!labels) return entry;
+  const nextLabels: Record<string, string> = {};
+  for (const [k, v] of Object.entries(labels)) {
+    nextLabels[k] = Buffer.byteLength(v, "utf-8") > MAX_LABEL_BYTES ? truncateToBytes(v, MAX_LABEL_BYTES) : v;
+  }
+  return { ...entry, [PROMOTED_LABELS_FIELD]: nextLabels };
 }
 
 /**
@@ -154,13 +182,11 @@ function shrinkEntry(original: Record<string, unknown>): Record<string, unknown>
   let entry = original;
   if (fits(entry)) return entry;
 
-  // a. breadcrumbs -> last 10, without `data`.
   if (Array.isArray(entry.breadcrumbs)) {
     entry = { ...entry, breadcrumbs: shrinkBreadcrumbs(entry.breadcrumbs as BreadcrumbEntry[]) };
     if (fits(entry)) return entry;
   }
 
-  // b. every other jsonPayload key (context, and anything else a caller adds).
   const extraKeys = Object.keys(entry).filter((k) => !PROTECTED_ENTRY_KEYS.has(k));
   if (extraKeys.length > 0) {
     const trimmed = { ...entry };
@@ -169,13 +195,11 @@ function shrinkEntry(original: Record<string, unknown>): Record<string, unknown>
     if (fits(entry)) return entry;
   }
 
-  // c. stack_trace and error.stack -> the top frames matter most, so cut
-  // harder in steps rather than all the way in one go.
   const originalStackTrace = typeof entry.stack_trace === "string" ? entry.stack_trace : undefined;
   const originalError = entry.error as Record<string, unknown> | undefined;
   const originalErrorStack = typeof originalError?.stack === "string" ? originalError.stack : undefined;
   if (originalStackTrace !== undefined || originalErrorStack !== undefined) {
-    for (const keepLines of [30, 15, 7, 3, 1]) {
+    for (const keepLines of STACK_LINES_TO_KEEP_IN_TURN) {
       const next = { ...entry };
       if (originalStackTrace !== undefined) {
         next.stack_trace = truncateStackLines(originalStackTrace, keepLines);
@@ -188,32 +212,10 @@ function shrinkEntry(original: Record<string, unknown>): Record<string, unknown>
     }
   }
 
-  // d. message, error.message and error.cause -> 8 KiB each.
-  {
-    const next = { ...entry };
-    if (typeof next.message === "string") next.message = truncateToBytes(next.message, MAX_FIELD_BYTES);
-    const error = next.error as Record<string, unknown> | undefined;
-    if (error) {
-      const nextError = { ...error };
-      if (typeof nextError.message === "string") nextError.message = truncateToBytes(nextError.message, MAX_FIELD_BYTES);
-      if (typeof nextError.cause === "string") nextError.cause = truncateToBytes(nextError.cause, MAX_FIELD_BYTES);
-      next.error = nextError;
-    }
-    entry = next;
-    if (fits(entry)) return entry;
-  }
+  entry = withTruncatedMessageFields(entry);
+  if (fits(entry)) return entry;
 
-  // e. last resort: any label value over 1 KiB.
-  const labels = entry["logging.googleapis.com/labels"] as Record<string, string> | undefined;
-  if (labels) {
-    const nextLabels: Record<string, string> = {};
-    for (const [k, v] of Object.entries(labels)) {
-      nextLabels[k] = Buffer.byteLength(v, "utf-8") > MAX_LABEL_BYTES ? truncateToBytes(v, MAX_LABEL_BYTES) : v;
-    }
-    entry = { ...entry, "logging.googleapis.com/labels": nextLabels };
-  }
-
-  return entry;
+  return withTruncatedLabelValues(entry);
 }
 
 // Warned once per process, not per entry — an app producing one oversized
@@ -262,41 +264,36 @@ export function initLogger(config: FunctionsLoggerConfig): void {
   }
 }
 
+function tolerateAnotherWorkerWinning(fileOperation: () => void): void {
+  try {
+    fileOperation();
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+}
+
 /**
  * Rotate the current log file to a timestamped backup, delete oldest files beyond limit.
  */
 function rotateLogFile(logDir: string, maxRotatedFiles: number): void {
   const current = path.join(logDir, LOG_FILENAME);
   try {
-    // The functions emulator spawns multiple worker processes that each call
-    // initLogger() on startup. existsSync + renameSync is a TOCTOU race:
-    // a parallel worker can rename the file between our check and our rename.
-    // Attempt the rename and swallow ENOENT — it means another worker already rotated.
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    try {
-      fs.renameSync(current, path.join(logDir, `dev-${timestamp}.jsonl`));
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-      // Another worker rotated first (or no previous log file to rotate) — fine
-    }
+    tolerateAnotherWorkerWinning(() =>
+      fs.renameSync(current, path.join(logDir, `dev-${timestamp}.jsonl`)),
+    );
 
-    // Delete oldest rotated files beyond limit
-    const rotated = fs
+    const rotatedOldestFirst = fs
       .readdirSync(logDir)
       .filter((f) => f.startsWith("dev-") && f.endsWith(".jsonl"))
-      .sort(); // ISO timestamps sort lexicographically = chronologically
+      .sort();
 
-    const toDelete = rotated.slice(
+    const toDelete = rotatedOldestFirst.slice(
       0,
-      Math.max(0, rotated.length - maxRotatedFiles),
+      Math.max(0, rotatedOldestFirst.length - maxRotatedFiles),
     );
     for (const f of toDelete) {
-      try {
-        fs.unlinkSync(path.join(logDir, f));
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-        // Another worker already deleted it — fine
-      }
+      tolerateAnotherWorkerWinning(() => fs.unlinkSync(path.join(logDir, f)));
     }
   } catch (err) {
     console.warn("[fsl] Failed to rotate log file:", err);
@@ -331,14 +328,12 @@ function coerceUnknownSeverity(value: unknown): LogSeverity {
   return "ERROR";
 }
 
-const CONSOLE_FN: Record<
+const FIREBASE_FUNCTIONS_CONSOLE_MAPPING: Record<
   LogSeverity,
   (message: string, ...args: unknown[]) => void
 > = {
   ERROR: console.error,
   WARNING: console.warn,
-  // There is no console.notice. firebase-functions maps NOTICE to console.info
-  // on the production side, so match that rather than inventing a mapping.
   NOTICE: console.info,
   DEBUG: console.debug,
   INFO: console.log,
@@ -360,54 +355,119 @@ export function cleanLabels(
   return cleaned;
 }
 
+function attachmentBucketOrNullWhenStorageThrows(): Bucket | null {
+  try {
+    return getAttachmentBucket();
+  } catch (err) {
+    console.warn("[fsl] Log attachment upload failed:", err);
+    return null;
+  }
+}
+
+interface CloudLoggingTimestamp {
+  seconds: number;
+  nanos: number;
+}
+
+function repeatSummaryTimestamp(
+  labels: Record<string, unknown>,
+  isoTimestamp: string | undefined,
+): CloudLoggingTimestamp | undefined {
+  if (labels.repeatCount === undefined || !isoTimestamp) return undefined;
+  const parsed = Date.parse(isoTimestamp);
+  if (Number.isNaN(parsed)) return undefined;
+  const now = Date.now();
+  if (now - parsed > MAX_SUMMARY_AGE_MS || parsed - now > MAX_SUMMARY_CLOCK_SKEW_MS) return undefined;
+  return { seconds: Math.floor(parsed / 1000), nanos: (parsed % 1000) * 1_000_000 };
+}
+
+function moveStackForErrorReporting(
+  payload: LogPayload,
+  severity: LogSeverity,
+  labels: Record<string, string | undefined>,
+): { reportingFields: Record<string, unknown>; jsonPayload: LogPayload["jsonPayload"] } {
+  const stack = payload.jsonPayload?.error?.stack;
+  const isReportable =
+    stack && SEVERITY_ORDER[severity] <= SEVERITY_ORDER.ERROR && !isFeedback(payload.labels);
+  const service = labels.appId ?? globalConfig?.appId;
+  if (!isReportable || !service) return { reportingFields: {}, jsonPayload: payload.jsonPayload };
+
+  const { error, ...rest } = payload.jsonPayload!;
+  const { stack: _movedToStackTrace, ...errorWithoutStack } = error!;
+  return {
+    reportingFields: {
+      stack_trace: stack,
+      serviceContext: {
+        service,
+        ...(labels.releaseId ? { version: labels.releaseId } : {}),
+      },
+    },
+    jsonPayload: { ...rest, error: errorWithoutStack },
+  };
+}
+
+function writeShrunkEntryAndSaveFull(finishedEntry: Record<string, unknown>, logId: string): void {
+  const overflowBucket = attachmentBucketOrNullWhenStorageThrows();
+  const overflowPath = attachmentPath(logId, OVERFLOW_ATTACHMENT_NAME, getAttachmentPrefix());
+
+  const shrunkEntry = shrinkEntry(finishedEntry);
+  const shrunkLabels = {
+    ...(shrunkEntry[PROMOTED_LABELS_FIELD] as Record<string, string>),
+    truncated: "true",
+    ...(overflowBucket ? { hasAttachments: "true" } : {}),
+  };
+
+  writeEntry({
+    ...shrunkEntry,
+    [PROMOTED_LABELS_FIELD]: shrunkLabels,
+  } as unknown as Parameters<EntryWriter>[0]);
+
+  if (overflowBucket) {
+    overflowBucket
+      .file(overflowPath)
+      .save(Buffer.from(safeStringify(finishedEntry), "utf-8"))
+      .catch((err) => {
+        console.warn(`[fsl] Overflow upload failed for ${overflowPath}:`, err);
+      });
+  }
+
+  warnOverBudget(overflowBucket ? overflowPath : undefined);
+}
+
 /**
  * Write a structured log entry. Transport depends on environment.
+ *
+ * A severity outside the known set is written as ERROR, with one warning per bad
+ * value, rather than dropped. Feedback (`labels.feedback`) is exempt from
+ * `minSeverity`. In production the labels go under
+ * `logging.googleapis.com/labels` and `jsonPayload` is spread to the top level; an
+ * ERROR with a stack carries it at `stack_trace` for Error Reporting; a line over
+ * 90 KiB is shrunk, with the full entry saved as an attachment.
  */
 export function writeLog(
   payload: LogPayload & { functionName?: string; requestId?: string },
 ): void {
-  // An unrecognised severity is not merely mislabelled — it is fatal. Both
-  // dispatches look the value up in a fixed table: CONSOLE_FN below, and
-  // firebase-functions' own CONSOLE_SEVERITY inside its write(). A miss resolves to
-  // undefined and calling it throws, which Logger.send()'s catch then swallows,
-  // so the entry disappears with no useful diagnostic — and only in production,
-  // since the emulator takes the other branch.
-  //
-  // It also slips past the floor: SEVERITY_ORDER[unknown] is undefined, and
-  // `undefined > n` is false, so the check below would not have stopped it.
-  //
-  // writeLog is exported, so a caller can reach this with a value read from
-  // config, crossing a type boundary, or from plain JavaScript. Coerce to ERROR
-  // rather than drop: an entry arriving loud beats one vanishing quietly.
   const severity = isLogSeverity(payload.severity)
     ? payload.severity
     : coerceUnknownSeverity(payload.severity);
 
-  // Feedback bypasses the floor. The client already bypassed its own, but the
-  // payload still passes through here on its way to Cloud Logging, and this
-  // floor defaults to WARNING in production — so without the exemption every
-  // report would be dropped here instead. Verified: it was.
   const minSeverity =
     globalConfig?.minSeverity ?? (IS_EMULATOR ? "DEBUG" : "WARNING");
+  const isFeedbackExemptFromFloor = isFeedback(payload.labels);
   if (
-    !isFeedback(payload.labels) &&
+    !isFeedbackExemptFromFloor &&
     SEVERITY_ORDER[severity] > SEVERITY_ORDER[minSeverity]
   ) {
     return;
   }
 
   const logId = ulid();
-  // Resolved before the labels, so `hasAttachments` is only claimed when there is
-  // somewhere to put them. With no Storage the attachments are dropped (warned once
-  // by getAttachmentBucket) and the entry is still written.
-  let attachmentBucket: Bucket | null = null;
-  if (payload.attachments && Object.keys(payload.attachments).length > 0) {
-    try {
-      attachmentBucket = getAttachmentBucket();
-    } catch (err) {
-      console.warn("[fsl] Log attachment upload failed:", err);
-    }
-  }
+  const hasAttachmentsToUpload = Boolean(
+    payload.attachments && Object.keys(payload.attachments).length > 0,
+  );
+  const attachmentBucket = hasAttachmentsToUpload
+    ? attachmentBucketOrNullWhenStorageThrows()
+    : null;
   const hasAttachments = attachmentBucket !== null;
   const labels = {
     ...payload.labels,
@@ -449,109 +509,24 @@ export function writeLog(
       }
     }
 
-    // Also write to console for immediate visibility
-    CONSOLE_FN[severity](
+    FIREBASE_FUNCTIONS_CONSOLE_MAPPING[severity](
       `[${severity}] ${payload.message}`,
       labels,
     );
     return;
   }
 
-  // Production: firebase-functions' write() where it is installed, writeJsonLine
-  // where it is not (see loadFirebaseWrite) — bypassing entryFromArgs. This avoids server-side stack injection and
-  // jsonPayload nesting, while preserving automatic trace context injection for
-  // request correlation in Cloud Logging.
-  //
-  // Labels MUST be emitted under "logging.googleapis.com/labels". write() does no
-  // mapping — it JSON-stringifies the object straight to stdout — and Cloud Logging
-  // only promotes specifically-named fields to the LogEntry. A plain `labels` key is
-  // not one of them, so it lands in jsonPayload.labels and `labels.appId="..."`
-  // filters match nothing. Verified live: the smoke run's entry labels contained only
-  // Cloud Functions' own platform labels until this changed.
-  // Cloud Error Reporting reads Cloud Logging and groups by exception type plus
-  // the five top-most frames — the fingerprint we would otherwise build. It
-  // looks for `stack_trace` at the TOP level of jsonPayload; ours lives one
-  // level down under `error`, so it has never been seen (#31).
-  //
-  // Moved, not duplicated. The stack is the largest field in an entry capped at
-  // 256 KB, and two copies of it buys nothing — so a reportable error carries its
-  // stack at `stack_trace` and its `error` object loses the `stack` key.
-  //
-  // A non-reportable entry keeps the stack where it was. It has to go somewhere,
-  // and the alternative — emitting `stack_trace` for warnings too — would likely
-  // turn every warning into something a person has to resolve in the Error
-  // Reporting console. The smoke run measures whether that is true; until it
-  // does, the cautious shape is the one that ships.
-  //
-  // ERROR and above only. A WARNING carrying a stack is not an error someone
-  // should have to resolve, and neither is a NOTICE feedback report — turning
-  // either into an Error Reporting group would be a regression of a deliberate
-  // product decision.
-  const stack = payload.jsonPayload?.error?.stack;
-  const reportable =
-    stack && SEVERITY_ORDER[severity] <= SEVERITY_ORDER.ERROR && !isFeedback(payload.labels);
-  const service = labels.appId ?? globalConfig?.appId;
-  const isReported = Boolean(reportable && service);
-  const errorReporting = isReported
-    ? {
-        stack_trace: stack,
-        serviceContext: {
-          service: service!,
-          ...(labels.releaseId ? { version: labels.releaseId } : {}),
-        },
-      }
-    : {};
-
-  // Strip the now-redundant copy. Rebuilt rather than mutated: payload is the
-  // caller's object and writeLog has no business editing it.
-  const jsonPayload = isReported
-    ? (() => {
-        const { error, ...rest } = payload.jsonPayload!;
-        const { stack: _dropped, ...errorWithoutStack } = error!;
-        return { ...rest, error: errorWithoutStack };
-      })()
-    : payload.jsonPayload;
-
-  // Set the trace ourselves when we have one. write() attaches this from
-  // firebase-functions' own store, which is only populated inside their request
-  // wrapper — empty on Cloud Run and anything behind createHttpLogHandler. When
-  // theirs IS populated it overwrites this, which is the right precedence: inside
-  // Cloud Functions their value is authoritative.
-  const trace = traceField();
-
-  // A repeat summary is timestamped at `lastSeen`, not at the moment it was
-  // sent — see README, "Repeats are counted, not dropped". Anything else
-  // keeps Cloud Logging's own ingestion time: `labels.repeatCount` is the only
-  // signal that this is a summary, so a plain entry that happens to carry a
-  // `timestamp` (an unrelated caller, or a replay) has it ignored rather than
-  // trusted. Bounded to the last 8 days and no more than 5 minutes into the
-  // future, so a malformed or stale value cannot backdate — or postdate — an
-  // entry into or out of a retention window.
-  // Written as `{ seconds, nanos }`: an RFC 3339 *string* under `timestamp` is
-  // not one of the shapes Cloud Logging's agent reads (it takes this object, a
-  // timestampSeconds/timestampNanos pair, or a `time` string), so it stays in
-  // jsonPayload and the entry keeps its ingestion time. The smoke run caught it.
-  let summaryTimestamp: { seconds: number; nanos: number } | undefined;
-  if ((labels as Record<string, unknown>).repeatCount !== undefined && payload.timestamp) {
-    const parsed = Date.parse(payload.timestamp);
-    if (!Number.isNaN(parsed)) {
-      const now = Date.now();
-      const eightDaysMs = 8 * 24 * 60 * 60 * 1000;
-      const fiveMinutesMs = 5 * 60 * 1000;
-      if (now - parsed <= eightDaysMs && parsed - now <= fiveMinutesMs) {
-        summaryTimestamp = { seconds: Math.floor(parsed / 1000), nanos: (parsed % 1000) * 1_000_000 };
-      }
-    }
-  }
+  const { reportingFields, jsonPayload } = moveStackForErrorReporting(payload, severity, labels);
+  const fallbackTrace = traceField();
+  const summaryTimestamp = repeatSummaryTimestamp(labels, payload.timestamp);
 
   const finishedEntry: Record<string, unknown> = {
     severity,
     message: payload.message,
-    "logging.googleapis.com/labels": labels,
-    ...(trace ? { "logging.googleapis.com/trace": trace } : {}),
-    ...errorReporting,
+    [PROMOTED_LABELS_FIELD]: labels,
+    ...(fallbackTrace ? { [TRACE_FIELD]: fallbackTrace } : {}),
+    ...reportingFields,
     ...jsonPayload,
-    // Last, so a payload field of the same name cannot replace it.
     ...(summaryTimestamp ? { timestamp: summaryTimestamp } : {}),
   };
 
@@ -560,39 +535,7 @@ export function writeLog(
     return;
   }
 
-  // Over budget. Resolve a bucket for the overflow attachment the same way
-  // attachments do: firebase-admin can throw synchronously with no
-  // initialised app, and that is "no Storage", not a crash.
-  let overflowBucket: Bucket | null = null;
-  try {
-    overflowBucket = getAttachmentBucket();
-  } catch (err) {
-    console.warn("[fsl] Log attachment upload failed:", err);
-  }
-  const overflowPath = attachmentPath(logId, OVERFLOW_ATTACHMENT_NAME, getAttachmentPrefix());
-
-  const shrunkEntry = shrinkEntry(finishedEntry);
-  const shrunkLabels = {
-    ...(shrunkEntry["logging.googleapis.com/labels"] as Record<string, string>),
-    truncated: "true",
-    ...(overflowBucket ? { hasAttachments: "true" } : {}),
-  };
-
-  writeEntry({
-    ...shrunkEntry,
-    "logging.googleapis.com/labels": shrunkLabels,
-  } as unknown as Parameters<EntryWriter>[0]);
-
-  if (overflowBucket) {
-    overflowBucket
-      .file(overflowPath)
-      .save(Buffer.from(safeStringify(finishedEntry), "utf-8"))
-      .catch((err) => {
-        console.warn(`[fsl] Overflow upload failed for ${overflowPath}:`, err);
-      });
-  }
-
-  warnOverBudget(overflowBucket ? overflowPath : undefined);
+  writeShrunkEntryAndSaveFull(finishedEntry, logId);
 }
 
 function logAttachmentsToBase64(

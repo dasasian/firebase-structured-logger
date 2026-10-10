@@ -270,6 +270,24 @@ function testHugeMessageIsCutWithEllipsis() {
   assert('it ends with an ellipsis', message?.endsWith('…') ?? false)
 }
 
+// --- Nothing but oversized labels ---
+
+function testLabelValuesAreCutOnlyWhenNothingElseCanBe() {
+  console.log('\nTest: label values over 1 KiB are cut when nothing else is left to shrink')
+  const labels: Record<string, string> = { appId: 'entry-size', userId: 'u_5' }
+  for (let i = 0; i < 40; i++) labels[`big${i}`] = bigString(5 * 1024)
+  const [entry] = captureEntries(() =>
+    writeLog({ message: 'labels only', severity: 'ERROR', labels: labels as never }),
+  )
+
+  const written = labelsOf(entry)
+  assert('every label is at most 1 KiB', Object.values(written).every((v) => Buffer.byteLength(v, 'utf-8') <= 1024))
+  assert('a long label ends with an ellipsis', written.big0?.endsWith('…') ?? false)
+  assert('a short label is untouched', written.userId === 'u_5')
+  assert('truncated is set', written.truncated === 'true')
+  assert('the message is untouched', entry?.message === 'labels only')
+}
+
 // --- No Storage at all ---
 
 function testNoStorageStillShortensWithoutHasAttachments() {
@@ -372,6 +390,7 @@ async function run() {
   testBreadcrumbsShrinkToLastTenWithoutData()
   testHugeStackKeepsTopFrames()
   testHugeMessageIsCutWithEllipsis()
+  testLabelValuesAreCutOnlyWhenNothingElseCanBe()
   testNoStorageStillShortensWithoutHasAttachments()
   await testOverflowUploadTargetsTheAttachmentPath()
   testSelfReferencingContextDoesNotThrow()

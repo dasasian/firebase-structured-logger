@@ -86,10 +86,33 @@ async function testEmulatorFolderIgnoresItself() {
   assert('an existing .gitignore is not overwritten', fs.readFileSync(path.join(dir, '.gitignore'), 'utf-8') === 'mine\n')
 }
 
+async function testRotationToleratesFilesAnotherWorkerAlreadyMoved() {
+  console.log('\nTest: rotating logs warns about nothing when there is no previous file, and keeps the newest backups')
+  const dir = path.join(tempProject(), 'rotating-logs')
+  const warnings: string[] = []
+  const savedWarn = console.warn
+  console.warn = (...args: unknown[]) => void warnings.push(args.map(String).join(' '))
+  try {
+    initLogger({ appId: 'local-app', logLocalDir: dir })
+    assert('no previous dev.jsonl is not a failure', warnings.length === 0, warnings.join('|'))
+
+    for (const day of ['01', '02', '03']) fs.writeFileSync(path.join(dir, `dev-2020-01-${day}.jsonl`), '')
+    fs.writeFileSync(path.join(dir, 'dev.jsonl'), '{}\n')
+    initLogger({ appId: 'local-app', logLocalDir: dir, logMaxRotatedFiles: 2 })
+  } finally {
+    console.warn = savedWarn
+  }
+  const backups = fs.readdirSync(dir).filter((f) => f.startsWith('dev-')).sort()
+  assert('the current file was moved aside', !fs.existsSync(path.join(dir, 'dev.jsonl')))
+  assert('only the newest two backups remain', backups.length === 2 && !backups.includes('dev-2020-01-01.jsonl'), backups.join(','))
+  assert('and nothing was warned', warnings.length === 0, warnings.join('|'))
+}
+
 async function main() {
   await testLocalReadsWhatTheEmulatorWrote()
   await testCliProcessReadsLocalFiles()
   await testEmulatorFolderIgnoresItself()
+  await testRotationToleratesFilesAnotherWorkerAlreadyMoved()
   reportResults()
 }
 
