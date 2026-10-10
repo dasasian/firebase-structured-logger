@@ -11,6 +11,7 @@
 import * as os from 'os'
 import * as fs from 'fs'
 import * as path from 'path'
+import { once } from 'events'
 import type { AddressInfo } from 'net'
 import express from 'express'
 import { initializeApp } from 'firebase-admin/app'
@@ -31,6 +32,7 @@ async function runAgainstDocumentedMount(): Promise<void> {
   app.all('/log', createHttpLogHandler({ authorize: async () => true }))
 
   const server = app.listen(0)
+  await once(server, 'listening')
   const { port } = server.address() as AddressInfo
   const url = `http://127.0.0.1:${port}/log`
 

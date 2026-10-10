@@ -206,7 +206,21 @@ function testMarkedActionsSaysWhichToMarkFirst() {
   assert('names the flows to mark first', /Mark first the controls of the flows where a failure costs the user most/.test(section))
 }
 
-function testLabelsExampleCompilesAndExpressMountAnswersPreflight() {
+function testClientInitExamplesPassEveryRequiredField() {
+  console.log('\nTest: every client initLogger example passes releaseId and logFunction')
+  const clientInits = codeBlocks(capabilities)
+    .filter((b) => b.lang === 'ts')
+    .filter((b) => /initLogger[^\n]*from '@dasasian\/firebase-structured-logger\/client'/.test(b.code))
+    .filter((b) => /initLogger(<\w+>)?\(/.test(b.code))
+  assert('the file has client initLogger examples to check', clientInits.length >= 4, `found ${clientInits.length}`)
+  for (const { code } of clientInits) {
+    const call = code.slice(code.search(/initLogger(<\w+>)?\(/))
+    assert(`passes releaseId: ${call.split('\n')[0]}`, /\breleaseId\b/.test(call))
+    assert(`passes logFunction: ${call.split('\n')[0]}`, /\blogFunction\b/.test(call))
+  }
+}
+
+function testLabelsTypeIsAnAliasAndExpressExampleMountsWithAppAll() {
   console.log('\nTest: the labels type is a type alias and Express mounts with app.all')
   const labels = sections.find((s) => s.title === 'User and labels')?.text ?? ''
   assert('the labels example is a type alias', labels.includes('type MyAppLabels ='))
@@ -232,6 +246,7 @@ testKnownMistakesAreNamed()
 testFixtureApps()
 testReviewSkillShape()
 testMarkedActionsSaysWhichToMarkFirst()
-testLabelsExampleCompilesAndExpressMountAnswersPreflight()
+testClientInitExamplesPassEveryRequiredField()
+testLabelsTypeIsAnAliasAndExpressExampleMountsWithAppAll()
 testPackaging()
 reportResults()

@@ -228,7 +228,9 @@ with no "see above" and no pointer to another section; Fits when lists things to
 that `tests/capabilities.ts` checks against the real exports; each mistake reads
 pattern → why it is wrong → the fix. No motivation, no history. Keep that shape when you edit it.
 
-**An example in `CAPABILITIES.md` must work as written, because an agent copies it.** Two
+**An example in `CAPABILITIES.md` must work as written, because an agent copies it.** So
+every client `initLogger` example passes `releaseId` and `logFunction`, which the type
+requires, and `tests/capabilities.ts` checks each one. Two more
 have a reason that the example cannot show. A labels type is a `type` alias: the limit on
 `AppLabels` is `Record<string, string | undefined>`, an `interface` has no index signature,
 and `initLogger<MyAppLabels>` then fails with TS2344. `tests/` type-checks both forms, so

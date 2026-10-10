@@ -279,6 +279,9 @@ import { initLogger } from '@dasasian/firebase-structured-logger/client'
 initLogger({
   appId: 'my-app',
   releaseId: import.meta.env.VITE_RELEASE_ID ?? 'dev',
+  logFunction: async (payload) => {
+    await fetch('/log', { method: 'POST', body: JSON.stringify(payload) })
+  },
 })
 ```
 ```bash
@@ -307,7 +310,13 @@ The Vite config needs `build: { sourcemap: true }`.
 ```ts
 import { initLogger } from '@dasasian/firebase-structured-logger/client'
 
-const logger = initLogger({ appId: 'my-app' })
+const logger = initLogger({
+  appId: 'my-app',
+  releaseId: import.meta.env.VITE_RELEASE_ID ?? 'dev',
+  logFunction: async (payload) => {
+    await fetch('/log', { method: 'POST', body: JSON.stringify(payload) })
+  },
+})
 
 logger.error(err, { orderId }, undefined, { photo: blob, state: JSON.stringify(cart) })
 ```
@@ -396,7 +405,7 @@ import { initLogger } from '@dasasian/firebase-structured-logger/client'
 import { captureEntries, resetSession } from '@dasasian/firebase-structured-logger/testing'
 
 const capture = captureEntries()
-const logger = initLogger({ appId: 'test', logFunction: capture.logFunction })
+const logger = initLogger({ appId: 'test', releaseId: 'test', logFunction: capture.logFunction })
 
 beforeEach(() => {
   resetSession()
