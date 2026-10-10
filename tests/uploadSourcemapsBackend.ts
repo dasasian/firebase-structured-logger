@@ -15,7 +15,7 @@ import os from 'os'
 import path from 'path'
 import { spawnSync } from 'child_process'
 import { assert, reportResults } from './testHelpers.js'
-import { EMBEDDED_RELEASE_MARKER } from '../src/tools/uploadSourceMaps.js'
+import { EMBEDDED_RELEASE_MARKER, uploadSourceMaps } from '../src/tools/uploadSourceMaps.js'
 
 const CLI = path.join(process.cwd(), 'src', 'tools', 'index.ts')
 
@@ -86,7 +86,51 @@ function testEmbedOnlyLeavesNoMapInDist() {
   fs.rmSync(root, { recursive: true, force: true })
 }
 
-function run() {
+function mapsLeftIn(dist: string): string[] {
+  return fs.readdirSync(dist).filter((f) => f.endsWith('.map'))
+}
+
+function testEmbedWithoutBackendIsRefusedAndKeepsTheMaps() {
+  console.log('\nTest: --embed-sourcemaps with no --backend exits 1 and leaves every map in dist/')
+  const { root, dist } = tempProject()
+  const out = runCli(root, ['--embed-sourcemaps', '--release=r1'])
+  assert('exits 1', out.status === 1, String(out.status))
+  assert('the message names --backend', out.stderr.includes('--backend'), out.stderr)
+  assert('the message gives an example', out.stderr.includes('Example:'), out.stderr)
+  assert('every .map is still in dist/', mapsLeftIn(dist).length === 1)
+  assert('nothing was embedded', !fs.existsSync(path.join(root, 'functions')))
+  fs.rmSync(root, { recursive: true, force: true })
+}
+
+function testEmbedWithBucketButNoBackendIsRefusedBeforeAnyUpload() {
+  console.log('\nTest: --embed-sourcemaps with a bucket but no --backend exits 1 before any upload')
+  const { root, dist } = tempProject()
+  const out = runCli(root, ['--embed-sourcemaps', '--release=r1', '--bucket=sentinel-bucket'])
+  assert('exits 1', out.status === 1, String(out.status))
+  assert('the message names --backend', out.stderr.includes('--backend'), out.stderr)
+  assert('no upload was attempted', !out.stderr.includes('GCS'), out.stderr)
+  assert('every .map is still in dist/', mapsLeftIn(dist).length === 1)
+  fs.rmSync(root, { recursive: true, force: true })
+}
+
+async function testProgrammaticEmbedWithoutBackendThrowsAndKeepsTheMaps() {
+  console.log('\nTest: uploadSourceMaps() with embedSourcemaps and no functionsDir throws')
+  const { root, dist } = tempProject()
+  let message = ''
+  try {
+    await uploadSourceMaps({ embedSourcemaps: true, release: 'r1', distDir: dist })
+  } catch (err) {
+    message = (err as Error).message
+  }
+  assert('it throws a message naming --backend', message.includes('--backend'), message)
+  assert('every .map is still in dist/', mapsLeftIn(dist).length === 1)
+  fs.rmSync(root, { recursive: true, force: true })
+}
+
+async function run() {
+  testEmbedWithoutBackendIsRefusedAndKeepsTheMaps()
+  testEmbedWithBucketButNoBackendIsRefusedBeforeAnyUpload()
+  await testProgrammaticEmbedWithoutBackendThrowsAndKeepsTheMaps()
   testEmbedMarksTheReleaseAndClearsWhatWasThere()
   testEmbedOnlyLeavesNoMapInDist()
   testBackendFlagEmbeds()
@@ -94,4 +138,7 @@ function run() {
   reportResults()
 }
 
-run()
+run().catch((err) => {
+  console.error(err)
+  process.exit(1)
+})

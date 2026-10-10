@@ -183,6 +183,13 @@ export async function uploadSourceMaps(options: UploadOptions): Promise<{ upload
     )
   }
 
+  if (options.embedSourcemaps && !options.functionsDir) {
+    throw new Error(
+      '[fsl] --embed-sourcemaps needs --backend=<path> to say where to embed the maps. ' +
+        'Example: fsl upload-sourcemaps --embed-sourcemaps --backend=./functions',
+    )
+  }
+
   if (mapFiles.length === 0) {
     console.log('[fsl] No .map files found in', distDir)
     return { uploaded: true }
