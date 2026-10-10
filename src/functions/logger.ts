@@ -262,41 +262,36 @@ export function initLogger(config: FunctionsLoggerConfig): void {
   }
 }
 
+function tolerateAnotherWorkerWinning(fileOperation: () => void): void {
+  try {
+    fileOperation();
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+}
+
 /**
  * Rotate the current log file to a timestamped backup, delete oldest files beyond limit.
  */
 function rotateLogFile(logDir: string, maxRotatedFiles: number): void {
   const current = path.join(logDir, LOG_FILENAME);
   try {
-    // The functions emulator spawns multiple worker processes that each call
-    // initLogger() on startup. existsSync + renameSync is a TOCTOU race:
-    // a parallel worker can rename the file between our check and our rename.
-    // Attempt the rename and swallow ENOENT — it means another worker already rotated.
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    try {
-      fs.renameSync(current, path.join(logDir, `dev-${timestamp}.jsonl`));
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-      // Another worker rotated first (or no previous log file to rotate) — fine
-    }
+    tolerateAnotherWorkerWinning(() =>
+      fs.renameSync(current, path.join(logDir, `dev-${timestamp}.jsonl`)),
+    );
 
-    // Delete oldest rotated files beyond limit
-    const rotated = fs
+    const rotatedOldestFirst = fs
       .readdirSync(logDir)
       .filter((f) => f.startsWith("dev-") && f.endsWith(".jsonl"))
-      .sort(); // ISO timestamps sort lexicographically = chronologically
+      .sort();
 
-    const toDelete = rotated.slice(
+    const toDelete = rotatedOldestFirst.slice(
       0,
-      Math.max(0, rotated.length - maxRotatedFiles),
+      Math.max(0, rotatedOldestFirst.length - maxRotatedFiles),
     );
     for (const f of toDelete) {
-      try {
-        fs.unlinkSync(path.join(logDir, f));
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-        // Another worker already deleted it — fine
-      }
+      tolerateAnotherWorkerWinning(() => fs.unlinkSync(path.join(logDir, f)));
     }
   } catch (err) {
     console.warn("[fsl] Failed to rotate log file:", err);
