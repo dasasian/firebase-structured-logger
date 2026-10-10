@@ -124,6 +124,10 @@ async function handleUnderRequestTrace(
  *       })
  *       if (!res.ok) throw new Error(`log rejected: ${res.status}`)
  *     }
+ *
+ * Entries it writes carry the request's trace, read from `X-Cloud-Trace-Context` or
+ * `traceparent`, so they group with the platform's own request log. firebase-functions
+ * does that only inside its own wrappers, so this handler reads the headers itself.
  */
 export function createHttpLogHandler(
   config: HttpLogHandlerConfig,

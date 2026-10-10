@@ -143,10 +143,6 @@ function unexpired(entries: BreadcrumbEntry[], now: number): BreadcrumbEntry[] {
   return entries.filter((bc) => bc.timestamp > cutoff)
 }
 
-function dropExpiredFromStoredTrail(now: number): void {
-  breadcrumbs = unexpired(breadcrumbs, now)
-}
-
 export function addBreadcrumb(
   type: BreadcrumbEntry['type'],
   name: string,
@@ -162,7 +158,7 @@ export function addBreadcrumb(
 }
 
 export function getLastBreadcrumbs(count: number): BreadcrumbEntry[] {
-  dropExpiredFromStoredTrail(Date.now())
+  breadcrumbs = unexpired(breadcrumbs, Date.now())
   return breadcrumbs.slice(Math.max(0, breadcrumbs.length - count))
 }
 
