@@ -26,6 +26,7 @@ import * as reactRouterNavigation from '../src/client/navigation/react-router.js
 import * as views from '../src/client/views.js'
 import * as actions from '../src/client/actions.js'
 import * as testing from '../src/testing.js'
+import type { Logger } from '../src/client/logger.js'
 
 const EXPECTED: Record<string, string[]> = {
   client: [
@@ -85,6 +86,27 @@ function testClientLoggerIsNotConstructible() {
   )
 }
 
+const CLIENT_LOGGER_MEMBERS: Record<keyof Logger, true> = {
+  setUser: true,
+  clearUser: true,
+  setScreen: true,
+  addBreadcrumb: true,
+  error: true,
+  warning: true,
+  info: true,
+  debug: true,
+  sendFeedback: true,
+}
+
+function testClientLoggerMembers() {
+  console.log('\nTest: the client logger has exactly the public members pinned here')
+  assert(
+    'every public member is pinned (a mismatch fails npm run typecheck)',
+    Object.keys(CLIENT_LOGGER_MEMBERS).length === 9,
+    Object.keys(CLIENT_LOGGER_MEMBERS).join(', '),
+  )
+}
+
 function testDoctorCommandSurface() {
   console.log('\nTest: fsl doctor is listed with its documented flags')
   const cli = path.join(process.cwd(), 'src', 'tools', 'index.ts')
@@ -122,6 +144,7 @@ function run() {
   checkSurface('testing', testing)
   testNoEntryPointExportsSetSendWatcher()
   testClientLoggerIsNotConstructible()
+  testClientLoggerMembers()
   testDoctorCommandSurface()
   reportResults()
 }

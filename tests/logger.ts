@@ -297,8 +297,7 @@ async function testFailedSummarySendKeepsItQueued() {
 
   // First attempt: force the summary due, and let the (failing) send run.
   withFrozenTime(t0 + 61 * 60_000, () => {
-    flushDueSummaries(true)
-    logger.sendPendingSummaries()
+    setVisibility('hidden')
   })
   await settle()
 
@@ -308,12 +307,13 @@ async function testFailedSummarySendKeepsItQueued() {
 
   // Retry: the next flush must pick up the SAME queued summary, not create a
   // second one, and this time the send succeeds.
-  logger.sendPendingSummaries()
+  setVisibility('hidden')
   await settle()
 
   const afterRetry = JSON.parse(localStorageStub.peek('fsl_pending_summaries') ?? '[]') as unknown[]
   assert('the queue is empty once the retry succeeds', afterRetry.length === 0, `got: ${afterRetry.length}`)
   assert('the summary was sent exactly once', summariesSent.length === 1, `got: ${summariesSent.length}`)
+  setVisibility('visible')
 }
 
 async function testConcurrentFlushesSendAQueuedSummaryOnce() {
@@ -340,15 +340,15 @@ async function testConcurrentFlushesSendAQueuedSummaryOnce() {
     logger.error(new Error('slow-boom'))
   })
   withFrozenTime(t0 + 61 * 60_000, () => {
-    flushDueSummaries(true)
-    logger.sendPendingSummaries()
-    logger.sendPendingSummaries()
+    setVisibility('hidden')
+    setVisibility('hidden')
   })
   await new Promise((r) => setTimeout(r, 0))
 
   assert('the summary reached logFunction once although two flushes ran', summariesSent.length === 1, `got: ${summariesSent.length}`)
   finishSummarySend()
   await new Promise((r) => setTimeout(r, 0))
+  setVisibility('visible')
 }
 
 function resetForPathTests(duplicateLimit: number) {

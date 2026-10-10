@@ -357,8 +357,7 @@ export class Logger<
 
   private readonly summaryIdsStillAwaitingTheirSend = new Set<string>()
 
-  /** Send whatever repeat summaries are due, from this visit or an earlier one. */
-  sendPendingSummaries(): void {
+  private sendQueuedSummaries(): void {
     for (const summary of peekPendingSummaries()) {
       if (this.summaryIdsStillAwaitingTheirSend.has(summary.id)) continue
       this.summaryIdsStillAwaitingTheirSend.add(summary.id)
@@ -460,7 +459,7 @@ let instance: Logger<Record<string, string | undefined>> | null = null
 
 function sendPreviousVisitSummariesOnceInitHasFinished(): void {
   if (typeof setTimeout !== 'undefined') {
-    setTimeout(() => instance?.sendPendingSummaries(), 0)
+    setTimeout(() => instance?.['sendQueuedSummaries'](), 0)
   }
 }
 
@@ -515,14 +514,14 @@ if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'hidden') return
     flushDueSummaries(true)
-    instance?.sendPendingSummaries()
+    instance?.['sendQueuedSummaries']()
   })
 }
 
 if (typeof window !== 'undefined') {
   const interval = setInterval(() => {
     flushDueSummaries()
-    instance?.sendPendingSummaries()
+    instance?.['sendQueuedSummaries']()
   }, 60_000)
   ;(interval as unknown as { unref?: () => void }).unref?.()
 }

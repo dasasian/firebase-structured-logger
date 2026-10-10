@@ -260,7 +260,8 @@ async function testSettledWaitsForARepeatSummary() {
     await capture.settled()
     capture.clear()
 
-    logger.sendPendingSummaries()
+    initLogger({ appId: 'test', releaseId: 'r1', logFunction: slowLogFunction(capture) })
+    await new Promise((r) => setTimeout(r, 0))
     await capture.settled()
 
     const summary = capture.entries.find((e) => e.message.startsWith('Repeated 1 more times'))
@@ -295,7 +296,9 @@ async function testResetSessionClearsPendingSummaries() {
 
     resetSession()
     capture.clear()
-    logger.sendPendingSummaries()
+    initLogger({ appId: 'test', releaseId: 'r1', logFunction: capture.logFunction })
+    await new Promise((r) => setTimeout(r, 0))
+    await capture.settled()
 
     assert('no repeat summary is captured after reset', capture.entries.length === 0, JSON.stringify(capture.entries))
   } finally {

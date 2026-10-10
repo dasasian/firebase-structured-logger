@@ -27,11 +27,11 @@ import { initializeApp } from 'firebase-admin/app'
 import { enableViews } from '../src/client/views.js'
 import { getActiveView } from '../src/client/breadcrumbs.js'
 import { initLogger } from '../src/client/logger.js'
-import { configureRateLimiter, resetRateLimiter, flushDueSummaries } from '../src/client/rateLimiter.js'
+import { configureRateLimiter, resetRateLimiter } from '../src/client/rateLimiter.js'
 import { initLogger as initFunctionsLogger } from '../src/functions/logger.js'
 import { createClientLogHandler } from '../src/functions/logHandler.js'
 import { assert, reportResults, readLastEntry, clearLog, makeRequest } from './testHelpers.js'
-import { jsdomWindow, removeCheckVisibilityStub } from './browserStubs.js'
+import { jsdomWindow, removeCheckVisibilityStub, setVisibility } from './browserStubs.js'
 import type { LogPayload } from '../src/shared/types.js'
 
 initializeApp({ projectId: 'demo-project' })
@@ -165,9 +165,9 @@ async function testRepeatSummaryCarriesNoView() {
   logger.error(new Error('flaky'))
   await flush()
 
-  flushDueSummaries(true)
-  logger.sendPendingSummaries()
+  setVisibility('hidden')
   await flush()
+  setVisibility('visible')
 
   const summary = sent.find((entry) => entry.labels.repeatCount !== undefined)
   assert('a repeat summary was sent', summary !== undefined, JSON.stringify(sent))

@@ -15,6 +15,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Repeats are told apart by the user's last actions on the screen.** An error's repeat signature now includes the names of the last 3 `bc.action` breadcrumbs since the last navigation, so the same error reached by two different paths on one screen gets its own full copies and its own summary. An app with no action breadcrumbs gets the signature it always had.
 
+### Removed
+
+- **`sendPendingSummaries()` is gone from the client logger's type.** It was never documented, and a call from an app sent nothing useful. fsl sends repeat summaries itself: once after `initLogger`, hourly, and when the tab is hidden. No code change is needed in an app.
+
 ### Fixed
 
 - **`fsl upload-sourcemaps --embed-sourcemaps` without `--backend` is an error.** It used to embed nothing and still delete every `.map` from `dist/` (and, with a bucket, upload but skip the embed); it now exits 1 before touching `dist/`, and `uploadSourceMaps()` throws. The usage text also names where the release id comes from: `--release`, else `VITE_RELEASE_ID`, else `RELEASE_ID`.
