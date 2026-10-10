@@ -202,7 +202,7 @@ async function testEnableReactRouterNavigationTwiceStopsTheFirst() {
 
 /**
  * client/timing's configureTraces — a second call replaces the limits
- * wholesale (README: "configureTraces holds every limit"), same as
+ * wholesale, so it holds every limit, same as
  * enableNavigation's options. #51.
  */
 async function testConfigureClientTracesTwiceReplaces() {

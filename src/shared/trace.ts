@@ -12,7 +12,7 @@ export interface TraceLimits {
   steps?: Record<string, number>
 }
 
-/** `configureTraces({ name: { warnAfterMs?, steps? } })` — see README, "Timing". */
+/** `configureTraces({ name: { warnAfterMs?, steps? } })`. */
 export type TraceConfig = Record<string, TraceLimits>
 
 export interface TraceReport {
@@ -132,7 +132,7 @@ export class TraceRun {
   }
 }
 
-/** The message README, "Timing" shows: `"app_boot slow: products passed 3000 ms, still waiting"`. */
+/** The message of a slow-trace entry, e.g. `"app_boot slow: products passed 3000 ms, still waiting"`. */
 export function traceMessage(name: string, report: TraceReport): string {
   const subject = report.slow === 'step' ? `${report.step} ` : ''
   return `${name} slow: ${subject}passed ${report.limitMs} ms, still waiting`

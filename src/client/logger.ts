@@ -68,8 +68,8 @@ export interface InitLoggerConfig<
  * No `typeof process` guard, on purpose. Every bundler folds `process.env.NODE_ENV` to a
  * string literal at build time, so the comparison is safe in a browser — but `process`
  * itself does not exist there, and guarding on it meant the folded branch was never
- * reached: every browser build defaulted to DEBUG in production, and the README's
- * "WARNING in production" was true only under Node. Seen in a real Vite bundle as
+ * reached: every browser build defaulted to DEBUG in production, and the documented
+ * "WARNING in production" default was true only under Node. Seen in a real Vite bundle as
  * `typeof process<"u"?"WARNING":"DEBUG"`. A runtime with neither the fold nor
  * `process` throws on the read, and that is the case the catch is for.
  */
@@ -368,8 +368,7 @@ export class Logger<
   }
 
   /**
-   * A repeat summary: a WARNING with no stack, timestamped at `lastSeen` (see
-   * README, "Repeats are counted, not dropped"). It still respects the
+   * A repeat summary: a WARNING with no stack, timestamped at `lastSeen`. It still respects the
    * severity floor — only the budget and the duplicate gate are skipped, via
    * `send`'s `skipBudget`.
    *
@@ -498,8 +497,7 @@ export function getClientLogger<
 }
 
 /**
- * Repeat summaries are sent hourly and when the tab is hidden (README,
- * "Repeats are counted, not dropped"). Neither is triggered by an ordinary
+ * Repeat summaries are sent hourly and when the tab is hidden. Neither is triggered by an ordinary
  * log call — `send` does not check for due summaries itself, since doing so
  * with frozen-for-testing time reliably makes an interval-based check look
  * due immediately (see tests/rateLimiter.ts). So there are exactly three

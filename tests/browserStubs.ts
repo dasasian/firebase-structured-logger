@@ -312,8 +312,8 @@ globals.sessionStorage = sessionStorageStub
 
 /**
  * `localStorage` that throws on demand, same shape as `sessionStorageStub` —
- * pending repeat summaries live here (README, "Summaries survive the tab
- * closing"), and that write path needs the same failure-mode coverage.
+ * pending repeat summaries live here so they survive the tab
+ * closing, and that write path needs the same failure-mode coverage.
  */
 export const localStorageStub = new FailableStorage(win.localStorage)
 globals.localStorage = localStorageStub

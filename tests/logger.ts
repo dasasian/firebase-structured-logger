@@ -258,7 +258,7 @@ async function testRepeatSignatureUsesTheSameScreenAsTheLabelWithNavigationOn() 
  * exact case where the send that follows can plausibly fail (offline, or the
  * tab tearing down right after `visibilitychange: hidden`). A summary may
  * only leave the queue once its `logFunction` call has actually resolved;
- * otherwise the "next visit sends them" promise in the README is false.
+ * otherwise the "next visit sends them" promise is false.
  */
 async function testFailedSummarySendKeepsItQueued() {
   console.log('\nTest: a summary stays queued until its send succeeds, and is not sent twice')

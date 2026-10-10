@@ -6,8 +6,8 @@
  * `dist/`, and the embedded `.release` marker. Nothing
  * here parses source code or guesses at behavior — a check that cannot read what it
  * needs reports `could-not-check`, never a pass (see CLAUDE.md, "fsl doctor — facts,
- * not guesses"). The finding ids, levels, and the `--json` shape are the README's
- * "Check your setup" section, verbatim; this file exists to make that section true.
+ * not guesses"). The finding ids, levels, and the `--json` shape are public API
+ * from 1.0.
  */
 
 import * as fs from 'fs'

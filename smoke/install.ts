@@ -244,8 +244,8 @@ function run() {
 
     // A user's real install, not a pinned one: firebase-admin 13 and this package in
     // one command. npm picks the newest Storage it can for us (8) before it sees that
-    // firebase-admin 13 needs 7, so this gives two copies — measured, and documented
-    // in the README with its fix. What must hold is that `npm dedupe` folds them into one.
+    // firebase-admin 13 needs 7, so this gives two copies — measured.
+    // What must hold is that `npm dedupe` folds them into one.
     console.log('\nTest: firebase-admin 13 installed alongside — npm dedupe leaves one Storage')
     const project = path.join(work, 'with-firebase-admin-13')
     fs.mkdirSync(project)

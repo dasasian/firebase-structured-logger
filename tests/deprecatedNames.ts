@@ -381,7 +381,7 @@ function testOldRateLimitNamesWarnOnce() {
 /**
  * The cap is on what is used, not only on a value someone passed. The default
  * reservedForErrors (10) with a small burstLimit, or a later call that lowers
- * burstLimit alone, must still leave warnings half the burst — as the README says.
+ * burstLimit alone, must still leave warnings half the burst.
  */
 function testDefaultReserveIsCappedBySmallBurst() {
   console.log('\nTest: the default reserve is capped at half a small burstLimit, and after a later lowering')

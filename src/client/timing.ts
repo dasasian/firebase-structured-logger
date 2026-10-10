@@ -12,7 +12,7 @@ function newPageLocalRunId(): string {
  * (CLAUDE.md, "Optional client helpers are separate entry points"), so an app
  * that never imports it ships none of this. Touches no browser global at module
  * load — `performance`, `document` and the timers below are only read once a
- * trace actually starts. See README, "Timing: when something is too slow".
+ * trace actually starts.
  */
 export interface Trace {
   step<T>(name: string, fn: () => T | Promise<T>): Promise<T>

@@ -1,7 +1,7 @@
 /**
  * `/testing` — `captureEntries()` and `resetSession()` (#64).
  *
- * The POUR5 routing shape from the README ("Testing what your app logs"): a real data
+ * The POUR5 routing shape: a real data
  * router, the React Router adapter, and a probe log, with `findLast` reading back the
  * entry that actually shipped. Deliberately NO `tests/browserStubs.js` import and no
  * jsdom anywhere in this file — `/testing` and the client modules it rests on

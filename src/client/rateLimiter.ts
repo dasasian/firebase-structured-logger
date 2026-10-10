@@ -12,7 +12,7 @@ const DEFAULT_SUMMARY_MAX_AGE_DAYS = 7
 const DEFAULT_MAX_PENDING_SUMMARIES = 50
 
 // Fixed, not configurable — the seven knobs in RateLimitConfig are the whole
-// documented surface (README, "Volume controls"). A second storage key for the
+// configurable surface. A second storage key for the
 // summary queue would be an eighth nobody asked for.
 const SUMMARY_STORAGE_KEY = 'fsl_pending_summaries'
 
@@ -293,7 +293,7 @@ function parseSignature(signature: string): { errorType?: string; message: strin
 /**
  * A signature is further scoped to the release and the user before it is
  * counted — two releases, or two people on one machine, must never share one
- * running count. See README, "Repeats are counted, not dropped".
+ * running count.
  */
 function compoundKey(signature: string, labels: Record<string, string | undefined> | undefined): string {
   return JSON.stringify([signature, labels?.releaseId ?? '', labels?.userId ?? ''])
@@ -488,8 +488,8 @@ function toSentSummary(s: PendingSummary): SentSummary {
  * (offline, or the tab tearing down right after the `visibilitychange` that
  * triggered this) leaves it queued for the next flush or the next visit to
  * retry, instead of losing it. `sentLate` is true for anything queued by an
- * earlier page load (a different `bootId`): the case the README's "next
- * visit sends them" describes.
+ * earlier page load (a different `bootId`): the case where the next
+ * visit sends them.
  *
  * Expired entries ARE removed here — there is no send to wait on for those.
  */

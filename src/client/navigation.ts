@@ -6,7 +6,7 @@ import type { NavigationLabels } from '../shared/types'
  * `@dasasian/firebase-structured-logger/client/navigation` — its own entry point
  * (see CLAUDE.md, "Optional client helpers are separate entry points") so an app
  * that never imports it ships none of this, whatever its bundler. Call `enableNavigation()`
- * once, before or after `initLogger`. See README, "Navigation, automatically".
+ * once, before or after `initLogger`.
  */
 export interface NavigationOptions {
   /**
