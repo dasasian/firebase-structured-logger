@@ -131,7 +131,10 @@ asks for, three times. Each call's message holds the run id.
 The caller's answer is asserted too, because `withLogging` promises to throw the same
 value again: a changed error would change the status or the code. The entries are found
 by a text search for the message, not by a label: Firebase's entry has no fsl label, and
-a label filter would hide the very entry the leg is there to count. The leg waits a short
+a label filter would hide the very entry the leg is there to count. The search keeps to
+entries the function itself wrote (`resource.type="cloud_run_revision"`): Cloud Error
+Reporting writes a `NOTICE` of its own to its `insights` log when it sees a new error
+group, and that entry quotes the message (seen live: a third entry for one call). The leg waits a short
 time (10 seconds) after the expected count arrives, reads once more, and asserts on that
 last read, so a late third entry is seen. The leg runs last, so its entries (they hold the
 run id too) do not change what the older legs wait for.

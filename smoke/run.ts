@@ -999,6 +999,7 @@ const THROWN_PLAIN_ENTRIES = 2
 const THROWN_REFUSAL_ENTRIES = 1
 const THROWN_LOGGED_ENTRIES = 2
 const THROWN_SETTLE_MS = 10_000
+const RESOURCE_OF_A_DEPLOYED_FUNCTION = 'cloud_run_revision'
 
 type ThrowMode = 'plain' | 'refusal' | 'logged'
 
@@ -1010,7 +1011,7 @@ function textOf(entry: SmokeEntry | undefined): string {
 const isFslThrowsEntry = (entry: SmokeEntry) => entry.metadata?.labels?.functionName === 'fslSmokeThrows'
 
 async function entriesHoldingMessage(message: string, since: Date, want: number): Promise<SmokeEntry[]> {
-  const filter = `"${message}" AND timestamp >= "${since.toISOString()}"`
+  const filter = `"${message}" AND resource.type="${RESOURCE_OF_A_DEPLOYED_FUNCTION}" AND timestamp >= "${since.toISOString()}"`
   let entries: SmokeEntry[] = []
   const started = Date.now()
   let delay = 4_000
