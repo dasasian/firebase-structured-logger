@@ -9,7 +9,7 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@dasasian/firebase-structured-logger": "^0.6.0",
+    "@dasasian/firebase-structured-logger": "file:fsl-local.tgz",
     "firebase-admin": "^14.2.0",
     "firebase-functions": "^7.3.2"
   },
