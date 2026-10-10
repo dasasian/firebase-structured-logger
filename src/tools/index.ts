@@ -19,8 +19,8 @@ Commands:
       --backend path to the backend directory (e.g. ./functions or ./backend). --functions is
                a deprecated alias, kept for existing scripts.
       --embed-sourcemaps copies maps to {backend}/sourcemaps/current/ for fast lookup of current release.
-               Requires --backend. Given without --bucket, embeds only and uploads nothing — for a backend with no
-               bucket. Only the deployed release can then be symbolicated.
+               Requires --backend. Given without --bucket, embeds only and uploads nothing — for a
+               backend with no bucket. Only the deployed release can then be symbolicated.
       --prefix Cloud Storage prefix to upload under (default sourcemaps/). Must match
                createClientLogHandler({ sourceMaps: { prefix } }) or maps are not found.
       Authenticates via FIREBASE_SERVICE_ACCOUNT_PATH if set, otherwise uses ADC.

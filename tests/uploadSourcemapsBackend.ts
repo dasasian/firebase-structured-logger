@@ -97,6 +97,7 @@ function testEmbedWithoutBackendIsRefusedAndKeepsTheMaps() {
   assert('exits 1', out.status === 1, String(out.status))
   assert('the message names --backend', out.stderr.includes('--backend'), out.stderr)
   assert('the message gives an example', out.stderr.includes('Example:'), out.stderr)
+  assert('the message comes without a stack trace', !/^\s+at /m.test(out.stderr), out.stderr)
   assert('every .map is still in dist/', mapsLeftIn(dist).length === 1)
   assert('nothing was embedded', !fs.existsSync(path.join(root, 'functions')))
   fs.rmSync(root, { recursive: true, force: true })
