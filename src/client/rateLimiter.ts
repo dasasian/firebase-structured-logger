@@ -171,15 +171,13 @@ export function configureRateLimiter(options: RateLimitConfig): void {
   if (refillPerMinute !== undefined) warnDeprecated('refillPerMinute', 'rechargeSecondsPerLog')
   const resolvedRecharge = rechargeSecondsPerLog ?? (refillPerMinute !== undefined ? 60 / refillPerMinute : undefined)
 
-  // Needed to convert `errorReserve` (a share) and to cap either name — both
-  // read the burst limit this same call is possibly also changing.
-  const effectiveBurstLimit = resolvedBurstLimit ?? config.burstLimit
+  const burstLimitAfterThisCall = resolvedBurstLimit ?? config.burstLimit
 
   if (errorReserve !== undefined) warnDeprecated('errorReserve', 'reservedForErrors')
   const rawReservedForErrors =
-    reservedForErrors ?? (errorReserve !== undefined ? Math.round(errorReserve * effectiveBurstLimit) : undefined)
+    reservedForErrors ?? (errorReserve !== undefined ? Math.round(errorReserve * burstLimitAfterThisCall) : undefined)
   const resolvedReservedForErrors =
-    rawReservedForErrors !== undefined ? capReservedForErrors(rawReservedForErrors, effectiveBurstLimit) : undefined
+    rawReservedForErrors !== undefined ? capReservedForErrors(rawReservedForErrors, burstLimitAfterThisCall) : undefined
 
   config = {
     ...config,
@@ -216,7 +214,6 @@ function writeState(state: RateLimitState): void {
   try {
     sessionStorage.setItem(config.storageKey, JSON.stringify(state))
   } catch {
-    // sessionStorage full or unavailable — rate limiting degrades, logging continues
   }
 }
 
@@ -233,7 +230,6 @@ function writeSummaryQueue(queue: PendingSummary[]): void {
   try {
     localStorage.setItem(SUMMARY_STORAGE_KEY, JSON.stringify(queue))
   } catch {
-    // localStorage full or unavailable — summaries degrade, logging continues
   }
 }
 
@@ -263,14 +259,15 @@ function refill(state: RateLimitState, now: number): void {
  * still collapses, and the second path can be suppressed before anyone sees it.
  * See #29 — deriving the path from breadcrumbs would discriminate properly,
  * without the staleness of a span someone has to remember to clear.
+ *
+ * The key is a JSON list, not a joined string: a summary rebuilds the name,
+ * message and screen from it, and a message containing `:` or `|` ("upload
+ * failed: timeout") must not split into the wrong fields.
  */
 export function signatureFor(
   error: Error | string,
   screen?: string,
 ): string {
-  // A JSON list, not a joined string: a summary rebuilds the name, message and
-  // screen from this key (parseSignatureKey), and a message containing `:` or
-  // `|` — "upload failed: timeout" — must not split into the wrong fields.
   const errorType = error instanceof Error ? error.name : null
   const message = error instanceof Error ? error.message : String(error)
   return JSON.stringify([errorType, message, screen ?? ''])
@@ -287,7 +284,6 @@ function parseSignature(signature: string): { errorType?: string; message: strin
     const [errorType, message, screen] = JSON.parse(signature) as [string | null, string, string]
     return { errorType: errorType ?? undefined, message, screen: screen || undefined }
   } catch {
-    // Not one of ours — keep it whole rather than guess at its parts.
     return { message: signature }
   }
 }
@@ -393,24 +389,14 @@ export function allow(options: AllowOptions): RateLimitDecision {
     return { allowed: false, reason: 'duplicate', signature: options.signature }
   }
 
-  // Capped here, where it is used, not only where it was configured: the
-  // default reservedForErrors (10) with a small burstLimit, or a later call
-  // that lowers burstLimit alone, would otherwise reserve the whole burst and
-  // refuse every warning. capReservedForErrors warns only for a value someone
-  // actually passed.
-  const reserveThreshold = Math.min(config.reservedForErrors, config.burstLimit / 2)
+  const reserveCappedAtHalfTheBurst = Math.min(config.reservedForErrors, config.burstLimit / 2)
   if (state.available < 1) {
     writeState(state)
     return { allowed: false, reason: 'session-limit' }
   }
-  // "ERROR and above" as a rank, not the literal string 'ERROR' — so the check
-  // stays right if a more severe level is ever added to SEVERITY_ORDER.
-  // Would spending one dip into the reserve? Asked that way, not as
-  // "available <= reserve": the count refills continuously and is almost never
-  // whole, so at 1.02 with a reserve of 1 the old check let a warning through
-  // and it spent the reserve. Found as a CI-only flake — on a fast machine the
-  // calls share one millisecond and the count stays exactly 1.
-  if (state.available - 1 < reserveThreshold && SEVERITY_ORDER[options.severity] > SEVERITY_ORDER.ERROR) {
+  const isLessSevereThanError = SEVERITY_ORDER[options.severity] > SEVERITY_ORDER.ERROR
+  const wouldSpendIntoReserve = state.available - 1 < reserveCappedAtHalfTheBurst
+  if (wouldSpendIntoReserve && isLessSevereThanError) {
     writeState(state)
     return { allowed: false, reason: 'reserve' }
   }
@@ -463,11 +449,10 @@ export function flushDueSummaries(force = false): void {
       createdAt: now,
       bootId,
     })
-    // Keep the newest when the queue is over its cap.
-    const trimmed = queue.length > config.maxPendingSummaries
+    const newestWithinCap = queue.length > config.maxPendingSummaries
       ? queue.slice(queue.length - config.maxPendingSummaries)
       : queue
-    writeSummaryQueue(trimmed)
+    writeSummaryQueue(newestWithinCap)
 
     sig.repeatCount = undefined
     sig.firstSeen = undefined
@@ -536,7 +521,6 @@ export function resetRateLimiter(): void {
   try {
     sessionStorage.removeItem(config.storageKey)
   } catch {
-    // Silently fail
   }
   bootId = generateId()
 }
@@ -546,6 +530,5 @@ export function clearPendingSummaries(): void {
   try {
     localStorage.removeItem(SUMMARY_STORAGE_KEY)
   } catch {
-    // Silently fail
   }
 }

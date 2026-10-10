@@ -16,6 +16,7 @@ import { sessionStorageStub, localStorageStub, withFrozenTime, listenerCount } f
 import {
   allow,
   signatureFor,
+  describeSignature,
   configureRateLimiter,
   resetRateLimiter,
   flushDueSummaries,
@@ -251,6 +252,12 @@ function testSignatureSurvivesColonsAndPipes() {
   assert('no error type is invented from the colon', summary?.errorType === undefined, `got: ${summary?.errorType}`)
   assert('the screen is whole', summary?.screen === 'Up|load', `got: ${summary?.screen}`)
   assert('releaseId and userId come back', summary?.releaseId === 'r1' && summary?.userId === 'u1')
+}
+
+function testForeignSignatureIsDescribedWhole() {
+  console.log('\nTest: a string that is not one of our signatures is described whole, not split')
+  assert('plain text comes back unchanged', describeSignature('upload failed: timeout | retrying') === 'upload failed: timeout | retrying')
+  assert('our own signature is read back', describeSignature(signatureFor(new TypeError('boom'), 'Cart')) === 'TypeError: boom | Cart')
 }
 
 // --- Duplicate suppression becomes repeat counting ---
@@ -648,6 +655,7 @@ function run() {
   testReserveIsByRank()
   testFractionalRechargeDoesNotBreachTheReserve()
   testSignatureSurvivesColonsAndPipes()
+  testForeignSignatureIsDescribedWhole()
   testDuplicateSuppression()
   testUnsignedLogsAreNeverSuppressedAsDuplicates()
   testSuppressionIsAvailableToAnySeverity()
