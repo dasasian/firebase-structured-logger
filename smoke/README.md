@@ -81,6 +81,29 @@ the leg that found both of these, after the unit suites had passed:
 - An entry whose body is only `message` is filed as `textPayload`, so a
   `jsonPayload.message` filter never finds it. Give every entry a second field.
 
+## The real-client leg
+
+Every other leg posts a payload the harness built by hand. This one runs the real
+`/client` logger from the working tree, in jsdom, with a `logFunction` that calls the
+deployed `fslSmokeClient`. So what the client decides (which copy is a repeat, what a
+summary carries, which breadcrumbs go with an entry) is checked where it ends up: in
+Cloud Logging.
+
+One user reaches the same error on one screen by two paths, four times each:
+
+| Path | First action | How it is recorded |
+|---|---|---|
+| A | `apply_discount` | `bc.action()` in code |
+| B | `edit_quantity` | a click on a `data-fsl-action` button, with `enableActions()` |
+
+Both paths end with `tap_place_order`. Then the tab goes hidden, which is what sends
+repeat summaries in a browser. The leg asserts 6 full copies under 2 `repeatKey`s,
+3 each; 2 summaries, each `repeatOf` one of those keys; and on every full copy the
+breadcrumbs of its own path.
+
+jsdom's globals stay out of the process the other legs run in: a `window` there
+changes how other libraries behave.
+
 ## What the deployed fixture covers
 
 `functions/sourcemaps/current/` ships an embedded map for release
