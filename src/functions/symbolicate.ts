@@ -8,6 +8,9 @@ export interface StackFrame {
   columnNumber?: number
 }
 
+const CHROME_FRAME_WITH_FUNCTION = /^at\s+(.+?)\s+\((.+?):(\d+):(\d+)\)$/
+const CHROME_FRAME_WITHOUT_FUNCTION = /^at\s+(.+?):(\d+):(\d+)$/
+const FIREFOX_OR_SAFARI_FRAME = /^(.*?)@(.+?):(\d+):(\d+)$/
 
 /**
  * Parse browser stack trace into structured frames.
@@ -20,8 +23,7 @@ export function parseStackTrace(stack: string): StackFrame[] {
     const trimmed = line.trim()
     if (!trimmed) continue
 
-    // Chrome: "at functionName (file:line:col)"
-    const chromeMatch = trimmed.match(/^at\s+(.+?)\s+\((.+?):(\d+):(\d+)\)$/)
+    const chromeMatch = trimmed.match(CHROME_FRAME_WITH_FUNCTION)
     if (chromeMatch) {
       frames.push({
         raw: trimmed,
@@ -33,8 +35,7 @@ export function parseStackTrace(stack: string): StackFrame[] {
       continue
     }
 
-    // Chrome without function: "at file:line:col"
-    const chromeSimple = trimmed.match(/^at\s+(.+?):(\d+):(\d+)$/)
+    const chromeSimple = trimmed.match(CHROME_FRAME_WITHOUT_FUNCTION)
     if (chromeSimple) {
       frames.push({
         raw: trimmed,
@@ -46,8 +47,7 @@ export function parseStackTrace(stack: string): StackFrame[] {
       continue
     }
 
-    // Firefox/Safari: "functionName@file:line:col" or "@file:line:col" (anonymous)
-    const firefoxMatch = trimmed.match(/^(.*?)@(.+?):(\d+):(\d+)$/)
+    const firefoxMatch = trimmed.match(FIREFOX_OR_SAFARI_FRAME)
     if (firefoxMatch) {
       frames.push({
         raw: trimmed,

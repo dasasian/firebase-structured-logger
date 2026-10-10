@@ -39,6 +39,14 @@ function firstValue(value: string | string[] | undefined): string | undefined {
   return value
 }
 
+function withLowerCasedNames(
+  headers: Record<string, string | string[] | undefined>,
+): Record<string, string | string[] | undefined> {
+  const lower: Record<string, string | string[] | undefined> = {}
+  for (const [k, v] of Object.entries(headers)) lower[k.toLowerCase()] = v
+  return lower
+}
+
 /**
  * Pull a trace id out of request headers, preferring Cloud Trace's own format.
  *
@@ -50,10 +58,7 @@ function firstValue(value: string | string[] | undefined): string | undefined {
 export function traceIdFromHeaders(
   headers: Record<string, string | string[] | undefined>,
 ): string | undefined {
-  // Header names are case-insensitive, and nothing guarantees the host framework
-  // lower-cased them — Node's http does, a hand-rolled object may not.
-  const lower: Record<string, string | string[] | undefined> = {}
-  for (const [k, v] of Object.entries(headers)) lower[k.toLowerCase()] = v
+  const lower = withLowerCasedNames(headers)
 
   const cloud = firstValue(lower[CLOUD_TRACE_HEADER])
   const cloudMatch = cloud && CLOUD_TRACE.exec(cloud.trim())
