@@ -80,10 +80,7 @@ interface CacheEntry {
 const cache = new Map<string, CacheEntry>()
 let cacheBytes = 0
 
-/**
- * Read, moving the entry to the most-recent position. A Map iterates in insertion
- * order, so delete + re-insert is what makes the cache LRU rather than FIFO.
- */
+/** Read, moving the entry to the most-recent position. */
 function cacheGet(key: string): CacheEntry | undefined {
   const entry = cache.get(key)
   if (!entry) return undefined
@@ -246,19 +243,11 @@ function loadEmbeddedSourceMap(fileName: string): EncodedSourceMap | null {
   return sourceMap
 }
 
-/**
- * The process working directory, which is the deployed backend's whether that is
- * Cloud Functions or anything else that ships the directory.
- */
-function deployedBackendDirectory(): string {
-  return process.cwd()
-}
-
 /** The release the embedded maps were built from, or null if unmarked. */
 function readEmbeddedRelease(): string | null {
   if (embeddedRelease !== undefined) return embeddedRelease
   try {
-    const markerPath = embeddedMarkerPath(deployedBackendDirectory())
+    const markerPath = embeddedMarkerPath(process.cwd())
     embeddedRelease = fs.existsSync(markerPath)
       ? fs.readFileSync(markerPath, 'utf-8').trim() || null
       : null
@@ -270,7 +259,7 @@ function readEmbeddedRelease(): string | null {
 
 function readEmbeddedSourceMap(fileName: string): EncodedSourceMap | null {
   try {
-    const mapPath = embeddedMapPath(deployedBackendDirectory(), fileName)
+    const mapPath = embeddedMapPath(process.cwd(), fileName)
     if (!fs.existsSync(mapPath)) return null
     return JSON.parse(fs.readFileSync(mapPath, 'utf-8')) as EncodedSourceMap
   } catch {
@@ -278,20 +267,12 @@ function readEmbeddedSourceMap(fileName: string): EncodedSourceMap | null {
   }
 }
 
-/**
- * Bucket and prefix are part of the key: the same release and file under two
- * buckets or two prefixes are different objects, and one key would serve the
- * wrong one.
- */
 function storageMapCacheKey(releaseId: string, fileName: string, bucketName?: string, prefix?: string): string {
   return `${bucketName ?? defaultBucket ?? ''}/${prefix ?? ''}/${releaseId}/${fileName}`
 }
 
 /**
  * Load source map from Firebase Storage (for older releases).
- *
- * A confirmed absence or a failed load is cached as a miss. Having no Storage at
- * all is not: it is not a miss, and warnNoStorage has already said why.
  */
 async function loadStorageSourceMap(
   releaseId: string,
@@ -349,6 +330,10 @@ async function loadStorageSourceMap(
  * the unversioned setup working exactly as before. Deploys from before markers
  * existed have no marker, so the release cannot be compared and embedded is used
  * as it always was.
+ *
+ * Embedded maps are read from `sourcemaps/current/` under the process working
+ * directory, which is the deployed backend's, on Cloud Functions or anywhere else
+ * that ships the directory.
  */
 export async function getSourceMap(
   releaseId: string,
@@ -407,7 +392,7 @@ function warnNothingResolved(
   console.warn(
     `[fsl] No source map for '${fileName}' at release '${releaseId}' — this stack stays minified.`,
   )
-  console.warn(`[fsl]   embedded: ${embeddedMapPath(deployedBackendDirectory(), fileName)} (not found)`)
+  console.warn(`[fsl]   embedded: ${embeddedMapPath(process.cwd(), fileName)} (not found)`)
   console.warn(`[fsl]   storage:  ${storage}`)
   console.warn(
     '[fsl]   Check that the deploy runs `fsl upload-sourcemaps`, and that its --prefix',
