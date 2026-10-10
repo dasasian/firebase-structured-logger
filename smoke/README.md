@@ -113,6 +113,26 @@ and the release through its environment and exits non-zero if a send failed; `ru
 scrubs the URL from anything the child printed. The leg runs last, so the entries it
 adds under the run id do not change what the older legs wait for.
 
+## The thrown-error leg
+
+`withLogging` logs what a handler throws and throws it again. A unit test drives it with
+a request the test made, so it cannot show the part that only a deployed callable has:
+Firebase's own wrapper, which answers the caller and writes its own `Unhandled error`
+entry. This leg calls `fslSmokeThrows`, a callable whose handler throws what the caller
+asks for, three times. Each call's message holds the run id.
+
+| Call | The handler | The caller gets | Entries that hold the message |
+|---|---|---|---|
+| `plain` | throws `new Error(message)` | 500, `INTERNAL` | 2: fsl's `ERROR` with `functionName` and `smokeRunId`, and Firebase's `Unhandled error` with neither |
+| `refusal` | throws `new HttpsError('permission-denied', message)` | 403, `PERMISSION_DENIED` | 1: fsl's `WARNING` with `context.code` and `context.status`, and no error payload |
+| `logged` | catches, calls `logError(err)`, throws the same error | 500, `INTERNAL` | 2, not 3: fsl's `ERROR` from `logError`, and Firebase's |
+
+The caller's answer is asserted too, because `withLogging` promises to throw the same
+value again: a changed error would change the status or the code. The entries are found
+by a text search for the message, not by a label: Firebase's entry has no fsl label, and
+a label filter would hide the very entry the leg is there to count. The leg waits a short
+time after the expected count arrives before it asserts, so a late third entry is seen.
+
 ## What the deployed fixture covers
 
 `functions/sourcemaps/current/` ships an embedded map for release
