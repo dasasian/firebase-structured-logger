@@ -35,6 +35,7 @@ import {
 } from '../src/functions/traceContext.js'
 import { configureAttachments, resetAttachmentConfig } from '../src/functions/sourceMapCache.js'
 import { initializeApp } from 'firebase-admin/app'
+import { createHttpLogHandler } from '../src/functions/httpHandler.js'
 
 // Attachments need a resolvable bucket before `hasAttachments` is claimed. The
 // emulator host points at a closed local port, so the upload that follows fails
@@ -502,6 +503,59 @@ function testTraceIsAttachedOutsideCloudFunctions() {
 }
 
 /**
+ * createHttpLogHandler runs outside firebase-functions' own wrapper, so it must read the
+ * request's trace header itself and write the entry inside that trace. Dropping the
+ * wrapper leaves every other assertion green and the logs uncorrelated.
+ */
+async function testHttpHandlerCorrelatesEntriesByRequestTrace() {
+  console.log('\nTest: createHttpLogHandler writes the entry under the request\'s trace')
+  const previousGcloud = process.env.GCLOUD_PROJECT
+  process.env.GCLOUD_PROJECT = 'demo-project'
+  const traceId = '305445aa7843bc8bf206b12000100000'
+  const lines: string[] = []
+  const realOut = process.stdout.write.bind(process.stdout)
+  const realErr = process.stderr.write.bind(process.stderr)
+  const grab = ((chunk: unknown) => {
+    lines.push(String(chunk))
+    return true
+  }) as typeof process.stdout.write
+  try {
+    const handler = createHttpLogHandler({ authorize: 'unauthenticated' })
+    const res = { statusCode: 0, setHeader: () => undefined, end: () => undefined }
+    process.stdout.write = grab
+    process.stderr.write = grab
+    try {
+      await handler(
+        {
+          method: 'POST',
+          headers: { 'x-cloud-trace-context': `${traceId}/1;o=1` },
+          body: { message: 'http traced', severity: 'ERROR', labels: { appId: 'acme' } },
+        },
+        res,
+      )
+    } finally {
+      process.stdout.write = realOut
+      process.stderr.write = realErr
+    }
+    const entry = lines
+      .join('')
+      .split('\n')
+      .filter((l) => l.trim().startsWith('{'))
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .find((e) => e.message === 'http traced')
+    assert('the entry was written', entry !== undefined)
+    assert(
+      'it carries the trace from the request header',
+      entry?.['logging.googleapis.com/trace'] === `projects/demo-project/traces/${traceId}`,
+      String(entry?.['logging.googleapis.com/trace']),
+    )
+  } finally {
+    if (previousGcloud === undefined) delete process.env.GCLOUD_PROJECT
+    else process.env.GCLOUD_PROJECT = previousGcloud
+  }
+}
+
+/**
  * Cloud Run sets no project variable (#39), and a bare trace id never meets Cloud
  * Run's own request log under the console's trace filter — the smoke run proved it.
  * So on Cloud Run the project comes from the metadata server, once. `fetch` is
@@ -784,6 +838,7 @@ async function run() {
   testTraceIsAttachedOutsideCloudFunctions()
   testTraceHeaderParsing()
   await testTraceProjectFromMetadataServer()
+  await testHttpHandlerCorrelatesEntriesByRequestTrace()
   testJsonLineRoutesLikeFirebaseFunctions()
   testJsonLineSurvivesACircularEntry()
   reportResults()

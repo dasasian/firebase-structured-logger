@@ -87,6 +87,23 @@ function send(res: HttpLogResponse, status: number, body?: Record<string, string
   }
 }
 
+function answerPreflight(res: HttpLogResponse): void {
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+  res.setHeader('Access-Control-Max-Age', '3600')
+  return send(res, 204)
+}
+
+async function handleUnderRequestTrace(
+  handler: (request: { data: LogPayload }) => Promise<void>,
+  req: HttpLogRequest,
+): Promise<void> {
+  await resolveTraceProject()
+  await runWithTrace(traceIdFromHeaders(req.headers), () =>
+    handler({ data: req.body as LogPayload }),
+  )
+}
+
 /**
  * Build a request handler that receives `LogPayload` over HTTP.
  *
@@ -118,14 +135,7 @@ export function createHttpLogHandler(
     res.setHeader('Access-Control-Allow-Origin', allowOrigin)
     res.setHeader('Vary', 'Origin')
 
-    // Preflight. The client sends Content-Type and usually Authorization, both
-    // of which make the request non-simple.
-    if (req.method === 'OPTIONS') {
-      res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-      res.setHeader('Access-Control-Max-Age', '3600')
-      return send(res, 204)
-    }
+    if (req.method === 'OPTIONS') return answerPreflight(res)
 
     if (req.method !== 'POST') {
       res.setHeader('Allow', 'POST, OPTIONS')
@@ -137,36 +147,22 @@ export function createHttpLogHandler(
       try {
         allowed = await config.authorize(req)
       } catch (err) {
-        // A gate that threw is a gate that did not pass. Say so on the server
-        // and tell the caller nothing about why.
         console.warn('[fsl] authorize() threw; rejecting the request:', err)
       }
       if (!allowed) return send(res, 401, { error: 'Unauthorized' })
     }
 
     if (req.body === null || typeof req.body !== 'object') {
-      // Almost always a missing body parser rather than a bad client, and that
-      // is a five-minute fix once someone says it out loud.
       return send(res, 400, {
         error: 'Expected a parsed JSON body. Is express.json() (or equivalent) mounted before this handler?',
       })
     }
 
     try {
-      // Cloud Logging groups a request's entries by trace. firebase-functions
-      // only attaches one inside its own wrapper, so out here we read the
-      // headers ourselves — otherwise the logs arrive uncorrelated and nothing
-      // says why.
-      // Once per process, and a no-op off Cloud Run: the trace needs the project
-      // id, which Cloud Run does not put in the environment.
-      await resolveTraceProject()
-      await runWithTrace(traceIdFromHeaders(req.headers), () =>
-        handler({ data: req.body as LogPayload }),
-      )
+      await handleUnderRequestTrace(handler, req)
       return send(res, 204)
     } catch (err) {
       if (err instanceof ClientLogError) {
-        // 'internal' has already been logged with its cause by the handler.
         return send(res, STATUS[err.code], { error: err.message })
       }
       console.error('[fsl] Unhandled error in the HTTP log handler:', err)

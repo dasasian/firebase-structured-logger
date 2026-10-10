@@ -78,6 +78,9 @@ const VALID_SEVERITIES = new Set<string>(SEVERITIES)
  * behind anything else got an error carrying a callable protocol's vocabulary.
  * `createClientLogFunction` converts these back, so a callable client sees
  * exactly what it saw before.
+ *
+ * `internal` has already been logged with its cause by the handler, so whoever
+ * catches it only has to turn it into a response.
  */
 export class ClientLogError extends Error {
   constructor(
