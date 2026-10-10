@@ -88,6 +88,9 @@ const MAX_FIELD_BYTES = 8 * 1024;
 const MAX_LABEL_BYTES = 1024;
 const OVERFLOW_ATTACHMENT_NAME = "fsl-overflow.json";
 const STACK_TRUNCATION_MARKER = "    … truncated by fsl";
+const ELLIPSIS = "…";
+const ELLIPSIS_BYTES = Buffer.byteLength(ELLIPSIS, "utf-8");
+const STACK_LINES_TO_KEEP_IN_TURN = [30, 15, 7, 3, 1];
 
 function entryByteLength(entry: unknown): number {
   return Buffer.byteLength(safeStringify(entry), "utf-8");
@@ -96,16 +99,14 @@ function entryByteLength(entry: unknown): number {
 /** Cut a string to `maxBytes` UTF-8 bytes, ending in "…" when it was cut. */
 function truncateToBytes(text: string, maxBytes: number): string {
   if (Buffer.byteLength(text, "utf-8") <= maxBytes) return text;
-  // Binary search the largest prefix (in UTF-16 code units) whose UTF-8
-  // encoding still fits, leaving room for the ellipsis.
   let lo = 0;
   let hi = text.length;
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2);
-    if (Buffer.byteLength(text.slice(0, mid), "utf-8") <= maxBytes - 3) lo = mid;
+    if (Buffer.byteLength(text.slice(0, mid), "utf-8") <= maxBytes - ELLIPSIS_BYTES) lo = mid;
     else hi = mid - 1;
   }
-  return text.slice(0, lo) + "…";
+  return text.slice(0, lo) + ELLIPSIS;
 }
 
 /** Keep the first `keepLines` lines of a stack, noting that it was cut. */
@@ -138,6 +139,31 @@ function shrinkBreadcrumbs(breadcrumbs: BreadcrumbEntry[]): BreadcrumbEntry[] {
   return breadcrumbs.slice(-10).map(({ data: _data, ...rest }) => rest);
 }
 
+/** Cut `message`, `error.message` and `error.cause` to MAX_FIELD_BYTES each. */
+function withTruncatedMessageFields(entry: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...entry };
+  if (typeof next.message === "string") next.message = truncateToBytes(next.message, MAX_FIELD_BYTES);
+  const error = next.error as Record<string, unknown> | undefined;
+  if (error) {
+    const nextError = { ...error };
+    if (typeof nextError.message === "string") nextError.message = truncateToBytes(nextError.message, MAX_FIELD_BYTES);
+    if (typeof nextError.cause === "string") nextError.cause = truncateToBytes(nextError.cause, MAX_FIELD_BYTES);
+    next.error = nextError;
+  }
+  return next;
+}
+
+/** Cut any label value over MAX_LABEL_BYTES. */
+function withTruncatedLabelValues(entry: Record<string, unknown>): Record<string, unknown> {
+  const labels = entry["logging.googleapis.com/labels"] as Record<string, string> | undefined;
+  if (!labels) return entry;
+  const nextLabels: Record<string, string> = {};
+  for (const [k, v] of Object.entries(labels)) {
+    nextLabels[k] = Buffer.byteLength(v, "utf-8") > MAX_LABEL_BYTES ? truncateToBytes(v, MAX_LABEL_BYTES) : v;
+  }
+  return { ...entry, "logging.googleapis.com/labels": nextLabels };
+}
+
 /**
  * Shrink a too-large entry, re-measuring after each step and stopping as soon
  * as it fits under MAX_ENTRY_BYTES. Order runs from least to most useful:
@@ -154,13 +180,11 @@ function shrinkEntry(original: Record<string, unknown>): Record<string, unknown>
   let entry = original;
   if (fits(entry)) return entry;
 
-  // a. breadcrumbs -> last 10, without `data`.
   if (Array.isArray(entry.breadcrumbs)) {
     entry = { ...entry, breadcrumbs: shrinkBreadcrumbs(entry.breadcrumbs as BreadcrumbEntry[]) };
     if (fits(entry)) return entry;
   }
 
-  // b. every other jsonPayload key (context, and anything else a caller adds).
   const extraKeys = Object.keys(entry).filter((k) => !PROTECTED_ENTRY_KEYS.has(k));
   if (extraKeys.length > 0) {
     const trimmed = { ...entry };
@@ -169,13 +193,11 @@ function shrinkEntry(original: Record<string, unknown>): Record<string, unknown>
     if (fits(entry)) return entry;
   }
 
-  // c. stack_trace and error.stack -> the top frames matter most, so cut
-  // harder in steps rather than all the way in one go.
   const originalStackTrace = typeof entry.stack_trace === "string" ? entry.stack_trace : undefined;
   const originalError = entry.error as Record<string, unknown> | undefined;
   const originalErrorStack = typeof originalError?.stack === "string" ? originalError.stack : undefined;
   if (originalStackTrace !== undefined || originalErrorStack !== undefined) {
-    for (const keepLines of [30, 15, 7, 3, 1]) {
+    for (const keepLines of STACK_LINES_TO_KEEP_IN_TURN) {
       const next = { ...entry };
       if (originalStackTrace !== undefined) {
         next.stack_trace = truncateStackLines(originalStackTrace, keepLines);
@@ -188,32 +210,10 @@ function shrinkEntry(original: Record<string, unknown>): Record<string, unknown>
     }
   }
 
-  // d. message, error.message and error.cause -> 8 KiB each.
-  {
-    const next = { ...entry };
-    if (typeof next.message === "string") next.message = truncateToBytes(next.message, MAX_FIELD_BYTES);
-    const error = next.error as Record<string, unknown> | undefined;
-    if (error) {
-      const nextError = { ...error };
-      if (typeof nextError.message === "string") nextError.message = truncateToBytes(nextError.message, MAX_FIELD_BYTES);
-      if (typeof nextError.cause === "string") nextError.cause = truncateToBytes(nextError.cause, MAX_FIELD_BYTES);
-      next.error = nextError;
-    }
-    entry = next;
-    if (fits(entry)) return entry;
-  }
+  entry = withTruncatedMessageFields(entry);
+  if (fits(entry)) return entry;
 
-  // e. last resort: any label value over 1 KiB.
-  const labels = entry["logging.googleapis.com/labels"] as Record<string, string> | undefined;
-  if (labels) {
-    const nextLabels: Record<string, string> = {};
-    for (const [k, v] of Object.entries(labels)) {
-      nextLabels[k] = Buffer.byteLength(v, "utf-8") > MAX_LABEL_BYTES ? truncateToBytes(v, MAX_LABEL_BYTES) : v;
-    }
-    entry = { ...entry, "logging.googleapis.com/labels": nextLabels };
-  }
-
-  return entry;
+  return withTruncatedLabelValues(entry);
 }
 
 // Warned once per process, not per entry — an app producing one oversized
@@ -326,14 +326,12 @@ function coerceUnknownSeverity(value: unknown): LogSeverity {
   return "ERROR";
 }
 
-const CONSOLE_FN: Record<
+const FIREBASE_FUNCTIONS_CONSOLE_MAPPING: Record<
   LogSeverity,
   (message: string, ...args: unknown[]) => void
 > = {
   ERROR: console.error,
   WARNING: console.warn,
-  // There is no console.notice. firebase-functions maps NOTICE to console.info
-  // on the production side, so match that rather than inventing a mapping.
   NOTICE: console.info,
   DEBUG: console.debug,
   INFO: console.log,
@@ -362,7 +360,7 @@ export function writeLog(
   payload: LogPayload & { functionName?: string; requestId?: string },
 ): void {
   // An unrecognised severity is not merely mislabelled — it is fatal. Both
-  // dispatches look the value up in a fixed table: CONSOLE_FN below, and
+  // dispatches look the value up in a fixed table: FIREBASE_FUNCTIONS_CONSOLE_MAPPING below, and
   // firebase-functions' own CONSOLE_SEVERITY inside its write(). A miss resolves to
   // undefined and calling it throws, which Logger.send()'s catch then swallows,
   // so the entry disappears with no useful diagnostic — and only in production,
@@ -444,8 +442,7 @@ export function writeLog(
       }
     }
 
-    // Also write to console for immediate visibility
-    CONSOLE_FN[severity](
+    FIREBASE_FUNCTIONS_CONSOLE_MAPPING[severity](
       `[${severity}] ${payload.message}`,
       labels,
     );
