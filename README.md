@@ -368,9 +368,9 @@ A gate that throws counts as a rejection, not an opening.
   source maps and for attachments. With `firebase-admin` installed, its Storage and
   default bucket are used. Without it, name the bucket — `bucket` on the handler, or
   `configureAttachments({ bucket })` — and the service's own credentials are used.
-- **No Storage bucket?** You do not need one. `fsl upload-sourcemaps --embed-sourcemaps`
-  without `--bucket` embeds the current release's maps into your deploy and uploads
-  nothing. The catch: only the **deployed** release can be symbolicated, because older
+- **No Storage bucket?** You do not need one.
+  `fsl upload-sourcemaps --backend=./functions --embed-sourcemaps` without `--bucket`
+  embeds the current release's maps into your deploy and uploads nothing. The catch: only the **deployed** release can be symbolicated, because older
   ones live in a bucket there isn't one of. Errors from a previous release come back
   minified, and attachments are dropped — the entry is still written. With neither
   `firebase-admin` nor a bucket name, the log says so once at the first lookup.
