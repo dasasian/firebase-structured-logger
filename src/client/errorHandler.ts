@@ -19,6 +19,10 @@ function errorFromEvent(event: ErrorEvent): Error {
   return new Error(`${event.message || 'Cross-origin script error'}${where}`)
 }
 
+function reasonOrNamedError(reason: unknown): unknown {
+  return reason ?? new Error('Unhandled promise rejection with no reason')
+}
+
 export function setupGlobalErrorHandler(): void {
   window.addEventListener('error', (event) => {
     if (event.error != null) {
@@ -40,11 +44,7 @@ export function setupGlobalErrorHandler(): void {
 
   window.addEventListener('unhandledrejection', (event) => {
     console.error('[fsl] Unhandled rejection:', event.reason)
-    // A rejection can carry any value, including none at all. `toError` would
-    // turn that into Error("undefined"), which says nothing.
-    const reason =
-      event.reason ?? new Error('Unhandled promise rejection with no reason')
-    getClientLogger().error(reason, {
+    getClientLogger().error(reasonOrNamedError(event.reason), {
       errorCategory: 'crash',
       errorType: 'UnhandledRejection',
     })

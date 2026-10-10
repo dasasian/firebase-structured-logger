@@ -143,6 +143,10 @@ function unexpired(entries: BreadcrumbEntry[], now: number): BreadcrumbEntry[] {
   return entries.filter((bc) => bc.timestamp > cutoff)
 }
 
+function dropExpiredFromStoredTrail(now: number): void {
+  breadcrumbs = unexpired(breadcrumbs, now)
+}
+
 export function addBreadcrumb(
   type: BreadcrumbEntry['type'],
   name: string,
@@ -158,9 +162,7 @@ export function addBreadcrumb(
 }
 
 export function getLastBreadcrumbs(count: number): BreadcrumbEntry[] {
-  // Prune the stored trail too, so an idle tab does not hold expired entries
-  // alive until the next write.
-  breadcrumbs = unexpired(breadcrumbs, Date.now())
+  dropExpiredFromStoredTrail(Date.now())
   return breadcrumbs.slice(Math.max(0, breadcrumbs.length - count))
 }
 
