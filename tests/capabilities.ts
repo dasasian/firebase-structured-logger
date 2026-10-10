@@ -206,6 +206,16 @@ function testMarkedActionsSaysWhichToMarkFirst() {
   assert('names the flows to mark first', /Mark first the controls of the flows where a failure costs the user most/.test(section))
 }
 
+function testLabelsExampleCompilesAndExpressMountAnswersPreflight() {
+  console.log('\nTest: the labels type is a type alias and Express mounts with app.all')
+  const labels = sections.find((s) => s.title === 'User and labels')?.text ?? ''
+  assert('the labels example is a type alias', labels.includes('type MyAppLabels ='))
+  assert('and not an interface', !labels.includes('interface MyAppLabels'))
+  const handler = sections.find((s) => s.title === 'withLogging and createHttpLogHandler')?.text ?? ''
+  assert("the Express example mounts with app.all('/log'", handler.includes("app.all('/log', createHttpLogHandler("))
+  assert("and never with app.post('/log'", !/^app\.post\('\/log'/m.test(handler))
+}
+
 function testPackaging() {
   console.log('\nTest: the package ships CAPABILITIES.md and skills/fsl-review, and not skills/logs')
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf-8')) as { files: string[] }
@@ -222,5 +232,6 @@ testKnownMistakesAreNamed()
 testFixtureApps()
 testReviewSkillShape()
 testMarkedActionsSaysWhichToMarkFirst()
+testLabelsExampleCompilesAndExpressMountAnswersPreflight()
 testPackaging()
 reportResults()

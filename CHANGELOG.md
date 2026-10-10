@@ -22,6 +22,9 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The Express example answers the browser's preflight.** `CAPABILITIES.md` and the `createHttpLogHandler` doc comment mounted the handler with `app.post`, so Express answered the `OPTIONS` request itself with no CORS headers and a page on another origin was blocked. They now use `app.all`, and a test drives a real Express app to check it.
+- **The labels example compiles.** `CAPABILITIES.md` wrote the labels type as an `interface`, which `initLogger<...>` and `withLogging<...>` reject with TS2344; it is now a `type` alias, the example sets the `releaseId` and `logFunction` that `initLogger` requires, and the file lists the interface mistake. A typecheck pins both.
+- **`fsl logs attachments` with no bucket names both variables.** The error named `FIREBASE_STORAGE_BUCKET` only; it also reads `VITE_FIREBASE_STORAGE_BUCKET`. The `platform` label's comment now lists the values the client writes.
 - **`fsl upload-sourcemaps --embed-sourcemaps` without `--backend` is an error.** It used to embed nothing and still delete every `.map` from `dist/` (and, with a bucket, upload but skip the embed); it now exits 1 before touching `dist/`, and `uploadSourceMaps()` throws. The usage text also names where the release id comes from: `--release`, else `VITE_RELEASE_ID`, else `RELEASE_ID`.
 
 ## [1.4.0] — 2026-10-08

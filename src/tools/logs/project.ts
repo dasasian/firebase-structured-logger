@@ -31,7 +31,7 @@ export function resolveProjectId(flagValue: string | undefined, cwd: string): st
 export function resolveBucket(flagValue: string | undefined, env: NodeJS.ProcessEnv): string {
   const bucket = flagValue ?? env.FIREBASE_STORAGE_BUCKET ?? env.VITE_FIREBASE_STORAGE_BUCKET
   if (bucket === undefined) {
-    throw new UsageError('No bucket to read. Pass --bucket <name>, or set FIREBASE_STORAGE_BUCKET (a .env.local is loaded).')
+    throw new UsageError('No bucket to read. Pass --bucket <name>, or set FIREBASE_STORAGE_BUCKET or VITE_FIREBASE_STORAGE_BUCKET (a .env.local is loaded).')
   }
   return bucket
 }

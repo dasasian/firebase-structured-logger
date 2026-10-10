@@ -112,7 +112,7 @@ async function handleUnderRequestTrace(
  *
  *     const app = express()
  *     app.use(express.json({ limit: '10mb' }))   // attachments ride in the body
- *     app.post('/log', createHttpLogHandler({ bucket, authorize }))
+ *     app.all('/log', createHttpLogHandler({ bucket, authorize }))
  *
  * On the client, point `logFunction` at it:
  *

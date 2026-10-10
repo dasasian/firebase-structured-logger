@@ -7,7 +7,7 @@ export interface BaseLabels {
   userId?: string
   /** The screen name, from navigation, `navigatedTo()` or the deprecated `setScreen()`. */
   screen?: string
-  /** The browser's platform, e.g. `MacIntel`. Client entries only. */
+  /** The browser's platform: `ios`, `android`, `macos`, `windows`, `linux`, `web` when none match, or `unknown` outside a browser. Client entries only. */
   platform?: string
   /** The browser family, e.g. `Chrome`. Client entries only. */
   browser?: string

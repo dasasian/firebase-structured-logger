@@ -230,17 +230,23 @@ Mark first the controls of the flows where a failure costs the user most: paymen
 ### Fits when
 - An auth state listener: `onAuthStateChanged(`, `useAuth(`, a sign-in or sign-out handler.
 - Log calls that repeat the same label (`orderId`, `organizationId`) in many places.
-- An `AppLabels` or similar interface already exported from a shared file.
+- An `AppLabels` or similar labels type already exported from a shared file.
 
 ### Add
 ```ts
 import { initLogger } from '@dasasian/firebase-structured-logger/client'
 
-interface MyAppLabels {
+type MyAppLabels = {
   organizationId?: string
 }
 
-const logger = initLogger<MyAppLabels>({ appId: 'my-app' })
+const logger = initLogger<MyAppLabels>({
+  appId: 'my-app',
+  releaseId: import.meta.env.VITE_RELEASE_ID ?? 'dev',
+  logFunction: async (payload) => {
+    await fetch('/log', { method: 'POST', body: JSON.stringify(payload) })
+  },
+})
 
 logger.setUser(uid, { organizationId })
 logger.clearUser()
@@ -251,6 +257,7 @@ Call `setUser` on sign in and `clearUser` on sign out.
 - An auth listener that calls `setUser` on sign in and has no `clearUser` on sign out → the next person on the device inherits the previous `userId` → call `clearUser()` when the user is null.
 - `userId` passed as a label on log calls → `setUser` already attaches it → remove it.
 - Treating client `userId` as verified → it is self-reported by the browser → use it for debugging only; backend entries carry the verified uid.
+- A labels type written as `interface` and passed to `initLogger<` or `withLogging<` → `tsc` reports TS2344, because an interface has no index signature and the limit is `Record<string, string | undefined>` → write it as a `type` alias.
 - Email, name or phone in a label → labels are written to the logs verbatim → use an id.
 
 ## Release ids and source maps
@@ -476,11 +483,12 @@ Cloud Run or any Node server:
 import { createHttpLogHandler } from '@dasasian/firebase-structured-logger/functions'
 
 app.use(express.json({ limit: '10mb' }))
-app.post('/log', createHttpLogHandler({ authorize: async (req) => isSignedIn(req) }))
+app.all('/log', createHttpLogHandler({ authorize: async (req) => isSignedIn(req) }))
 ```
 
 ### Mistakes
 - `createHttpLogHandler({` without `authorize` → required; an open endpoint writes to the log bill on anyone's say-so → pass a function, or `'unauthenticated'` only when a gateway or IAM already gates it.
+- `app.post('/log', createHttpLogHandler(` → Express answers the browser's `OPTIONS` preflight itself, with no CORS headers, so the handler's own answer never runs and a page on another origin is blocked → mount it with `app.all`.
 - `createHttpLogHandler` mounted before `express.json()` → body parsing is the app's job → mount the parser first, with a limit that fits attachments.
 - `withLogging` inside `onSchedule(` or `onTaskDispatched(` without the event type → `request` is typed as `CallableRequest` and `tsc` rejects it → pass `ScheduledEvent` (from `firebase-functions/v2/scheduler`) or `Request<Data>` (from `firebase-functions/v2/tasks`) as the second type argument.
 - `withLogging` around an `onRequest(` handler → it takes one argument and `onRequest` handlers take `(req, res)` → leave it unwrapped.

@@ -255,6 +255,7 @@ async function testAttachments() {
   assert('the bucket is never printed', !run.stdout.concat(run.stderr).join('\n').includes(FAKE_BUCKET))
   const noBucket = await runFsl(['attachments', '01JABC'], { cwd })
   assert('no bucket is an error', noBucket.code === 1 && noBucket.stderr[0].includes('--bucket'))
+  assert('the no-bucket error names both variables', noBucket.stderr[0].includes('FIREBASE_STORAGE_BUCKET') && noBucket.stderr[0].includes('VITE_FIREBASE_STORAGE_BUCKET'), noBucket.stderr[0])
   const badId = await runFsl(['attachments', '../etc'], { cwd, env: { FIREBASE_STORAGE_BUCKET: FAKE_BUCKET } })
   assert('a logId that is not an id is refused', badId.code === 1)
 }
