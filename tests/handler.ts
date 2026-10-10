@@ -21,7 +21,8 @@ process.env.GOOGLE_APPLICATION_CREDENTIALS = './service-account.json'
 const LOG_DIR = './test-handler-output'
 
 import { initializeApp } from 'firebase-admin/app'
-import { createClientLogHandler } from '../src/functions/logHandler.js'
+import { HttpsError } from 'firebase-functions/v2/https'
+import { createClientLogFunction, createClientLogHandler } from '../src/functions/logHandler.js'
 import { initLogger } from '../src/functions/logger.js'
 import type { LogPayload } from '../src/shared/types.js'
 import { assert, reportResults, readLastEntry, clearLog, makeRequest } from './testHelpers.js'
@@ -101,6 +102,30 @@ async function testInvalidPayloadRejected() {
   assert('invalid payload was rejected', threw)
 }
 
+async function testCallableConvertsClientLogErrorToHttpsError() {
+  console.log('\nTest: the callable throws HttpsError, the bare handler throws ClientLogError')
+  clearLog(LOG_DIR)
+
+  const callable = createClientLogFunction({})
+  const invalid = makeRequest({ message: '', severity: 'ERROR', labels: { appId: 'acme' } })
+
+  let fromCallable: unknown
+  try {
+    await callable.run(invalid as never)
+  } catch (e) {
+    fromCallable = e
+  }
+  assert('the callable throws an HttpsError', fromCallable instanceof HttpsError)
+  assert('it keeps the invalid-argument code', (fromCallable as HttpsError)?.code === 'invalid-argument')
+
+  let fromHandler: unknown
+  try {
+    await handler(invalid)
+  } catch (e) {
+    fromHandler = e
+  }
+  assert('the bare handler does not throw an HttpsError', !(fromHandler instanceof HttpsError))
+}
 
 async function testUnknownSeverityInEmulatorMode() {
   console.log('\nTest: an unknown severity is coerced on the emulator branch too')
@@ -130,6 +155,7 @@ async function testUnknownSeverityInEmulatorMode() {
 async function run() {
   await testErrorPayloadStructure()
   await testInvalidPayloadRejected()
+  await testCallableConvertsClientLogErrorToHttpsError()
   await testUnknownSeverityInEmulatorMode()
 
   // Cleanup

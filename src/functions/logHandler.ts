@@ -8,6 +8,7 @@ import {
   parseStackTrace,
   symbolicateStackTrace,
   formatStackTrace,
+  type StackFrame,
 } from './symbolicate'
 
 /**
@@ -110,6 +111,33 @@ function bundleFileFromUrl(url: string): string | null {
   return match ? match[1] : null
 }
 
+function uniqueBundleFiles(frames: StackFrame[]): Set<string> {
+  const bundleFiles = new Set<string>()
+  for (const frame of frames) {
+    if (frame.fileName) {
+      const bundle = bundleFileFromUrl(frame.fileName)
+      if (bundle) bundleFiles.add(bundle)
+    }
+  }
+  return bundleFiles
+}
+
+async function loadSourceMapsByBundle(
+  releaseId: string,
+  bundleFiles: Set<string>,
+  bucketName?: string,
+  prefix?: string,
+): Promise<Map<string, NonNullable<Awaited<ReturnType<typeof getSourceMap>>>>> {
+  const sourceMaps = new Map<string, NonNullable<Awaited<ReturnType<typeof getSourceMap>>>>()
+  await Promise.all(
+    Array.from(bundleFiles).map(async (bundle) => {
+      const map = await getSourceMap(releaseId, bundle, bucketName, prefix)
+      if (map) sourceMaps.set(bundle, map)
+    }),
+  )
+  return sourceMaps
+}
+
 /**
  * Attempt to symbolicate a minified error stack trace using source maps.
  * Loads source maps per-bundle so multiple chunks are handled correctly.
@@ -125,29 +153,14 @@ async function symbolicateError(
   try {
     const frames = parseStackTrace(error.stack)
 
-    // Collect unique bundle filenames referenced across all frames
-    const bundleFiles = new Set<string>()
-    for (const frame of frames) {
-      if (frame.fileName) {
-        const bundle = bundleFileFromUrl(frame.fileName)
-        if (bundle) bundleFiles.add(bundle)
-      }
-    }
+    const bundleFiles = uniqueBundleFiles(frames)
 
     if (bundleFiles.size === 0) return error
 
-    // Load source map for each unique bundle (getSourceMap handles caching)
-    const sourceMaps = new Map<string, Awaited<ReturnType<typeof getSourceMap>>>()
-    await Promise.all(
-      Array.from(bundleFiles).map(async (bundle) => {
-        const map = await getSourceMap(releaseId, bundle, bucketName, prefix)
-        if (map) sourceMaps.set(bundle, map)
-      }),
-    )
+    const sourceMaps = await loadSourceMapsByBundle(releaseId, bundleFiles, bucketName, prefix)
 
     if (sourceMaps.size === 0) return error
 
-    // Symbolicate each frame with its bundle's source map
     const symbolicated = symbolicateStackTrace(frames, (frame) => {
       const bundle = frame.fileName && bundleFileFromUrl(frame.fileName)
       return bundle ? sourceMaps.get(bundle) : null
@@ -230,8 +243,6 @@ export function createClientLogFunction(
       try {
         await handler(request)
       } catch (err) {
-        // Convert back at the Firebase boundary, so a callable client sees the
-        // same error it always did.
         if (err instanceof ClientLogError) throw new HttpsError(err.code, err.message)
         throw err
       }
