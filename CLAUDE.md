@@ -250,6 +250,15 @@ subagents — is an ordinary request to their agent, not the skill's business. I
 `fsl doctor` only when the scope is the whole project; doctor checks the setup, and the
 setup has nothing to say about `src/checkout`.
 
+**Where a capability fits many places, the proposal is by user flow and ends with a
+question.** The review can see where a mark fits; only the owner knows which flows matter,
+and a mark on everything fills the trail with small clicks. So the proposal groups the
+places by what the user is trying to do ("Checkout: 5 controls"), says which flow it would
+do first, and asks which flows matter most. The question comes after the code is read,
+never before: a goal asked for with nothing to choose from gets a vague answer. The skill
+states this step in general terms and names no capability. Which flows to prefer for a
+capability is a fact, so it lives in that capability's section of `CAPABILITIES.md`.
+
 **`fsl logs` is flags named after SQL clauses, never a SQL string.** An agent writes
 `--where labels.screen=Checkout --group-by labels.screen` reliably; a single
 `"SELECT ... WHERE severity='ERROR'"` needs nested quotes, and one extra shell quoting
