@@ -117,6 +117,56 @@ function findMapFiles(dir: string): string[] {
   return results
 }
 
+function embedMapsForCurrentRelease(mapFiles: string[], functionsDir: string, releaseId: string): void {
+  const embedDir = embeddedDir(path.join(process.cwd(), functionsDir))
+  fs.mkdirSync(embedDir, { recursive: true })
+  for (const f of fs.readdirSync(embedDir)) {
+    fs.unlinkSync(path.join(embedDir, f))
+  }
+  for (const localPath of mapFiles) {
+    const dest = path.join(embedDir, path.basename(localPath))
+    const { json, before, after } = readStrippedMap(localPath)
+    fs.writeFileSync(dest, json)
+    const saved = before > after ? ` (${kb(before)} → ${kb(after)})` : ''
+    console.log(`  ✓ embedded ${path.basename(localPath)} → ${functionsDir}/sourcemaps/current/${saved}`)
+  }
+
+  fs.writeFileSync(path.join(embedDir, EMBEDDED_RELEASE_MARKER), releaseId)
+  console.log(`  ✓ marked ${functionsDir}/sourcemaps/current/ as release ${releaseId}`)
+}
+
+function removeMapsBrowsersCouldServe(mapFiles: string[]): void {
+  for (const localPath of mapFiles) {
+    if (fs.existsSync(localPath)) {
+      fs.unlinkSync(localPath)
+      console.log(`  ✗ deleted ${path.relative(process.cwd(), localPath)}`)
+    }
+  }
+}
+
+function keyFileOrApplicationDefaultCredentials(): { keyFilename?: string } {
+  const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH
+  return serviceAccountPath && fs.existsSync(serviceAccountPath) ? { keyFilename: serviceAccountPath } : {}
+}
+
+function warnThisReleaseHasOnlyTheEmbeddedCopy(releaseId: string, err: unknown): void {
+  console.warn(`[fsl] GCS upload FAILED for release ${releaseId}.`)
+  console.warn('[fsl] GCS error:', (err as Error)?.message ?? err)
+  console.warn(`[fsl] Errors from ${releaseId} will still symbolicate while it is the deployed`)
+  console.warn('[fsl]   release, because the embedded copy is checked first. Once a newer release')
+  console.warn(`[fsl]   is deployed, sourcemaps/current/ is replaced and ${releaseId} can no`)
+  console.warn('[fsl]   longer be symbolicated. Re-run upload-sourcemaps before deploying again.')
+}
+
+/**
+ * Upload every `.map` under `distDir` to Storage and/or embed it into the backend, then
+ * delete it from `distDir` so no source map is served to browsers.
+ *
+ * If the upload fails and `embedSourcemaps` is set, resolves `{ uploaded: false }` instead
+ * of throwing. Earlier releases are unaffected, since their maps reached Storage on earlier
+ * runs; only this release is at risk, because its maps exist only in
+ * `{functionsDir}/sourcemaps/current/`, which the next deploy wipes.
+ */
 export async function uploadSourceMaps(options: UploadOptions): Promise<{ uploaded: boolean }> {
   const releaseId = options.release ?? process.env.VITE_RELEASE_ID ?? process.env.RELEASE_ID
   if (!releaseId) {
@@ -141,53 +191,19 @@ export async function uploadSourceMaps(options: UploadOptions): Promise<{ upload
   const verb = options.bucket ? 'Uploading' : 'Embedding'
   console.log(`[fsl] ${verb} ${mapFiles.length} source map(s) for release ${releaseId}...`)
 
-  // Embed maps into functions directory before uploading (for fast lookup of current release)
   if (options.embedSourcemaps && options.functionsDir) {
-    const embedDir = embeddedDir(path.join(process.cwd(), options.functionsDir))
-    fs.mkdirSync(embedDir, { recursive: true })
-    for (const f of fs.readdirSync(embedDir)) {
-      fs.unlinkSync(path.join(embedDir, f))
-    }
-    for (const localPath of mapFiles) {
-      const dest = path.join(embedDir, path.basename(localPath))
-      // Stripped here too: these ship inside the deployed function, so the
-      // content would inflate the deploy and sit in memory for the instance's life.
-      const { json, before, after } = readStrippedMap(localPath)
-      fs.writeFileSync(dest, json)
-      const saved = before > after ? ` (${kb(before)} → ${kb(after)})` : ''
-      console.log(`  ✓ embedded ${path.basename(localPath)} → ${options.functionsDir}/sourcemaps/current/${saved}`)
-    }
-
-    // Record which release these maps are for. Without it the runtime cannot tell
-    // a stack from the deployed release from a stack from an older one, and
-    // resolves both with whatever is embedded — see the marker's own doc above.
-    // Written after the loop, which has already cleared any stale marker.
-    fs.writeFileSync(path.join(embedDir, RELEASE_MARKER), releaseId)
-    console.log(`  ✓ marked ${options.functionsDir}/sourcemaps/current/ as release ${releaseId}`)
+    embedMapsForCurrentRelease(mapFiles, options.functionsDir, releaseId)
   }
 
-  // Embed-only: nothing to authenticate against, so do not construct a client.
-  // The maps still leave dist/ — they are embedded, and leaving them behind
-  // would serve source maps to browsers, which is the worse outcome.
   if (!options.bucket) {
-    for (const localPath of mapFiles) {
-      if (fs.existsSync(localPath)) {
-        fs.unlinkSync(localPath)
-        console.log(`  ✗ deleted ${path.relative(process.cwd(), localPath)}`)
-      }
-    }
+    removeMapsBrowsersCouldServe(mapFiles)
     console.log('[fsl] Embedded only — no bucket given, nothing uploaded.')
     console.log(`[fsl]   Stacks from ${releaseId} symbolicate while it is the deployed release.`)
     console.log('[fsl]   Older releases cannot be symbolicated without a bucket to read from.')
     return { uploaded: true }
   }
 
-  // Authenticate via service account key if available, otherwise fall back to ADC
-  const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH
-  const storageOptions = serviceAccountPath && fs.existsSync(serviceAccountPath)
-    ? { keyFilename: serviceAccountPath }
-    : {}
-  const storage = new Storage(storageOptions)
+  const storage = new Storage(keyFileOrApplicationDefaultCredentials())
   const bucket = storage.bucket(options.bucket)
 
   try {
@@ -200,7 +216,6 @@ export async function uploadSourceMaps(options: UploadOptions): Promise<{ upload
       const saved = before > after ? ` (${kb(before)} → ${kb(after)}, -${Math.round(100 - (after / before) * 100)}%)` : ''
       console.log(`  ✓ ${fileName} → gs://${options.bucket}/${destination}${saved}`)
 
-      // Delete local .map file after upload
       fs.unlinkSync(localPath)
       console.log(`  ✗ deleted ${path.relative(process.cwd(), localPath)}`)
     }
@@ -210,25 +225,8 @@ export async function uploadSourceMaps(options: UploadOptions): Promise<{ upload
   } catch (err) {
     if (!options.embedSourcemaps) throw err
 
-    // Be precise about the consequence. Previous releases are unaffected —
-    // their maps reached Storage on earlier runs. What is at risk is THIS
-    // release: its maps never got there, and the embedded copy lives in
-    // {functionsDir}/sourcemaps/current/, which the next deploy wipes.
-    console.warn(`[fsl] GCS upload FAILED for release ${releaseId}.`)
-    console.warn('[fsl] GCS error:', (err as Error)?.message ?? err)
-    console.warn(`[fsl] Errors from ${releaseId} will still symbolicate while it is the deployed`)
-    console.warn('[fsl]   release, because the embedded copy is checked first. Once a newer release')
-    console.warn(`[fsl]   is deployed, sourcemaps/current/ is replaced and ${releaseId} can no`)
-    console.warn('[fsl]   longer be symbolicated. Re-run upload-sourcemaps before deploying again.')
-
-    // Deleted regardless: the maps are embedded, and leaving them in dist/ would
-    // ship source maps to browsers, which is the worse outcome.
-    for (const localPath of mapFiles) {
-      if (fs.existsSync(localPath)) {
-        fs.unlinkSync(localPath)
-        console.log(`  ✗ deleted ${path.relative(process.cwd(), localPath)}`)
-      }
-    }
+    warnThisReleaseHasOnlyTheEmbeddedCopy(releaseId, err)
+    removeMapsBrowsersCouldServe(mapFiles)
     return { uploaded: false }
   }
 }

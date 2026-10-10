@@ -15,6 +15,7 @@ import os from 'os'
 import path from 'path'
 import { spawnSync } from 'child_process'
 import { assert, reportResults } from './testHelpers.js'
+import { EMBEDDED_RELEASE_MARKER } from '../src/tools/uploadSourceMaps.js'
 
 const CLI = path.join(process.cwd(), 'src', 'tools', 'index.ts')
 
@@ -59,7 +60,35 @@ function testFunctionsFlagStillWorksAndWarnsOnce() {
   fs.rmSync(root, { recursive: true, force: true })
 }
 
+function testEmbedMarksTheReleaseAndClearsWhatWasThere() {
+  console.log('\nTest: embedding marks the release and leaves nothing from the previous one')
+  const { root, backend } = tempProject()
+  const embedded = path.join(backend, 'sourcemaps', 'current')
+  fs.mkdirSync(embedded, { recursive: true })
+  fs.writeFileSync(path.join(embedded, 'old-bundle.js.map'), '{}')
+  fs.writeFileSync(path.join(embedded, EMBEDDED_RELEASE_MARKER), 'r0')
+  const out = runCli(root, ['--embed-sourcemaps', '--release=r1', `--backend=${path.relative(root, backend)}`])
+  assert('exits cleanly', out.status === 0, out.stderr.slice(0, 300))
+  assert(
+    'the marker names the new release',
+    fs.readFileSync(path.join(embedded, EMBEDDED_RELEASE_MARKER), 'utf-8') === 'r1',
+  )
+  assert('the previous release map is gone', !fs.existsSync(path.join(embedded, 'old-bundle.js.map')))
+  fs.rmSync(root, { recursive: true, force: true })
+}
+
+function testEmbedOnlyLeavesNoMapInDist() {
+  console.log('\nTest: embed-only deletes the maps from dist/')
+  const { root, dist, backend } = tempProject()
+  const out = runCli(root, ['--embed-sourcemaps', '--release=r1', `--backend=${path.relative(root, backend)}`])
+  assert('exits cleanly', out.status === 0, out.stderr.slice(0, 300))
+  assert('no .map file is left in dist/', !fs.existsSync(path.join(dist, 'app-abc.js.map')))
+  fs.rmSync(root, { recursive: true, force: true })
+}
+
 function run() {
+  testEmbedMarksTheReleaseAndClearsWhatWasThere()
+  testEmbedOnlyLeavesNoMapInDist()
   testBackendFlagEmbeds()
   testFunctionsFlagStillWorksAndWarnsOnce()
   reportResults()
