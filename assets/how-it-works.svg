@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 420" role="img" aria-label="The browser has no credentials and no source maps. It sends each log to a Cloud Function in your own project, which holds both and writes to Cloud Logging, the same stream your backend functions write to.">
+  <style>
+    .bg { fill: #f5f7fa; }
+    .box { fill: #f5f7fa; stroke: #cfd6e0; }
+    .row { fill: #eef1f6; stroke: #cfd6e0; }
+    .row-src { fill: #e4f2ea; stroke: #1b7a46; }
+    .title { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 20px; font-weight: 600; fill: #15181e; }
+    .text { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 16px; fill: #4b5462; }
+    .code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 18px; font-weight: 600; fill: #235a9b; }
+    .code-src { fill: #1b7a46; }
+    .line { stroke: #79828f; fill: none; }
+    .head { fill: #79828f; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #101318; }
+      .box { fill: #101318; stroke: #333c48; }
+      .row { fill: #1e232b; stroke: #333c48; }
+      .row-src { fill: #16261e; stroke: #55b585; }
+      .title { fill: #e8ecf2; }
+      .text { fill: #9aa4b2; }
+      .code { fill: #74a6e2; }
+      .code-src { fill: #55b585; }
+      .line { stroke: #6b7480; }
+      .head { fill: #6b7480; }
+    }
+  </style>
+  <defs>
+    <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" orient="auto">
+      <path class="head" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1280" height="420"/>
+
+  <g transform="translate(0,-20)">
+    <rect class="box" x="72" y="110" width="300" height="250" rx="7" stroke-width="1.5"/>
+    <text class="title" x="96" y="154">Browser</text>
+    <text class="text" x="96" y="204">no credentials</text>
+    <text class="text" x="96" y="236">no source maps</text>
+
+    <rect class="box" x="500" y="110" width="380" height="250" rx="7" stroke-width="1.5"/>
+    <text class="title" x="524" y="154">Your Cloud Functions</text>
+    <rect class="row-src" x="524" y="170" width="332" height="80" rx="7" stroke-width="1.5"/>
+    <text class="code code-src" x="548" y="203">logFrontendEvent()</text>
+    <text class="text" x="548" y="231">credentials + source maps</text>
+    <rect class="row" x="524" y="266" width="332" height="70" rx="7" stroke-width="1.5"/>
+    <text class="text" x="548" y="296">your own functions</text>
+    <text class="code" x="548" y="322">withLogging()</text>
+
+    <rect class="box" x="988" y="110" width="220" height="250" rx="7" stroke-width="1.5"/>
+    <text class="title" x="1012" y="154">Cloud Logging</text>
+    <text class="text" x="1012" y="204">your project</text>
+    <text class="text" x="1012" y="236">one stream</text>
+    <text class="text" x="1012" y="268">one query</text>
+
+    <line class="line" x1="372" y1="210" x2="522" y2="210" stroke-width="2" marker-end="url(#arrowhead)"/>
+    <line class="line" x1="856" y1="210" x2="986" y2="210" stroke-width="2" marker-end="url(#arrowhead)"/>
+    <line class="line" x1="856" y1="301" x2="986" y2="301" stroke-width="2" marker-end="url(#arrowhead)"/>
+  </g>
+</svg>
