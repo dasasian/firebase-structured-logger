@@ -46,6 +46,29 @@ initializeApp({ projectId: 'demo-production-output' })
 
 initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
 
+function startCapturingStdoutAndStderr(): { stopAndReadJsonLines: () => Record<string, unknown>[] } {
+  const lines: string[] = []
+  const realOut = process.stdout.write.bind(process.stdout)
+  const realErr = process.stderr.write.bind(process.stderr)
+  const grab = ((chunk: unknown) => {
+    lines.push(String(chunk))
+    return true
+  }) as typeof process.stdout.write
+  process.stdout.write = grab
+  process.stderr.write = grab
+  return {
+    stopAndReadJsonLines: () => {
+      process.stdout.write = realOut
+      process.stderr.write = realErr
+      return lines
+        .join('')
+        .split('\n')
+        .filter((l) => l.trim().startsWith('{'))
+        .map((l) => JSON.parse(l) as Record<string, unknown>)
+    },
+  }
+}
+
 /**
  * Run `fn` with stdout AND stderr captured, returning every JSON line emitted.
  *
@@ -54,50 +77,26 @@ initLogger({ appId: 'acme', minSeverity: 'DEBUG' })
  * to console.info/debug/warn. Capturing only stdout silently misses every error
  * entry — which is most of what matters here.
  */
-async function captureEntriesAsync(fn: () => Promise<void>): Promise<Record<string, unknown>[]> {
-  const lines: string[] = []
-  const realOut = process.stdout.write.bind(process.stdout)
-  const realErr = process.stderr.write.bind(process.stderr)
-  const grab = ((chunk: unknown) => {
-    lines.push(String(chunk))
-    return true
-  }) as typeof process.stdout.write
-  process.stdout.write = grab
-  process.stderr.write = grab
-  try {
-    await fn()
-  } finally {
-    process.stdout.write = realOut
-    process.stderr.write = realErr
-  }
-  return lines
-    .join('')
-    .split('\n')
-    .filter((l) => l.trim().startsWith('{'))
-    .map((l) => JSON.parse(l) as Record<string, unknown>)
-}
-
 function captureEntries(fn: () => void): Record<string, unknown>[] {
-  const lines: string[] = []
-  const realOut = process.stdout.write.bind(process.stdout)
-  const realErr = process.stderr.write.bind(process.stderr)
-  const grab = ((chunk: unknown) => {
-    lines.push(String(chunk))
-    return true
-  }) as typeof process.stdout.write
-  process.stdout.write = grab
-  process.stderr.write = grab
+  const capture = startCapturingStdoutAndStderr()
+  let entries: Record<string, unknown>[] = []
   try {
     fn()
   } finally {
-    process.stdout.write = realOut
-    process.stderr.write = realErr
+    entries = capture.stopAndReadJsonLines()
   }
-  return lines
-    .join('')
-    .split('\n')
-    .filter((l) => l.trim().startsWith('{'))
-    .map((l) => JSON.parse(l) as Record<string, unknown>)
+  return entries
+}
+
+async function captureEntriesAsync(fn: () => Promise<void>): Promise<Record<string, unknown>[]> {
+  const capture = startCapturingStdoutAndStderr()
+  let entries: Record<string, unknown>[] = []
+  try {
+    await fn()
+  } finally {
+    entries = capture.stopAndReadJsonLines()
+  }
+  return entries
 }
 
 // --- The shape ---
