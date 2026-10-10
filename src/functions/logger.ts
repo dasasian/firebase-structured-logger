@@ -143,7 +143,6 @@ function shrinkBreadcrumbs(breadcrumbs: BreadcrumbEntry[]): BreadcrumbEntry[] {
   return breadcrumbs.slice(-10).map(({ data: _data, ...rest }) => rest);
 }
 
-/** Cut `message`, `error.message` and `error.cause` to MAX_FIELD_BYTES each. */
 function withTruncatedMessageFields(entry: Record<string, unknown>): Record<string, unknown> {
   const next = { ...entry };
   if (typeof next.message === "string") next.message = truncateToBytes(next.message, MAX_FIELD_BYTES);
@@ -157,7 +156,6 @@ function withTruncatedMessageFields(entry: Record<string, unknown>): Record<stri
   return next;
 }
 
-/** Cut any label value over MAX_LABEL_BYTES. */
 function withTruncatedLabelValues(entry: Record<string, unknown>): Record<string, unknown> {
   const labels = entry[PROMOTED_LABELS_FIELD] as Record<string, string> | undefined;
   if (!labels) return entry;
@@ -395,7 +393,8 @@ function moveStackForErrorReporting(
   if (!isReportable || !service) return { reportingFields: {}, jsonPayload: payload.jsonPayload };
 
   const { error, ...rest } = payload.jsonPayload!;
-  const { stack: _movedToStackTrace, ...errorWithoutStack } = error!;  return {
+  const { stack: _movedToStackTrace, ...errorWithoutStack } = error!;
+  return {
     reportingFields: {
       stack_trace: stack,
       serviceContext: {
