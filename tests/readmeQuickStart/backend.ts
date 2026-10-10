@@ -5,7 +5,7 @@ import { initLogger, createClientLogFunction, withLogging } from '../../src/func
 
 initLogger({ appId: 'my-app' })
 
-export const logFrontendEvent = createClientLogFunction({})
+export const logFrontendEvent = createClientLogFunction()
 
 export const checkout = onCall(
   withLogging({ functionName: 'checkout' }, async (request) => {

@@ -102,6 +102,23 @@ async function testInvalidPayloadRejected() {
   assert('invalid payload was rejected', threw)
 }
 
+async function testBothFactoriesTakeNoArgument() {
+  console.log('\nTest: createClientLogHandler() and createClientLogFunction() take no argument when every default fits')
+  clearLog(LOG_DIR)
+
+  await createClientLogHandler()(makeRequest({ message: 'written with no config', severity: 'INFO', labels: { appId: 'acme' } }))
+  assert('the handler built with no argument writes the entry', readLastEntry(LOG_DIR)?.message === 'written with no config')
+
+  const invalid = makeRequest({ message: '', severity: 'ERROR', labels: { appId: 'acme' } })
+  let fromCallable: unknown
+  try {
+    await createClientLogFunction().run(invalid as never)
+  } catch (e) {
+    fromCallable = e
+  }
+  assert('the callable built with no argument runs the handler', (fromCallable as HttpsError)?.code === 'invalid-argument')
+}
+
 async function testCallableConvertsClientLogErrorToHttpsError() {
   console.log('\nTest: the callable throws HttpsError, the bare handler throws ClientLogError')
   clearLog(LOG_DIR)
@@ -156,6 +173,7 @@ async function run() {
   await testErrorPayloadStructure()
   await testInvalidPayloadRejected()
   await testCallableConvertsClientLogErrorToHttpsError()
+  await testBothFactoriesTakeNoArgument()
   await testUnknownSeverityInEmulatorMode()
 
   // Cleanup

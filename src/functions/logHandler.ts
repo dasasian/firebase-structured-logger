@@ -180,11 +180,12 @@ async function symbolicateError(
 /**
  * Create an onCall handler that receives LogPayload from the client,
  * symbolicates stack traces, and writes structured entries to Cloud Logging.
+ * With no argument, every option takes its default.
  *
  * @example
  * export const logFrontendEvent = onCall(createClientLogHandler({ bucket: 'my-bucket' }))
  */
-export function createClientLogHandler(config: ClientLogHandlerConfig) {
+export function createClientLogHandler(config: ClientLogHandlerConfig = {}) {
   const bucket = resolveBucket(config)
   if (bucket) configureSourceMapBucket(bucket)
 
@@ -231,12 +232,13 @@ export function createClientLogHandler(config: ClientLogHandlerConfig) {
 /**
  * Convenience factory that wraps createClientLogHandler in onCall.
  * Use when you want a ready-to-export Cloud Function.
+ * With no argument, every option takes its default.
  *
  * @example
- * export const logFrontendEvent = createClientLogFunction({ bucket: 'my-bucket' })
+ * export const logFrontendEvent = createClientLogFunction()
  */
 export function createClientLogFunction(
-  config: ClientLogHandlerConfig & { cors?: boolean | string | string[]; maxInstances?: number },
+  config: ClientLogHandlerConfig & { cors?: boolean | string | string[]; maxInstances?: number } = {},
 ) {
   const handler = createClientLogHandler(config)
   const { onCall, HttpsError } = loadFirebaseHttps()
