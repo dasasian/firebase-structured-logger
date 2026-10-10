@@ -203,7 +203,7 @@ function testMarkedActionsSaysWhichToMarkFirst() {
   console.log('\nTest: Marked actions says which controls to mark first')
   const capabilities = fs.readFileSync(path.join(ROOT, 'CAPABILITIES.md'), 'utf-8')
   const section = capabilities.split('\n## ').find((s) => s.startsWith('Marked actions')) ?? ''
-  assert('names the flows to mark first', /where a failure costs the user most first/.test(section))
+  assert('names the flows to mark first', /Mark first the controls of the flows where a failure costs the user most/.test(section))
 }
 
 function testPackaging() {
