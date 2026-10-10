@@ -24,7 +24,7 @@ npm install @dasasian/firebase-structured-logger
 Needs Node 22 or later.
 
 ## Docs
-[fsl.dasasian.com](https://fsl.dasasian.com/)
+[fsl.dasasian.com](https://fsl.dasasian.com/) · [Changelog](CHANGELOG.md)
 
 - [Get started](https://fsl.dasasian.com/start/) · [React](https://fsl.dasasian.com/react/) · [Vue](https://fsl.dasasian.com/vue/)
 - [Cloud Functions](https://fsl.dasasian.com/cloud-functions/) · [Cloud Run](https://fsl.dasasian.com/cloud-run/) · [Source maps](https://fsl.dasasian.com/source-maps/) · [Troubleshooting](https://fsl.dasasian.com/troubleshooting/)
@@ -36,4 +36,4 @@ Needs Node 22 or later.
 
 ## License
 
-MIT © Dasasian. See the [changelog](CHANGELOG.md).
+MIT © Dasasian
