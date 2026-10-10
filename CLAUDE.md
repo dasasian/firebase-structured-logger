@@ -503,11 +503,19 @@ before or after it. Prefer observing to wrapping wherever the browser offers it
 It holds every page a person reads. This repo holds three things: a short `README.md`,
 `CAPABILITIES.md` for agents, and the code with its doc comments.
 
-The README says what fsl is, how to install it, and where the docs are. It is the page
-npm and GitHub show, so it stays short enough to read in one look, and it explains
-nothing the site explains: two copies of one explanation drift, and the README was where
-1.4.0's examples that did not compile lived. Its links end with a slash, because the
-site redirects an address without one.
+The README is the front page: the one npm and GitHub show, and the one a visitor judges
+the package by in a few seconds. It holds what answers "what is this and why would I
+click": the pitch, the picture of how it works (`assets/how-it-works.svg`, whose `alt`
+text says the same in words), six results that each link to their page, the install
+line, a quick start for both halves, and a map of every page of the site. It explains
+nothing more. Two copies of one explanation drift, and the long README was where 1.4.0's
+examples that did not compile lived.
+
+So the quick start is compiled. Its two code blocks are the text of two files under
+`tests/`, which the typecheck covers, and a test fails when the README and those files
+differ. A page list has no such check: when the site adds, moves or removes a page, the
+`dasasian-web` session says so, and the map changes here. README links to the site end
+with a slash, because the site redirects an address without one.
 
 Text for people never moves into `CAPABILITIES.md`; that file keeps its shape for its
 reader. A deprecation is stated in the code, with a `@deprecated` tag that names the
