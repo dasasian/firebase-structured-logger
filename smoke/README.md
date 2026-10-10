@@ -110,8 +110,9 @@ crumbs, so path B's copies are read from their last arrival on).
 globals stay out of the process the other legs run in: a `window` there changes how
 the Google libraries and `fetch` behave. The child gets the callable's URL, the run id
 and the release through its environment and exits non-zero if a send failed; `run.ts`
-scrubs the URL from anything the child printed. The leg runs last, so the entries it
-adds under the run id do not change what the older legs wait for.
+scrubs the URL from anything the child printed. The leg runs after the older ones, so the
+entries it adds under the run id do not change what they wait for; the thrown-error leg
+runs after it, and finds its entries by their own messages.
 
 ## The thrown-error leg
 
@@ -131,7 +132,9 @@ The caller's answer is asserted too, because `withLogging` promises to throw the
 value again: a changed error would change the status or the code. The entries are found
 by a text search for the message, not by a label: Firebase's entry has no fsl label, and
 a label filter would hide the very entry the leg is there to count. The leg waits a short
-time after the expected count arrives before it asserts, so a late third entry is seen.
+time (10 seconds) after the expected count arrives, reads once more, and asserts on that
+last read, so a late third entry is seen. The leg runs last, so its entries (they hold the
+run id too) do not change what the older legs wait for.
 
 ## What the deployed fixture covers
 

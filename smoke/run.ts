@@ -127,6 +127,22 @@ async function callFunction(name: string, data: unknown): Promise<void> {
   }
 }
 
+interface CallerAnswer {
+  httpStatus: number
+  errorStatus?: string
+  errorMessage?: string
+}
+
+async function callFunctionForAnswer(name: string, data: unknown): Promise<CallerAnswer> {
+  const res = await fetch(functionUrl(name), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data }),
+  })
+  const body = (await res.json().catch(() => ({}))) as { error?: { status?: string; message?: string } }
+  return { httpStatus: res.status, errorStatus: body.error?.status, errorMessage: body.error?.message }
+}
+
 /**
  * Poll until `want` entries carrying this run id appear, or time out.
  *
@@ -161,6 +177,7 @@ interface SmokeEntryMeta {
   labels?: Record<string, string | undefined>
   trace?: string
   timestamp?: string
+  textPayload?: string
   errorGroups?: Array<{ id?: string }>
   [key: string]: unknown
 }
@@ -635,6 +652,7 @@ async function main(): Promise<void> {
   await bigEntryLeg()
   await repeatSummaryLeg()
   await realClientLeg()
+  await thrownErrorLeg()
 }
 
 // --- Cloud Run: the backend without firebase-functions or firebase-admin (#39) ---
@@ -973,6 +991,102 @@ async function realClientLeg(): Promise<void> {
       `got ${summariesOfPath[0]?.metadata?.labels?.repeatCount}`)
   }
   assert(`${REAL_CLIENT_SUMMARIES} summaries arrived`, summaries.length === REAL_CLIENT_SUMMARIES, `got ${summaries.length}`)
+}
+
+// --- What withLogging does with a throw, next to Firebase's own wrapper (#84) ---
+
+const THROWN_PLAIN_ENTRIES = 2
+const THROWN_REFUSAL_ENTRIES = 1
+const THROWN_LOGGED_ENTRIES = 2
+const THROWN_SETTLE_MS = 10_000
+
+type ThrowMode = 'plain' | 'refusal' | 'logged'
+
+function textOf(entry: SmokeEntry | undefined): string {
+  const textPayload = entry?.metadata?.textPayload
+  return typeof textPayload === 'string' ? textPayload : String(entry?.data?.message ?? '')
+}
+
+const isFslThrowsEntry = (entry: SmokeEntry) => entry.metadata?.labels?.functionName === 'fslSmokeThrows'
+
+async function entriesHoldingMessage(message: string, since: Date, want: number): Promise<SmokeEntry[]> {
+  const filter = `"${message}" AND timestamp >= "${since.toISOString()}"`
+  let entries: SmokeEntry[] = []
+  const started = Date.now()
+  let delay = 4_000
+  while (Date.now() - started < 240_000 && entries.length < want) {
+    entries = await listEntriesRest(filter)
+    if (entries.length < want) {
+      await new Promise((r) => setTimeout(r, delay))
+      delay = Math.min(delay * 1.4, 15_000)
+    }
+  }
+  await new Promise((r) => setTimeout(r, THROWN_SETTLE_MS))
+  return listEntriesRest(filter)
+}
+
+/**
+ * Calls `fslSmokeThrows` three ways and asserts what the caller gets and which entries hold
+ * each message. Found by text, not by label: Firebase's own `Unhandled error` entry has no
+ * fsl label, and a label filter would hide the entry this leg is there to count.
+ */
+async function thrownErrorLeg(): Promise<void> {
+  console.log('\n  --- what a handler throws ---')
+  const since = new Date(Date.now() - 60_000)
+  const messages: Record<ThrowMode, string> = {
+    plain: `[fsl-verify] thrown plain ${RUN_ID}`,
+    refusal: `[fsl-verify] thrown refusal ${RUN_ID}`,
+    logged: `[fsl-verify] thrown logged ${RUN_ID}`,
+  }
+  const answers = {} as Record<ThrowMode, CallerAnswer>
+  for (const mode of ['plain', 'refusal', 'logged'] as const) {
+    answers[mode] = await callFunctionForAnswer('fslSmokeThrows', { runId: RUN_ID, mode, message: messages[mode] })
+  }
+  const describeAnswer = (a: CallerAnswer) => `HTTP ${a.httpStatus}, status ${a.errorStatus}`
+  const severities = (entries: SmokeEntry[]) => entries.map((e) => e.metadata?.severity).join(',')
+
+  assert('plain: the caller gets 500 INTERNAL', answers.plain.httpStatus === 500 && answers.plain.errorStatus === 'INTERNAL',
+    describeAnswer(answers.plain))
+  assert('refusal: the caller gets 403 PERMISSION_DENIED with the message sent',
+    answers.refusal.httpStatus === 403 && answers.refusal.errorStatus === 'PERMISSION_DENIED' &&
+      answers.refusal.errorMessage === messages.refusal,
+    `${describeAnswer(answers.refusal)}, message matches: ${answers.refusal.errorMessage === messages.refusal}`)
+  assert('logged: the caller gets 500 INTERNAL', answers.logged.httpStatus === 500 && answers.logged.errorStatus === 'INTERNAL',
+    describeAnswer(answers.logged))
+
+  const plain = await entriesHoldingMessage(messages.plain, since, THROWN_PLAIN_ENTRIES)
+  const plainFsl = plain.filter(isFslThrowsEntry)
+  const plainFirebase = plain.filter((e) => !isFslThrowsEntry(e))
+  assert(`plain: ${THROWN_PLAIN_ENTRIES} entries hold the message`, plain.length === THROWN_PLAIN_ENTRIES,
+    `got ${plain.length}, severities ${severities(plain)}`)
+  assert("plain: one is fsl's ERROR with the run id and the error payload",
+    plainFsl.length === 1 && plainFsl[0].metadata?.severity === 'ERROR' &&
+      plainFsl[0].metadata?.labels?.smokeRunId === RUN_ID && plainFsl[0].data?.error?.message === messages.plain,
+    `fsl entries ${plainFsl.length}, severity ${plainFsl[0]?.metadata?.severity}, error message matches: ${plainFsl[0]?.data?.error?.message === messages.plain}`)
+  assert("plain: one is Firebase's Unhandled error, with no functionName label",
+    plainFirebase.length === 1 && textOf(plainFirebase[0]).includes('Unhandled error'),
+    `other entries ${plainFirebase.length}, text starts: ${textOf(plainFirebase[0]).slice(0, 40)}`)
+
+  const refusal = await entriesHoldingMessage(messages.refusal, since, THROWN_REFUSAL_ENTRIES)
+  const refusalFsl = refusal.filter(isFslThrowsEntry)
+  assert(`refusal: ${THROWN_REFUSAL_ENTRIES} entry holds the message and none of it is Firebase's`,
+    refusal.length === THROWN_REFUSAL_ENTRIES && refusalFsl.length === refusal.length,
+    `got ${refusal.length}, fsl's ${refusalFsl.length}, severities ${severities(refusal)}`)
+  assert("refusal: fsl's entry is a WARNING with the code and status, and no error payload",
+    refusalFsl[0]?.metadata?.severity === 'WARNING' &&
+      refusalFsl[0].metadata?.labels?.smokeRunId === RUN_ID &&
+      refusalFsl[0].data?.context?.code === 'permission-denied' &&
+      refusalFsl[0].data?.context?.status === 403 &&
+      refusalFsl[0].data?.error === undefined,
+    `severity ${refusalFsl[0]?.metadata?.severity}, code ${String(refusalFsl[0]?.data?.context?.code)}, status ${String(refusalFsl[0]?.data?.context?.status)}, has error payload: ${refusalFsl[0]?.data?.error !== undefined}`)
+
+  const logged = await entriesHoldingMessage(messages.logged, since, THROWN_LOGGED_ENTRIES)
+  const loggedFsl = logged.filter(isFslThrowsEntry)
+  assert(`logged: ${THROWN_LOGGED_ENTRIES} entries hold the message, not 3`, logged.length === THROWN_LOGGED_ENTRIES,
+    `got ${logged.length}, severities ${severities(logged)}`)
+  assert("logged: one is fsl's ERROR from logError, one is Firebase's",
+    loggedFsl.length === 1 && loggedFsl[0].metadata?.severity === 'ERROR' && logged.length - loggedFsl.length === 1,
+    `fsl entries ${loggedFsl.length}, other entries ${logged.length - loggedFsl.length}, severity ${loggedFsl[0]?.metadata?.severity}`)
 }
 
 async function cleanup(): Promise<void> {

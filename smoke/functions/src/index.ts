@@ -97,3 +97,42 @@ export const fslSmokeFeedback = onCall<LogPayload, void>(OPTS, async (request) =
   initLogger({ appId: APP_ID, minSeverity: 'WARNING' })
   return createClientLogHandler({})(request)
 })
+
+/**
+ * A callable whose handler throws what the caller asks for: a plain `Error`, a 4xx
+ * `HttpsError`, or an error it logs itself before throwing it again.
+ *
+ * Only a deploy shows what `withLogging` does with a throw next to Firebase's own
+ * `onCall` wrapper, which answers the caller and writes an `Unhandled error` entry of its
+ * own. A unit test drives `withLogging` with a request it made, so it has no such wrapper.
+ */
+export const fslSmokeThrows = onCall(
+  OPTS,
+  withLogging(
+    (request) => ({
+      functionName: 'fslSmokeThrows',
+      appId: APP_ID,
+      labels: { smokeRunId: (request.data as { runId?: string })?.runId },
+    }),
+    async (request) => {
+      const { runId, mode, message } = (request.data ?? {}) as {
+        runId?: string
+        mode?: string
+        message?: string
+      }
+      if (!runId || !message) throw new HttpsError('invalid-argument', 'runId and message are required')
+
+      if (mode === 'plain') throw new Error(message)
+      if (mode === 'refusal') throw new HttpsError('permission-denied', message)
+      if (mode === 'logged') {
+        try {
+          throw new Error(message)
+        } catch (err) {
+          logError(err)
+          throw err
+        }
+      }
+      throw new HttpsError('invalid-argument', 'mode must be plain, refusal or logged')
+    },
+  ),
+)
