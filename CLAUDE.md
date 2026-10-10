@@ -371,6 +371,17 @@ the first's — and the running sends are one list in `/testing`, not one per ca
 first capture's `settled()` would return at once while its entries were still on the way.
 `tests/configureTwice.ts` pins that.
 
+## Repeats are told apart by what the user did
+
+A repeat's signature is the error type, the message, the screen, and the names of the last
+3 `action` breadcrumbs at most since the last `nav` breadcrumb. Two paths to one crash are
+often two bugs, so each gets its own full copies and summary. Only signals that move at
+human speed go in: a flood repeats with no new click between, so it keeps one signature and
+stays collapsed. Never `data`, timestamps, `state` breadcrumbs (an app can emit them in a
+loop) or network breadcrumbs (their URLs carry ids). There is no option: an app with no
+actions gets the signature it always had. No label shows the path on a summary;
+`repeatKey` joins it to a full copy, whose breadcrumbs do.
+
 ## Optional client helpers are separate entry points
 
 Navigation, and the helpers after it (#51 timing, #58 views, #52 marked actions, #53 network), each

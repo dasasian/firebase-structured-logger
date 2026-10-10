@@ -1110,9 +1110,17 @@ capped at half, with one warning, so warnings always have room. A noisy warning 
 
 ### Repeats are counted, not dropped
 
-Two errors are the same when the **message and the screen both match**, so the same error
-on two different screens is kept apart. The first 3 are sent in full, with their stack and
-breadcrumbs. After that the browser only counts them, and sends one summary:
+Two errors are the same when the **error type, the message, the screen and the user's last
+actions on that screen** all match. The actions are the names of the last 3 `bc.action`
+breadcrumbs at most, since the user arrived on the screen. So the same crash reached by
+`apply_discount › tap_place_order` and by `edit_quantity › tap_place_order` is two errors,
+and each gets its own full copies and its own summary: two paths to one crash are often two
+bugs. Only action names count, never their `data`, and never state or navigation
+breadcrumbs, so an error that repeats with no new click in between, such as a render loop,
+is still one error.
+
+The first 3 are sent in full, with their stack and breadcrumbs. After that the browser only
+counts them, and sends one summary:
 
 ```
 WARNING  Repeated 197 more times: cart sync failed
@@ -1127,7 +1135,7 @@ The browser never learns the server's `logId` for the first copy — `writeLog` 
 after the log has already left the tab. So each full copy instead carries its own
 `labels.repeatKey`, a client-side id, and the summary's `repeatOf` points at that instead:
 query `labels.repeatKey="…" OR labels.repeatOf="…"` to find a full copy and its summary
-together.
+together. The full copy's breadcrumbs show which path a summary counts.
 
 A summary is sent once an hour, when the tab is hidden, and once at startup for anything
 a previous visit left queued. It is keyed by the error, the `releaseId` and the `userId`,
