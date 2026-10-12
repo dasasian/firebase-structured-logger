@@ -136,6 +136,8 @@ enableNavigation()
 
 ### Fits when
 - State-driven screen switching: `useState('home')` with a `switch (screen)` render, a `currentView` or `step` variable swapped without `pushState`.
+- A Vue root component whose template is a `v-if` / `v-else-if` / `v-else` chain that swaps the whole tree on auth or gate state.
+- A React component with no screen variable that swaps the whole tree by a chain of early returns, or by a conditional render, on auth or gate state.
 - Wizards and tab shells where the address bar never changes.
 - `bc.nav(` or `setScreen(` calls (both deprecated).
 
@@ -160,6 +162,8 @@ Call it at each screen change. Optional second argument: `{ route, path }`.
 
 ### Fits when
 - Dialog, modal, drawer or popover components: `role="dialog"`, `<dialog`, `aria-modal`, `Modal`, `Dialog`, `Drawer` in JSX or templates.
+- Menus and alerts: `role="menu"`, `role="alertdialog"`.
+- Overlays built by hand: `<Teleport`, `createPortal(`, and an element shown on a condition (`v-if`, `&&`) next to a backdrop, with or without a role.
 - Tab panels (`role="tabpanel"`) and wizard step containers.
 - No `data-fsl-view` attribute anywhere in the markup.
 
@@ -174,11 +178,13 @@ enableViews()
 <div class="modal" data-fsl-view="Attachment">…</div>
 ```
 Put the mark in the one shared modal component and pass the name in as a prop, so every dialog is marked once.
+Mark first the dialogs, the overlays and the layout mode; they tell most about where the user was. Menus tell least and cost least, so mark them last.
 
 ### Mistakes
 - A dialog, modal or drawer element with no `data-fsl-view` while `enableViews()` is called → the dialog is invisible to the `view` label → add the mark, once, in the shared modal component.
 - `` data-fsl-view={`Order ${order.id}`} `` or any mark whose value is a record id, name, email or free text → the value reaches every log entry as user data → use a value from a fixed set of code names, as in `` data-fsl-view={`Tab ${tab.name}`} `` where `tab.name` is one of `"details"`, `"history"`.
 - A mark on every row of a list → the label becomes `row › row › row` → mark the list once.
+- A mark on each of several regions that are always visible together, such as two panes shown in every layout mode → the same names are on every entry and tell nothing → mark the layout mode once, with a name from a fixed set, or mark nothing.
 - `bc.action(` used to say a dialog is open → a view is a label, not a breadcrumb → mark the dialog; keep `bc.action` for the click that opened it.
 - `enableViews` imported from `/client` → it lives in its own entry point → import from `/client/views`.
 - Marks inside a web component's shadow root → not found → move the mark outside the shadow root.

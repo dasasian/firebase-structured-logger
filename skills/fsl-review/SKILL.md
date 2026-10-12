@@ -20,9 +20,16 @@ The scope is the app, a folder or a file. If none is given, it is the whole app.
    add it, and what goes wrong. Do not rely on memory of fsl.
 4. Read the code in the scope, and find how it uses fsl today: what it imports from the
    package, what it calls, and what the code does that a capability covers.
+   Before you decide where a capability fits, list what is in the scope: each component
+   file, and each block that is rendered on a condition. Then decide for each item which
+   capability covers it, or none. The words in "Fits when" help to find places; they are not
+   the limit of the search.
 5. Propose, as a short list, how fsl could best serve this code. Additions and fixes, in
    the order you would do them. Fold in doctor's findings if you ran it. Say nothing
    about code that is already right.
+   Say in one line what you read: how many files, and the kinds of place you looked for.
+   Before you propose to remove code, read the comments at that place. When the code says
+   why it is there, give both sides and do not call the removal a fix.
    When one capability fits more than about ten places in the scope, do not list the places.
    Group them by user flow, meaning what the user is trying to do, and give the count for
    each flow. Say in a few words which flow you would do first and why. End the proposal

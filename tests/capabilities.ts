@@ -197,6 +197,41 @@ function testReviewSkillShape() {
   const backticked = [...skill.matchAll(/`([^`]+)`/g)].map((m) => m[1])
   assert('only allowed identifiers in backticks', backticked.every((b) => ALLOWED_SKILL_CODE.includes(b)), backticked.join(' | '))
   assert('groups many places by user flow and asks which flows matter', /by user flow/.test(skill) && /which flows matter most/.test(skill))
+  const flat = skill.replace(/\s+/g, ' ')
+  assert('lists component files and conditional blocks before deciding', /list what is in the scope: each component file, and each block that is rendered on a condition/.test(flat))
+  assert('says the Fits when words are not the limit of the search', /not the limit of the search/.test(flat))
+  assert('says in one line what was read', /Say in one line what you read: how many files, and the kinds of place/.test(flat))
+  assert('reads comments before proposing a removal', /Before you propose to remove code, read the comments at that place/.test(flat))
+  assert('gives both sides and does not call the removal a fix', /give both sides and do not call the removal a fix/.test(flat))
+}
+
+function testReviewSkillNamesNoCapability() {
+  console.log('\nTest: /fsl-review contains no capability title from CAPABILITIES.md')
+  const skill = fs.readFileSync(path.join(ROOT, 'skills', 'fsl-review', 'SKILL.md'), 'utf-8')
+  assert('there are capability titles to check', sections.length >= 10, `found ${sections.length}`)
+  for (const { title } of sections) {
+    assert(`the skill does not contain "${title}"`, !skill.toLowerCase().includes(title.toLowerCase()))
+  }
+}
+
+function sectionPart(title: string, heading: string): string {
+  return sections.find((s) => s.title === title)?.parts.get(heading) ?? ''
+}
+
+function testNewPlacesAreInTheirSections() {
+  console.log('\nTest: the new places and lines are in Pages without a URL change and Views')
+  const pages = sectionPart('Pages without a URL change', 'Fits when')
+  assert('pages: the Vue chain', pages.includes('`v-if` / `v-else-if` / `v-else` chain'))
+  assert('pages: the React early returns', pages.includes('chain of early returns'))
+  const viewsFits = sectionPart('Views', 'Fits when')
+  for (const word of ['role="menu"', 'role="alertdialog"', '<Teleport', 'createPortal(', 'next to a backdrop']) {
+    assert(`views: ${word}`, viewsFits.includes(word))
+  }
+  assert('views: says which to mark first', /Mark first the dialogs, the overlays and the layout mode/.test(sectionPart('Views', 'Add')))
+  assert(
+    'views: regions always visible together are a mistake',
+    /several regions that are always visible together.* →.* → mark the layout mode once, with a name from a fixed set, or mark nothing/.test(sectionPart('Views', 'Mistakes'))
+  )
 }
 
 function testMarkedActionsSaysWhichToMarkFirst() {
@@ -245,6 +280,8 @@ testExamplesImportRealSymbols()
 testKnownMistakesAreNamed()
 testFixtureApps()
 testReviewSkillShape()
+testReviewSkillNamesNoCapability()
+testNewPlacesAreInTheirSections()
 testMarkedActionsSaysWhichToMarkFirst()
 testClientInitExamplesPassEveryRequiredField()
 testLabelsTypeIsAnAliasAndExpressExampleMountsWithAppAll()
