@@ -185,7 +185,7 @@ function testFixtureApps() {
   assert('clean-app uses the adapter and views', cleanText.includes('enableReactRouterNavigation(') && cleanText.includes('enableViews()'))
 }
 
-const ALLOWED_SKILL_CODE = ['CAPABILITIES.md', `node_modules/${PACKAGE_NAME}`, 'npx fsl doctor --json']
+const ALLOWED_SKILL_CODE = ['CAPABILITIES.md', `node_modules/${PACKAGE_NAME}`, 'node_modules/.bin/fsl doctor --json']
 
 function testReviewSkillShape() {
   console.log('\nTest: /fsl-review has frontmatter and names nothing a release could change')

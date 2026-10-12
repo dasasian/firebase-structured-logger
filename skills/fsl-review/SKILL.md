@@ -10,10 +10,13 @@ The scope is the app, a folder or a file. If none is given, it is the whole app.
 
 1. Find the installed package. For a folder or a file, walk up from the scope to the first
    `node_modules/@dasasian/firebase-structured-logger`. For the whole app, use the one in the
-   project root, and if another install in the project (such as the Cloud Functions folder) has a different
-   version, name both versions in the proposal. If there is none, say so and stop.
-2. If the scope is the whole app, run `npx fsl doctor --json` in the project root and keep
-   its findings. For a folder or a file, skip this step.
+   project root; if the root has none, look in each folder one level down. If more than one install in
+   the project (such as the Cloud Functions folder) has a different version, name both versions in the
+   proposal. If there is none, say so and stop.
+2. If the scope is the whole app, run `node_modules/.bin/fsl doctor --json`, with the install
+   folder from step 1 in front of the path, from the project root, and keep its findings.
+   Never run it through npx: with no install in the folder, npx reaches for another package. For a folder
+   or a file, skip this step.
 3. Read `CAPABILITIES.md` in that package. It is the only source of what fsl can do, how to
    add it, and what goes wrong. Do not rely on memory of fsl.
 4. Read the code in the scope, and find how it uses fsl today: what it imports from the

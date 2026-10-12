@@ -9,10 +9,13 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`fsl doctor` reports where it found the backend.** `--json` has one new field, `setup.backendFrom`: `"flag"`, `"firebase.json"`, `"search"` or `null`. The Setup line adds "(found by search)" to a backend that the search found, so a person can see the deduction and correct it with `--backend`.
 - **`enableActions()` records marked user actions.** From `@dasasian/firebase-structured-logger/client/actions`, an element marked `data-fsl-action="apply_discount"` becomes an `action` breadcrumb on click, submit (`<form>`) or change (`<select>`, `<input>`, `<textarea>`), with no code per handler, so it also tells repeats apart by path.
 
 ### Changed
 
+- **`fsl doctor` finds the backend by flag, then the `functions` key of `firebase.json`, then a search.** The search looks at the project root and each folder one level down whose `package.json` lists this package, drops a folder that holds a web build, and answers only when the web build is known and one folder is left. With none left the backend is not checked; with several, or with one and no known web build, doctor reports `could-not-check` naming the folders and the flags to pass. `--backend` and `--dist` now work next to a `firebase.json`. A project whose `firebase.json` has a `functions` key gets the same report as before, plus `backendFrom`.
+- **`/fsl-review` and `/fsl-logs` run the `fsl` of the installed package by its path.** `npx fsl` in a folder with no install reaches for another author's package named `fsl`. `/fsl-review` looks one level down when the project root has no install.
 - **`createClientLogFunction()` and `createClientLogHandler()` take no argument when every default fits.** The config was a required parameter, so the shortest correct call was `createClientLogFunction({})`. A call with a config works as before.
 - **The docs moved to `https://fsl.dasasian.com/`.** The README is now a front page with a quick start and a map of the docs, and the npm `homepage` points at the site.
 - **`withLogging` logs what the handler throws, then throws it again.** After the upgrade an app gets new entries: every throw out of a wrapped handler is logged with the request's `functionName`, `userId` and labels, and the caller, the schedule or the task queue gets the same value as before. A handler needs no `try`/`catch` only to log; an error already given to `logError` is not logged twice. A plain `Error` or an error with a status of 500 or more is an `ERROR`; an `HttpsError` with a 4xx code is a `WARNING` with its code and status and no stack. A plain `Error` from a callable now shows as two `ERROR` entries: fsl's, with the labels, and Firebase's own `Unhandled error`.
@@ -25,6 +28,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`fsl doctor` no longer invents a `./functions` folder.** A `firebase.json` with `hosting` and no `functions` key, for an app whose backend runs on Cloud Run, reported `could-not-check` for `./functions` and `callable-without-firebase-functions` for a folder nothing named. `callable-without-firebase-functions` now appears only when `firebase.json` has a `functions` key.
+- **The `duplicate-storage` fix says what a yarn user does.** `yarn dedupe` for yarn 2 and later; yarn 1 has no dedupe command. The `skill-out-of-date` fix names the installed bin by path instead of `npx fsl`.
 - **The Express example answers the browser's preflight.** `CAPABILITIES.md` and the `createHttpLogHandler` doc comment mounted the handler with `app.post`, so Express answered the `OPTIONS` request itself with no CORS headers and a page on another origin was blocked. They now use `app.all`, and a test drives a real Express app to check it.
 - **The labels example compiles.** `CAPABILITIES.md` wrote the labels type as an `interface`, which `initLogger<...>` and `withLogging<...>` reject with TS2344; it is now a `type` alias, and the file lists the interface mistake. Four client examples left out the `releaseId` or the `logFunction` that `initLogger` requires; each now passes both. A typecheck pins the type limit, and a test checks every client `initLogger` example.
 - **`fsl logs attachments` with no bucket names both variables.** The error named `FIREBASE_STORAGE_BUCKET` only; it also reads `VITE_FIREBASE_STORAGE_BUCKET`. The `platform` label's comment now lists the values the client writes.

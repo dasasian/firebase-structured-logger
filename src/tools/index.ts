@@ -28,8 +28,11 @@ Commands:
 
   fsl doctor [--backend=<path>] [--dist=<path>] [--strict] [--json]
       Check the project's setup from disk: how logging, trace ids, Storage and the
-      callable will behave, and any findings. Reads firebase.json when present;
-      otherwise --backend and --dist say where things are.
+      callable will behave, and any findings. The backend folder is --backend, else the
+      functions key of firebase.json, else the one folder (the project root or a folder
+      one level down) whose package.json lists this package and that holds no web build.
+      The web build is --dist, else each hosting.public of firebase.json. When the search
+      cannot pick one folder, doctor reports could-not-check and names the flags to pass.
       --strict  also fail (exit 1) on warnings, not just errors.
       --json    print the same result as JSON instead of the human-readable report.
       Exit code: 0 with no errors, 1 with an error (or a warning under --strict).

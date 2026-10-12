@@ -231,7 +231,9 @@ and is removed. The search answers only when the web build is known and exactly 
 candidate is left; with no known web build, one folder with fsl could be either half. No
 candidate left means the backend is not checked, and doctor does not say that the app has
 none. More than one left, or one with no known web build, is `could-not-check`: the
-message names the folders and the fix names the flag.
+message names the folders and the fix names the flag. A `package.json` the search cannot
+parse, in a folder that is not a web build, is also `could-not-check`: that folder may be
+the backend.
 
 The kind is `firebase` only when the backend folder is the one the `functions` key names,
 so `callable-without-firebase-functions` can appear only when that key is there.
@@ -243,7 +245,10 @@ has fsl, is not in `hosting`, and is the only candidate left is taken for the ba
 **A skill runs the `fsl` of the installed package it found.** `fsl` on npm is another
 author's package, and `npx fsl` in a folder with no local install reaches for that one. A
 project root can be such a folder: an app with `backend/` and `frontend/` and no root
-`package.json` has no install there.
+`package.json` has no install there. So a skill runs the bin by its path,
+`<install folder>/node_modules/.bin/fsl`, which never asks npm anything. `npx --no fsl`
+was tried: in a folder with no install it still asks the registry about the other
+package, and what stops it is that package's shape, not our command.
 
 ## Skills and `fsl logs` are for agents
 

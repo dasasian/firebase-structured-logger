@@ -9,9 +9,14 @@ fsl-version: <version>
 Answer the question with the fewest, smallest queries. `fsl logs` prints one JSON entry per
 line, so narrow with flags before you read anything.
 
+Every `fsl` below is `node_modules/.bin/fsl` of the install: the folder that holds
+`node_modules/@dasasian/firebase-structured-logger` (the project root, or a folder one level
+down), as a path in front of the command, run from the project root. Never run fsl through npx:
+with no install in the folder, npx reaches for another package.
+
 ## 1. Missing or odd logs? Check the setup first
 
-No entries at all, stacks that stay minified, no attachments: run `npx fsl doctor --json`
+No entries at all, stacks that stay minified, no attachments: run `fsl doctor --json`
 before reading logs to explain it. Most of those are setup problems doctor reads off disk.
 
 ## 2. Ask the question
@@ -21,19 +26,19 @@ Add `--local` to ask `.fsl-logs/` instead; the flags and the output are the same
 
 ```
 # One user's story, client and server
-npx fsl logs --where labels.userId=<uid> --since 2h --select timestamp,severity,labels.screen,message
+fsl logs --where labels.userId=<uid> --since 2h --select timestamp,severity,labels.screen,message
 
 # How many errors, per screen, in one release
-npx fsl logs --where severity=ERROR --where labels.releaseId=<sha> --group-by labels.screen --select labels.screen,count --order-by "count desc" --limit 10
+fsl logs --where severity=ERROR --where labels.releaseId=<sha> --group-by labels.screen --select labels.screen,count --order-by "count desc" --limit 10
 
 # What failed just now on this machine
-npx fsl logs --local --where severity=ERROR --since 30m --select timestamp,message,jsonPayload.error.message
+fsl logs --local --where severity=ERROR --since 30m --select timestamp,message,jsonPayload.error.message
 
 # Which values a label takes
-npx fsl logs --distinct labels.screen --since 1d
+fsl logs --distinct labels.screen --since 1d
 
 # Entries whose message contains a word
-npx fsl logs --where message~timeout --since 1d --select timestamp,labels.screen,message --limit 20
+fsl logs --where message~timeout --since 1d --select timestamp,labels.screen,message --limit 20
 ```
 
 Group, count and `--select` before you fetch whole entries: ten lines of counts beat five
@@ -45,22 +50,22 @@ example; an unknown field also suggests the nearest one.
 
 ## 3. Find the labels
 
-`npx fsl logs schema` lists every label the logs carry, with counts and sample values.
+`fsl logs schema` lists every label the logs carry, with counts and sample values.
 For what the code could write that the logs have not shown yet:
 
 - The meaning of the labels fsl writes itself: `BaseLabels` in
   `node_modules/@dasasian/firebase-structured-logger/dist/shared/types.d.ts`.
 - The labels this app adds: grep for `AppLabels`, `setUser(`, `createLogWriter(`,
   `withRequestLogger(`, and the `labels` argument of `.error(`, `.warning(`, `.info(`, `.debug(`.
-- Record one for the next reader: `npx fsl logs schema --add <name> "<meaning>"`.
+- Record one for the next reader: `fsl logs schema --add <name> "<meaning>"`.
 
 ## 4. How often did an error happen?
 
 Never count entries. A repeating error sends a few full copies and then one summary with
-the rest. Take its `labels.repeatKey` and run `npx fsl logs --repeats <repeatKey>`: it prints
+the rest. Take its `labels.repeatKey` and run `fsl logs --repeats <repeatKey>`: it prints
 the copies, the summaries and a last line with the true count.
 
 ## 5. Files an entry saved
 
-When `labels.hasAttachments` is `true`, run `npx fsl logs attachments <labels.logId>`. It
+When `labels.hasAttachments` is `true`, run `fsl logs attachments <labels.logId>`. It
 downloads to `.fsl-logs/attachments/<logId>/` and prints each file's path.

@@ -115,7 +115,7 @@ function testJsonShape() {
   assert('has a numeric exitCode', typeof report.exitCode === 'number')
 
   const setup = report.setup as Record<string, unknown>
-  for (const field of ['kind', 'backend', 'dist', 'logging', 'trace', 'storage', 'callable']) {
+  for (const field of ['kind', 'backend', 'backendFrom', 'dist', 'logging', 'trace', 'storage', 'callable']) {
     assert(`setup has "${field}"`, field in setup, JSON.stringify(setup))
   }
 
@@ -164,7 +164,51 @@ function testJsonCarriesSkillOutOfDate() {
   const findings = (JSON.parse(out.stdout.trim()) as { findings: Array<Record<string, unknown>> }).findings
   const finding = findings.find((f) => f.id === 'skill-out-of-date')
   assert('skill-out-of-date is present', finding !== undefined, JSON.stringify(findings))
-  assert('at warning level, with the install-skills fix', finding?.level === 'warning' && finding?.fix === 'npx fsl install-skills', JSON.stringify(finding))
+  assert('at warning level, with the install-skills fix', finding?.level === 'warning' && typeof finding?.fix === 'string' && finding.fix.includes('node_modules/.bin/fsl install-skills') && !finding.fix.includes('npx'), JSON.stringify(finding))
+  fs.rmSync(root, { recursive: true, force: true })
+}
+
+function hostingOnlySplitProject(): string {
+  const root = tempProject()
+  writeJson(path.join(root, 'firebase.json'), { hosting: [{ public: 'frontend/dist' }, { public: 'frontend/admin-dist' }], firestore: {} })
+  for (const folder of ['backend', 'frontend']) {
+    writeJson(path.join(root, folder, 'package.json'), { name: folder, dependencies: { '@dasasian/firebase-structured-logger': '^1.5.0' } })
+  }
+  fs.mkdirSync(path.join(root, 'frontend', 'dist'), { recursive: true })
+  return root
+}
+
+function testSearchFindsBackendFromTheRootWithNoFlags() {
+  console.log('\nTest: Hosting + Cloud Run layout, no flags: backend from the search, exit 0, in --json and in the report')
+  const root = hostingOnlySplitProject()
+  const json = runCli(root, ['--json'])
+  const parsed = JSON.parse(json.stdout.trim()) as { setup: Record<string, unknown>; findings: unknown[] }
+  assert('exit code is 0', json.status === 0, `status=${json.status} ${json.stdout.slice(0, 300)}`)
+  assert('setup.backendFrom is "search"', parsed.setup.backendFrom === 'search', JSON.stringify(parsed.setup))
+  assert('setup.kind is node and backend ./backend', parsed.setup.kind === 'node' && parsed.setup.backend === './backend')
+  assert('no findings', parsed.findings.length === 0, JSON.stringify(parsed.findings))
+  const human = runCli(root, [])
+  assert('the printed Setup line marks the search', human.stdout.startsWith('Setup: Node — backend in ./backend (found by search), web build in ./frontend/dist'), human.stdout.slice(0, 200))
+  const flagged = JSON.parse(runCli(root, ['--json', '--backend=./backend']).stdout.trim()) as { setup: Record<string, unknown> }
+  assert('with --backend the field is "flag"', flagged.setup.backendFrom === 'flag', JSON.stringify(flagged.setup))
+  fs.rmSync(root, { recursive: true, force: true })
+}
+
+function testFunctionsKeyReportsFirebaseJson() {
+  console.log('\nTest: a functions key and no flags: --json carries backendFrom "firebase.json"')
+  const { root } = cleanFirebaseProject()
+  const parsed = JSON.parse(runCli(root, ['--json']).stdout.trim()) as { setup: Record<string, unknown> }
+  assert('setup.backendFrom is "firebase.json"', parsed.setup.backendFrom === 'firebase.json', JSON.stringify(parsed.setup))
+  fs.rmSync(root, { recursive: true, force: true })
+}
+
+function testAmbiguousSearchExitsOne() {
+  console.log('\nTest: two backend candidates exit 1 and name both')
+  const root = hostingOnlySplitProject()
+  writeJson(path.join(root, 'worker', 'package.json'), { name: 'worker', dependencies: { '@dasasian/firebase-structured-logger': '^1.5.0' } })
+  const out = runCli(root, [])
+  assert('exit code is 1', out.status === 1, `status=${out.status}`)
+  assert('names both folders', out.stdout.includes('./backend') && out.stdout.includes('./worker'), out.stdout.slice(0, 400))
   fs.rmSync(root, { recursive: true, force: true })
 }
 
@@ -177,6 +221,9 @@ function run() {
   testCouldNotCheckAlwaysExitsOne()
   testJsonShape()
   testJsonCarriesLogsInsideFunctionsSource()
+  testSearchFindsBackendFromTheRootWithNoFlags()
+  testFunctionsKeyReportsFirebaseJson()
+  testAmbiguousSearchExitsOne()
   reportResults()
 }
 

@@ -13,7 +13,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { runDoctor, exitCodeFor, checkUnsupportedPeers, type DoctorReport, type DoctorFinding } from '../src/tools/doctor.js'
+import { runDoctor, exitCodeFor, checkUnsupportedPeers, formatDoctorReport, type DoctorReport, type DoctorFinding } from '../src/tools/doctor.js'
 import { RELEASE_MARKER } from '../src/shared/paths.js'
 import { assert, reportResults } from './testHelpers.js'
 
@@ -377,7 +377,7 @@ function testSkillOutOfDateFires() {
   assert('skill-out-of-date fires', finding !== undefined)
   assert('at warning level', finding?.level === 'warning')
   assert('names both versions', !!finding && finding.message.includes('0.0.1') && finding.message.includes(RUNNING_VERSION))
-  assert('fix is install-skills', finding?.fix === 'npx fsl install-skills')
+  assert('fix is install-skills', finding?.fix.includes('node_modules/.bin/fsl install-skills') === true && !finding.fix.includes('npx'), finding?.fix)
   cleanup([root])
 }
 
@@ -442,6 +442,251 @@ function testCloudRunSetupSummary() {
   cleanup([root])
 }
 
+// --- Finding the backend: flag, firebase.json key, search ---
+
+const OWN_PACKAGE_NAME = (JSON.parse(fs.readFileSync('package.json', 'utf-8')) as { name: string }).name
+
+function writeAppPackageJson(dir: string, listedIn: 'dependencies' | 'devDependencies' | 'nowhere', extra: Record<string, unknown> = {}): void {
+  const listing = listedIn === 'nowhere' ? {} : { [listedIn]: { [OWN_PACKAGE_NAME]: '^1.5.0' } }
+  writeJson(path.join(dir, 'package.json'), { name: path.basename(dir), ...listing, ...extra })
+}
+
+function hostingOnlyProject(): string {
+  const root = tempProject()
+  writeJson(path.join(root, 'firebase.json'), {
+    hosting: [{ target: 'app', public: 'frontend/dist' }, { target: 'admin', public: 'frontend/admin-dist' }],
+    firestore: { rules: 'firestore.rules' },
+  })
+  writeAppPackageJson(path.join(root, 'backend'), 'dependencies')
+  writeAppPackageJson(path.join(root, 'frontend'), 'devDependencies')
+  fs.mkdirSync(path.join(root, 'frontend', 'dist'), { recursive: true })
+  fs.mkdirSync(path.join(root, 'frontend', 'admin-dist'), { recursive: true })
+  return root
+}
+
+function testSearchFindsTheBackendBesideAHostingOnlyFirebaseJson() {
+  console.log('\nTest: Hosting-only firebase.json, no flags: the search finds ./backend')
+  const root = hostingOnlyProject()
+  const report = runDoctor({ projectRoot: root })
+  assert('kind is node', report.setup.kind === 'node', report.setup.kind)
+  assert('backend is ./backend', report.setup.backend === './backend', String(report.setup.backend))
+  assert('backendFrom is search', report.setup.backendFrom === 'search', String(report.setup.backendFrom))
+  assert('dist is the first hosting.public', report.setup.dist === './frontend/dist', String(report.setup.dist))
+  assert('no findings at all', report.findings.length === 0, JSON.stringify(report.findings))
+  assert('exit code 0', exitCodeFor(report, false) === 0)
+  cleanup([root])
+}
+
+function testBackendFlagBesideAHostingOnlyFirebaseJson() {
+  console.log('\nTest: Hosting-only firebase.json with --backend: same result, backendFrom is flag')
+  const root = hostingOnlyProject()
+  const report = runDoctor({ projectRoot: root, backend: './backend' })
+  assert('kind is node', report.setup.kind === 'node', report.setup.kind)
+  assert('backend is ./backend', report.setup.backend === './backend')
+  assert('backendFrom is flag', report.setup.backendFrom === 'flag', String(report.setup.backendFrom))
+  assert('no findings at all', report.findings.length === 0, JSON.stringify(report.findings))
+  cleanup([root])
+}
+
+function testBackendFlagBeatsTheFunctionsKey() {
+  console.log('\nTest: a functions key and a --backend naming another folder: the flag\'s folder is checked')
+  const { root } = firebaseProject()
+  writeJson(path.join(root, 'firebase.json'), { functions: { source: 'functions', runtime: 'nodejs18' }, hosting: { public: 'dist' } })
+  writeAppPackageJson(path.join(root, 'server'), 'dependencies', { engines: { node: '18' } })
+  const report = runDoctor({ projectRoot: root, backend: 'server' })
+  const nodeVersion = report.findings.find((f) => f.id === 'node-version')
+  assert('backend is ./server', report.setup.backend === './server', String(report.setup.backend))
+  assert('backendFrom is flag', report.setup.backendFrom === 'flag')
+  assert('kind is node, not firebase', report.setup.kind === 'node', report.setup.kind)
+  assert('the flag folder\'s engines.node is judged', nodeVersion?.message.includes('server') === true, JSON.stringify(report.findings))
+  assert('the key\'s runtime is not applied to it', !report.findings.some((f) => f.message.includes('nodejs18')), JSON.stringify(report.findings))
+  assert('no callable-without-firebase-functions', !findingIds(report).includes('callable-without-firebase-functions'))
+  cleanup([root])
+}
+
+function testFlagNamingTheFunctionsKeyFolderIsStillFirebase() {
+  console.log('\nTest: --backend naming the folder the functions key names is kind firebase')
+  const { root } = firebaseProject()
+  const report = runDoctor({ projectRoot: root, backend: './functions/' })
+  assert('kind is firebase', report.setup.kind === 'firebase', report.setup.kind)
+  assert('backendFrom is flag', report.setup.backendFrom === 'flag')
+  assert('callable is true', report.setup.callable === true)
+  cleanup([root])
+}
+
+function testFunctionsKeyWithoutFlagsKeepsToday() {
+  console.log('\nTest: a functions key and no flags: backendFrom is firebase.json, the rest as before')
+  const { root } = firebaseProject()
+  writeAppPackageJson(path.join(root, 'other'), 'dependencies')
+  const report = runDoctor({ projectRoot: root })
+  assert('backendFrom is firebase.json', report.setup.backendFrom === 'firebase.json', String(report.setup.backendFrom))
+  assert('kind is firebase', report.setup.kind === 'firebase')
+  assert('backend is ./functions even with another folder that lists the package', report.setup.backend === './functions')
+  assert('no findings', report.findings.length === 0, JSON.stringify(report.findings))
+  assert('Setup line is the one of today', formatDoctorReport(report).startsWith('Setup: Firebase — functions in ./functions, web build in ./dist\n'))
+  cleanup([root])
+}
+
+function testFunctionsKeyWithoutSourceNamesFunctionsFolder() {
+  console.log('\nTest: a functions key with no source means ./functions')
+  const { root } = firebaseProject()
+  writeJson(path.join(root, 'firebase.json'), { functions: {}, hosting: { public: 'dist' } })
+  const report = runDoctor({ projectRoot: root })
+  assert('backend is ./functions from firebase.json', report.setup.backend === './functions' && report.setup.backendFrom === 'firebase.json')
+  cleanup([root])
+}
+
+function testCallableFindingNeedsTheFunctionsKey() {
+  console.log('\nTest: callable-without-firebase-functions appears only with a functions key')
+  const searched = hostingOnlyProject()
+  assert('searched backend without firebase-functions: no callable finding', !findingIds(runDoctor({ projectRoot: searched })).includes('callable-without-firebase-functions'))
+  const flagged = hostingOnlyProject()
+  assert('flagged backend without firebase-functions: no callable finding', !findingIds(runDoctor({ projectRoot: flagged, backend: 'backend' })).includes('callable-without-firebase-functions'))
+  const { root, backend } = firebaseProject()
+  fs.rmSync(path.join(backend, 'node_modules', 'firebase-functions'), { recursive: true, force: true })
+  const finding = runDoctor({ projectRoot: root }).findings.find((f) => f.id === 'callable-without-firebase-functions')
+  assert('with the key it fires, and says the file configures functions', finding?.message.startsWith('firebase.json configures functions in ') === true)
+  cleanup([searched, flagged, root])
+}
+
+function testSearchSkipsTheWebFolder() {
+  console.log('\nTest: fsl in the web folder only, web build known: the backend is not checked')
+  const root = hostingOnlyProject()
+  fs.rmSync(path.join(root, 'backend'), { recursive: true, force: true })
+  const report = runDoctor({ projectRoot: root })
+  assert('backend is null', report.setup.backend === null)
+  assert('backendFrom is null', report.setup.backendFrom === null)
+  assert('kind is browser-only', report.setup.kind === 'browser-only', report.setup.kind)
+  assert('no findings', report.findings.length === 0, JSON.stringify(report.findings))
+  assert('exit code 0', exitCodeFor(report, false) === 0)
+  assert('the Setup line says nothing about a missing backend', formatDoctorReport(report).startsWith('Setup: browser only — web build in ./frontend/dist\n'))
+  cleanup([root])
+}
+
+function testTwoCandidatesAreCouldNotCheck() {
+  console.log('\nTest: two candidates left: could-not-check names both, exit 1')
+  const root = hostingOnlyProject()
+  writeAppPackageJson(path.join(root, 'worker'), 'dependencies')
+  const report = runDoctor({ projectRoot: root })
+  const finding = report.findings.find((f) => f.id === 'could-not-check')
+  assert('could-not-check fires as an error', finding?.level === 'error', JSON.stringify(report.findings))
+  assert('names ./backend and ./worker', finding?.message.includes('./backend') === true && finding.message.includes('./worker'), finding?.message)
+  assert('the fix names --backend', finding?.fix.includes('--backend=') === true, finding?.fix)
+  assert('backend is not checked', report.setup.backend === null && report.setup.backendFrom === null)
+  assert('exit code 1', exitCodeFor(report, false) === 1)
+  cleanup([root])
+}
+
+function testOneCandidateAndNoWebBuildIsCouldNotCheck() {
+  console.log('\nTest: one candidate and no known web build: could-not-check names it and both flags, exit 1')
+  const root = tempProject()
+  writeAppPackageJson(path.join(root, 'backend'), 'dependencies')
+  const report = runDoctor({ projectRoot: root })
+  const finding = report.findings.find((f) => f.id === 'could-not-check')
+  assert('could-not-check fires as an error', finding?.level === 'error', JSON.stringify(report.findings))
+  assert('names ./backend', finding?.message.includes('./backend') === true, finding?.message)
+  assert('the fix names --backend and --dist', finding?.fix.includes('--backend=') === true && finding.fix.includes('--dist='), finding?.fix)
+  assert('backend is not taken', report.setup.backend === null)
+  assert('exit code 1', exitCodeFor(report, false) === 1)
+  cleanup([root])
+}
+
+function testNoCandidateAtAllChecksNothingAndSaysNothing() {
+  console.log('\nTest: nothing lists the package: no finding, no backend')
+  const root = tempProject()
+  writeAppPackageJson(path.join(root, 'backend'), 'nowhere')
+  const report = runDoctor({ projectRoot: root })
+  assert('no findings', report.findings.length === 0, JSON.stringify(report.findings))
+  assert('backend is null', report.setup.backend === null && report.setup.backendFrom === null)
+  cleanup([root])
+}
+
+function testSearchLooksOnlyWhereItSaysItLooks() {
+  console.log('\nTest: the search ignores node_modules, dot folders and folders two levels down')
+  const root = hostingOnlyProject()
+  fs.rmSync(path.join(root, 'backend'), { recursive: true, force: true })
+  writeAppPackageJson(path.join(root, 'node_modules', 'vendored'), 'dependencies')
+  writeAppPackageJson(path.join(root, '.cache'), 'dependencies')
+  writeAppPackageJson(path.join(root, 'services', 'api'), 'dependencies')
+  const report = runDoctor({ projectRoot: root })
+  assert('no candidate, so no backend and no finding', report.setup.backend === null && report.findings.length === 0, JSON.stringify(report))
+  cleanup([root])
+}
+
+function testSearchRemovesAFolderHoldingTheWebBuild() {
+  console.log('\nTest: a candidate that is, or contains, the web build folder is the web side')
+  const root = hostingOnlyProject()
+  writeAppPackageJson(root, 'dependencies')
+  const report = runDoctor({ projectRoot: root })
+  assert('the root holds the web build, so ./backend is the one left', report.setup.backend === './backend' && report.setup.backendFrom === 'search', JSON.stringify(report.setup))
+  cleanup([root])
+}
+
+function testSearchWorksWithNoFirebaseJsonWhenDistIsGiven() {
+  console.log('\nTest: no firebase.json, --dist given: the search still finds the backend')
+  const root = tempProject()
+  writeAppPackageJson(path.join(root, 'server'), 'dependencies')
+  writeAppPackageJson(path.join(root, 'web'), 'dependencies')
+  fs.mkdirSync(path.join(root, 'web', 'build'), { recursive: true })
+  const report = runDoctor({ projectRoot: root, dist: 'web/build' })
+  assert('backend is ./server from search', report.setup.backend === './server' && report.setup.backendFrom === 'search', JSON.stringify(report.setup))
+  assert('kind is node', report.setup.kind === 'node')
+  cleanup([root])
+}
+
+function testDistFlagBeatsHosting() {
+  console.log('\nTest: --dist is the web build, and hosting.public is not added to it')
+  const root = hostingOnlyProject()
+  fs.mkdirSync(path.join(root, 'backend', 'public'), { recursive: true })
+  const report = runDoctor({ projectRoot: root, dist: 'backend/public' })
+  assert('dist is the flag\'s', report.setup.dist === './backend/public', String(report.setup.dist))
+  assert('./backend now holds the web build, so ./frontend is the one left', report.setup.backend === './frontend' && report.setup.backendFrom === 'search', JSON.stringify(report.setup))
+  cleanup([root])
+}
+
+function testUnreadablePackageJsonInTheSearchIsCouldNotCheck() {
+  console.log('\nTest: a package.json the search cannot parse is could-not-check, never skipped')
+  const root = hostingOnlyProject()
+  fs.mkdirSync(path.join(root, 'tools'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'tools', 'package.json'), '{ not json')
+  const report = runDoctor({ projectRoot: root })
+  const finding = report.findings.find((f) => f.id === 'could-not-check')
+  assert('could-not-check fires', finding !== undefined, JSON.stringify(report.findings))
+  assert('names ./tools/package.json', finding?.message.includes('./tools/package.json') === true, finding?.message)
+  assert('backend is not taken', report.setup.backend === null)
+  assert('exit code 1', exitCodeFor(report, false) === 1)
+  cleanup([root])
+}
+
+function testUnreadablePackageJsonOfTheWebFolderDoesNotMatter() {
+  console.log('\nTest: a package.json that cannot be parsed in the web folder is not read')
+  const root = hostingOnlyProject()
+  fs.writeFileSync(path.join(root, 'frontend', 'package.json'), '{ not json')
+  const report = runDoctor({ projectRoot: root })
+  assert('backend is ./backend', report.setup.backend === './backend' && report.findings.length === 0, JSON.stringify(report))
+  cleanup([root])
+}
+
+function testSetupLineMarksOnlyASearchedBackend() {
+  console.log('\nTest: the Setup line marks a backend the search found, and no other')
+  const searched = hostingOnlyProject()
+  const flagged = hostingOnlyProject()
+  assert('searched: marked', formatDoctorReport(runDoctor({ projectRoot: searched })).startsWith('Setup: Node — backend in ./backend (found by search), web build in ./frontend/dist\n'))
+  assert('flagged: not marked', formatDoctorReport(runDoctor({ projectRoot: flagged, backend: 'backend' })).startsWith('Setup: Node — backend in ./backend, web build in ./frontend/dist\n'))
+  cleanup([searched, flagged])
+}
+
+function testDuplicateStorageFixNamesYarn() {
+  console.log('\nTest: the duplicate-storage fix says what a yarn user does')
+  const { root, backend } = firebaseProject()
+  writePackage(backend, '@google-cloud/storage', '8.2.0')
+  writePackage(path.join(backend, 'node_modules', 'firebase-admin'), '@google-cloud/storage', '7.22.0')
+  const fix = runDoctor({ projectRoot: root }).findings.find((f) => f.id === 'duplicate-storage')?.fix ?? ''
+  assert('names npm dedupe', fix.includes('npm dedupe'), fix)
+  assert('names yarn dedupe for yarn 2 and later, and yarn 1', fix.includes('yarn 2 and later: yarn dedupe') && fix.includes('yarn 1'), fix)
+  cleanup([root])
+}
+
 function run() {
   testMapsPublishedFires()
   testMapsPublishedQuiet()
@@ -474,6 +719,25 @@ function run() {
   testSkillCheckNeedsNothingInNodeModules()
   testFirebaseSetupSummary()
   testCloudRunSetupSummary()
+  testSearchFindsTheBackendBesideAHostingOnlyFirebaseJson()
+  testBackendFlagBesideAHostingOnlyFirebaseJson()
+  testBackendFlagBeatsTheFunctionsKey()
+  testFlagNamingTheFunctionsKeyFolderIsStillFirebase()
+  testFunctionsKeyWithoutFlagsKeepsToday()
+  testFunctionsKeyWithoutSourceNamesFunctionsFolder()
+  testCallableFindingNeedsTheFunctionsKey()
+  testSearchSkipsTheWebFolder()
+  testTwoCandidatesAreCouldNotCheck()
+  testOneCandidateAndNoWebBuildIsCouldNotCheck()
+  testNoCandidateAtAllChecksNothingAndSaysNothing()
+  testSearchLooksOnlyWhereItSaysItLooks()
+  testSearchRemovesAFolderHoldingTheWebBuild()
+  testSearchWorksWithNoFirebaseJsonWhenDistIsGiven()
+  testDistFlagBeatsHosting()
+  testUnreadablePackageJsonInTheSearchIsCouldNotCheck()
+  testUnreadablePackageJsonOfTheWebFolderDoesNotMatter()
+  testSetupLineMarksOnlyASearchedBackend()
+  testDuplicateStorageFixNamesYarn()
   reportResults()
 }
 

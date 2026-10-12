@@ -22,6 +22,7 @@ export type LoggingPath = 'firebase-functions' | 'stdout' | 'none'
 export type TraceSource = 'trigger' | 'header' | 'none'
 export type StoragePath = 'firebase-admin' | 'google-cloud-storage' | 'none'
 export type FindingLevel = 'error' | 'warning'
+export type BackendFrom = 'flag' | 'firebase.json' | 'search'
 
 export type FindingId =
   | 'maps-published'
@@ -37,6 +38,7 @@ export type FindingId =
 export interface DoctorSetup {
   kind: SetupKind
   backend: string | null
+  backendFrom: BackendFrom | null
   dist: string | null
   logging: LoggingPath
   trace: TraceSource
@@ -113,34 +115,130 @@ function hostingPublicDirs(hosting: FirebaseHostingConfig | FirebaseHostingConfi
   return configs.map((c) => c.public).filter((p): p is string => typeof p === 'string')
 }
 
-/**
- * Determine the setup this project has, from `firebase.json` when present, or from
- * `--backend`/`--dist` otherwise. `dist` here is "the folder hosting serves" — under
- * Firebase that is `hosting.public`; outside Firebase it is whatever `--dist` names.
- */
-function detectSetup(options: DoctorOptions, findings: DoctorFinding[]): { kind: SetupKind; backendDir: string | null; distDirs: string[] } {
+interface DetectedSetup {
+  kind: SetupKind
+  backendDir: string | null
+  backendFrom: BackendFrom | null
+  distDirs: string[]
+}
+
+interface BackendSearchResult {
+  backendDir: string | null
+  finding: DoctorFinding | null
+}
+
+type PackageListing = 'listed' | 'not-listed' | 'unreadable'
+
+function listingOfOwnPackage(folder: string, ownPackageName: string): PackageListing {
+  const read = readPackageJson(folder)
+  if (!read.ok) return read.reason === 'missing' ? 'not-listed' : 'unreadable'
+  const listed = [read.pkg.dependencies, read.pkg.devDependencies].some(
+    (dependencies) => typeof dependencies === 'object' && dependencies !== null && ownPackageName in dependencies,
+  )
+  return listed ? 'listed' : 'not-listed'
+}
+
+function searchFolders(projectRoot: string): string[] {
+  const children = fs
+    .readdirSync(projectRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name !== 'node_modules' && !entry.name.startsWith('.'))
+    .map((entry) => path.join(projectRoot, entry.name))
+    .sort()
+  return [projectRoot, ...children]
+}
+
+function holdsWebBuild(folder: string, distDirs: string[]): boolean {
+  return distDirs.some((dist) => dist === folder || dist.startsWith(folder + path.sep))
+}
+
+function searchBackend(projectRoot: string, distDirs: string[]): BackendSearchResult {
+  const ownPackageName = readOwnPackageJson().name as string
+  const candidates: string[] = []
+  for (const folder of searchFolders(projectRoot)) {
+    if (holdsWebBuild(folder, distDirs)) continue
+    const listing = listingOfOwnPackage(folder, ownPackageName)
+    if (listing === 'unreadable') {
+      const shown = displayPath(projectRoot, folder)
+      return {
+        backendDir: null,
+        finding: couldNotCheck(
+          `${shown}/package.json could not be parsed as JSON, so doctor cannot tell whether ${shown} is the backend.`,
+          `Fix the syntax error in ${shown}/package.json, or pass --backend=<folder>.`,
+        ),
+      }
+    }
+    if (listing === 'listed') candidates.push(folder)
+  }
+  if (candidates.length === 0) return { backendDir: null, finding: null }
+
+  const shown = candidates.map((folder) => displayPath(projectRoot, folder))
+  if (distDirs.length === 0) {
+    return {
+      backendDir: null,
+      finding: couldNotCheck(
+        `${shown.join(' and ')} ${shown.length === 1 ? 'lists' : 'list'} ${ownPackageName}, but no web build folder is known, so doctor cannot tell the backend from the web app.`,
+        `Pass --backend=<folder> for the backend (${shown.join(' or ')}) and --dist=<folder> for the web build.`,
+      ),
+    }
+  }
+  if (candidates.length > 1) {
+    return {
+      backendDir: null,
+      finding: couldNotCheck(
+        `${shown.join(' and ')} each list ${ownPackageName} and hold no web build, so doctor cannot tell which is the backend.`,
+        `Pass --backend=<folder>, one of: ${shown.join(', ')}.`,
+      ),
+    }
+  }
+  return { backendDir: candidates[0], finding: null }
+}
+
+function functionsKeyDir(projectRoot: string, config: FirebaseJson): string | null {
+  if (config.functions === undefined) return null
+  return path.resolve(projectRoot, firstOf(config.functions)?.source ?? 'functions')
+}
+
+function detectSetup(options: DoctorOptions, findings: DoctorFinding[]): DetectedSetup {
   const firebaseJson = readFirebaseJson(options.projectRoot)
 
   if (firebaseJson.ok === false) {
     findings.push(firebaseJson.finding)
-    return { kind: 'firebase', backendDir: null, distDirs: [] }
+    return { kind: 'firebase', backendDir: null, backendFrom: null, distDirs: [] }
   }
 
-  if (firebaseJson.ok === true) {
-    const functionsConfig = firstOf(firebaseJson.config.functions)
-    const backend = functionsConfig?.source ?? 'functions'
-    const distDirs = hostingPublicDirs(firebaseJson.config.hosting)
-    return {
-      kind: 'firebase',
-      backendDir: path.resolve(options.projectRoot, backend),
-      distDirs: distDirs.map((d) => path.resolve(options.projectRoot, d)),
+  const config: FirebaseJson = firebaseJson.ok === true ? firebaseJson.config : {}
+  const inRoot = (folder: string) => path.resolve(options.projectRoot, folder)
+  const distDirs = options.dist ? [inRoot(options.dist)] : hostingPublicDirs(config.hosting).map(inRoot)
+  const keyDir = functionsKeyDir(options.projectRoot, config)
+
+  let backendDir: string | null = null
+  let backendFrom: BackendFrom | null = null
+  if (options.backend) {
+    backendDir = inRoot(options.backend)
+    backendFrom = 'flag'
+  } else if (keyDir !== null) {
+    backendDir = keyDir
+    backendFrom = 'firebase.json'
+  } else {
+    const found = searchBackend(options.projectRoot, distDirs)
+    if (found.finding) findings.push(found.finding)
+    if (found.backendDir) {
+      backendDir = found.backendDir
+      backendFrom = 'search'
     }
   }
 
-  const backendDir = options.backend ? path.resolve(options.projectRoot, options.backend) : null
-  const distDirs = options.dist ? [path.resolve(options.projectRoot, options.dist)] : []
-  const kind: SetupKind = backendDir && distDirs.length ? 'node' : backendDir ? 'backend-only' : distDirs.length ? 'browser-only' : 'backend-only'
-  return { kind, backendDir, distDirs }
+  const kind: SetupKind =
+    backendDir !== null && backendDir === keyDir
+      ? 'firebase'
+      : backendDir && distDirs.length
+        ? 'node'
+        : backendDir
+          ? 'backend-only'
+          : distDirs.length
+            ? 'browser-only'
+            : 'backend-only'
+  return { kind, backendDir, backendFrom, distDirs }
 }
 
 function findMapFiles(dir: string): string[] {
@@ -261,7 +359,7 @@ function checkDuplicateStorage(backendDir: string | null, findings: DoctorFindin
     id: 'duplicate-storage',
     level: 'warning',
     message: `${copies.length} copies of @google-cloud/storage (${placed.join(', ')})`,
-    fix: 'npm dedupe',
+    fix: 'npm dedupe; yarn 2 and later: yarn dedupe; yarn 1 has no dedupe command, so remove the extra copy from yarn.lock and run yarn install',
   })
 }
 
@@ -430,7 +528,7 @@ function checkSkillsOutOfDate(projectRoot: string, runningVersion: string, findi
       id: 'skill-out-of-date',
       level: 'warning',
       message: `.claude/skills/${skill.name} was installed by fsl ${skill.version}; this is fsl ${runningVersion}.`,
-      fix: 'npx fsl install-skills',
+      fix: 'Run install-skills with the installed package\'s bin: <install folder>/node_modules/.bin/fsl install-skills',
     })
   }
 }
@@ -450,16 +548,17 @@ function resolveStorage(searchDirs: string[]): StoragePath {
 
 function describeSetup(
   projectRoot: string,
-  detected: { kind: SetupKind; backendDir: string | null; distDirs: string[] },
+  detected: DetectedSetup,
   searchDirs: string[],
   callable: boolean,
 ): DoctorSetup {
-  const { kind, backendDir, distDirs } = detected
+  const { kind, backendDir, backendFrom, distDirs } = detected
   const hasFirebaseFunctions = backendDir !== null && findTopLevelVersion([backendDir], 'firebase-functions') !== undefined
   const onFunctions = kind === 'firebase' && hasFirebaseFunctions
   return {
     kind,
     backend: backendDir ? displayPath(projectRoot, backendDir) : null,
+    backendFrom,
     dist: distDirs[0] ? displayPath(projectRoot, distDirs[0]) : null,
     logging: onFunctions ? 'firebase-functions' : backendDir ? 'stdout' : 'none',
     trace: onFunctions ? 'trigger' : backendDir ? 'header' : 'none',
@@ -470,10 +569,11 @@ function describeSetup(
 
 export function runDoctor(options: DoctorOptions): DoctorReport {
   const findings: DoctorFinding[] = []
-  const { kind, backendDir, distDirs } = detectSetup(options, findings)
+  const detected = detectSetup(options, findings)
+  const { kind, backendDir, distDirs } = detected
 
   const firebaseJson = readFirebaseJson(options.projectRoot)
-  const firebaseRuntime = firebaseJson.ok === true ? firstOf(firebaseJson.config.functions)?.runtime : undefined
+  const firebaseRuntime = firebaseJson.ok === true && kind === 'firebase' ? firstOf(firebaseJson.config.functions)?.runtime : undefined
 
   checkMapsPublished(options.projectRoot, firebaseJson.ok === true ? firebaseJson.config.hosting : undefined, distDirs, findings)
   checkNodeVersion(backendDir, firebaseRuntime, findings)
@@ -489,7 +589,7 @@ export function runDoctor(options: DoctorOptions): DoctorReport {
   checkEmbeddedMapsWithoutRelease(backendDir, findings)
   checkSkillsOutOfDate(options.projectRoot, ownPkg.version as string, findings)
 
-  const setup = describeSetup(options.projectRoot, { kind, backendDir, distDirs }, searchDirs, callable)
+  const setup = describeSetup(options.projectRoot, detected, searchDirs, callable)
 
   const hasError = findings.some((f) => f.level === 'error')
   const exitCode = hasError ? 1 : 0
@@ -533,10 +633,11 @@ const STORAGE_LABEL: Record<StoragePath, string> = {
 export function formatDoctorReport(report: DoctorReport): string {
   const { setup, findings } = report
   const backendNoun = setup.kind === 'firebase' ? 'functions' : 'backend'
+  const backendPlace = `${setup.backend}${setup.backendFrom === 'search' ? ' (found by search)' : ''}`
   const location = setup.backend && setup.dist
-    ? `${backendNoun} in ${setup.backend}, web build in ${setup.dist}`
+    ? `${backendNoun} in ${backendPlace}, web build in ${setup.dist}`
     : setup.backend
-      ? `backend in ${setup.backend}`
+      ? `backend in ${backendPlace}`
       : setup.dist
         ? `web build in ${setup.dist}`
         : 'nothing to check — pass --backend and/or --dist'
