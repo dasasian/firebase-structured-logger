@@ -339,11 +339,47 @@ not a cost.
 **`fsl logs` sends a condition to the server only when it surely means the same there.**
 A label key nobody has confirmed (not in `BaseLabels`, `schema.json` or the entries read)
 stays client-side: a typo sent to Cloud Logging returns zero entries and leaves nothing to
-compare the key against, and the "Did you mean" error would never fire. `gcloud logging read`
-signs in with `gcloud auth login`, not application-default credentials. The bucket for
+compare the key against, and the "Did you mean" error would never fire. The bucket for
 `attachments` comes from `--bucket` or `FIREBASE_STORAGE_BUCKET`, the variable
 `upload-sourcemaps` reads: `firebase.json` holds no bucket name, and doctor's rule is to
 read only what a file's fixed format says.
+
+**`fsl logs` reads the entries fsl wrote, unless `--all` asks for every line.** The scan
+stops at 5000 entries, and on Cloud Run a service's own request lines fill it: a question
+over seven days was answered from the last day, and `schema` showed two labels. So the
+filter asks Cloud Logging for entries that carry the `appId` label, which every entry fsl
+writes has. `--all` reads every line of the service, for the failure where fsl wrote
+nothing: out of memory, a crash at startup. A query that finds nothing says that `--all`
+exists, because that is the moment an agent needs it. When the scan stopped at its limit
+and nothing matched, the answer is "not known", never "0 matched": the tool read the
+newest entries only.
+
+**A word `fsl logs` does not know is an error.** `schema` and `attachments` come directly
+after `logs`. A word anywhere else was ignored, so `fsl logs --local schema` ran a plain
+query and printed "0 entries matched", which reads as an empty schema. The error shows the
+correct form, as the errors for an unknown flag and an unknown field do.
+
+**The tools sign in with a key file when one is named, and then with nothing else.** The
+name is `GOOGLE_APPLICATION_CREDENTIALS`, Google's own, a path to a key file; the tools
+load `.env.local`, so an app writes it once. `fsl upload-sourcemaps` passes the file to
+the Storage library. `fsl logs` starts `gcloud`, which ignores that name, so it hands the
+file to its `gcloud` process alone through `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE`; the
+person's own `gcloud` login is not touched. With no key file named, `gcloud logging read`
+signs in with `gcloud auth login`, not application-default credentials.
+
+The key wins: a tool that was given a key never falls back to the personal login. A
+fallback hides the real fault (the last error is about the login, not the key), works on
+one machine and fails on the next, and lets a person's account do an upload that was
+meant for the service account. So a key that may not read logs is one error that names the
+role, `roles/logging.viewer`, and a path to a file that is not there is an error from the
+tool that reads it, never a silent use of another account. Doctor has no check for the
+key: no key file is a correct setup, and a role cannot be read from disk.
+
+Only a path. The key as text in a variable has no standard name, and `gcloud` takes a
+file, so fsl would write a secret to disk on every run. No flag either: the line in
+`.env.local` is written once, and a flag is typed on every command.
+`FIREBASE_SERVICE_ACCOUNT_PATH` is the deprecated name for the same path. It still works,
+warns once, and wins when both are set, which is what `upload-sourcemaps` did before.
 
 **`fsl logs schema` keeps two kinds of knowledge apart.** `fromLogs` is what the logs
 show — keys, counts, up to three sample values — and `--refresh` rewrites it. `fromCode`
