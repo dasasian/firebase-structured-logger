@@ -80,8 +80,8 @@ it and in `productionOutput`, so no attachment upload can reach real Storage wit
 machine's credentials.
 
 `entrySize` runs with the flag unset too — the 90 KiB shrink-and-warn path lives entirely
-in `writeLog`'s production branch; the emulator branch writes to a local file with no
-line-length ceiling, so there is nothing there to test. It reuses `storageChain`'s
+in `writeLog`'s production branch; the local file has no line-length ceiling, so there is
+nothing there to test. It reuses `storageChain`'s
 `Module._load` hook for the "no Storage at all" case, and `productionOutput`'s closed-port
 `STORAGE_EMULATOR_HOST` so the overflow upload fails fast instead of reaching real Storage.
 One case needs the failure itself — it asserts the failed upload names the overflow
@@ -114,8 +114,14 @@ Three support modules, not suites themselves:
 label and fails on a key `BaseLabels` does not declare. `BaseLabels` is what `fsl logs`
 validates `--where labels.<key>` against and what the shipped `.d.ts` tells an agent fsl
 writes, so a new label gets a field and a one-line comment there in the same change.
-`logsLocal` runs with `FUNCTIONS_EMULATOR=true` because it reads files the emulator branch
-really wrote.
+`logsLocal` runs with `FUNCTIONS_EMULATOR=true` because the emulator's default severity floor
+is DEBUG and it writes an INFO entry; it reads files the logger really wrote.
+
+`localLogFile` is the suite for the rule in "The backend writes the local log file in
+development only". The logger reads `FUNCTIONS_EMULATOR`, `K_SERVICE` and `NODE_ENV` when its
+module loads, so each case starts `localLogFileApp` as a child process with the environment
+under test and compares the file and the printed bytes. It strips those three variables from
+the parent's environment first, so it passes under any `NODE_ENV`.
 
 `errorPayload` is the parity suite: the client and functions loggers must build an identical
 `ErrorPayload`. They share `src/shared/error.ts` now, but they drifted once before.

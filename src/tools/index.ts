@@ -48,7 +48,8 @@ Commands:
 
   fsl logs [--where field=value]... [--select a,b] [--group-by f] [--order-by "f desc"]
            [--limit N] [--distinct f] [--since 1h] [--local] [--project <id>] [--repeats <repeatKey>]
-      Read production logs (through gcloud logging read) or, with --local, .fsl-logs/*.jsonl.
+      Read production logs (through gcloud logging read) or, with --local, .fsl-logs/*.jsonl,
+      the file the backend writes in development when initLogger has logLocalDir.
       One JSON entry per line. --where operators: = != >= <= ~ (contains). --limit is 100 by
       default, 1000 at most; a cut result says on stderr how many more there were.
       --select with no value lists the fields. Project: --project, else .firebaserc.

@@ -1,6 +1,6 @@
 ---
 name: fsl-logs
-description: Answer a question from an app's logs with `fsl logs` — production through gcloud, or the emulator's local files. Use when asked what happened to a user, which screen or release fails most, how often an error really happened, or to fetch the files an entry saved.
+description: Answer a question from an app's logs with `fsl logs` — production through gcloud, or the local file the backend writes in development. Use when asked what happened to a user, which screen or release fails most, how often an error really happened, or to fetch the files an entry saved.
 fsl-version: <version>
 ---
 
@@ -22,7 +22,8 @@ before reading logs to explain it. Most of those are setup problems doctor reads
 ## 2. Ask the question
 
 Production needs `gcloud` signed in and a project (`--project <id>`, or `.firebaserc`).
-Add `--local` to ask `.fsl-logs/` instead; the flags and the output are the same.
+Add `--local` to ask `.fsl-logs/` instead, the file the backend writes in development
+(the Functions emulator or any dev server); the flags and the output are the same.
 
 ```
 # One user's story, client and server

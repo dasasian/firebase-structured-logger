@@ -442,7 +442,7 @@ test('logs the probe', async () => {
 
 ### Gives
 - `initLogger` for the backend, then `logInfo`, `logWarn`, `logError`, `logDebug` writing the same entry shape as the client.
-- In the emulator, entries go to `{logLocalDir}/dev.jsonl` instead of Cloud Logging.
+- With `logLocalDir` set, a development process writes entries to `{logLocalDir}/dev.jsonl`, which `fsl logs --local` reads: in the Functions emulator instead of Cloud Logging, on any other server besides the normal output. A process is in development when `K_SERVICE` is unset and `NODE_ENV` is not `production`. With no `logLocalDir`, no file is written.
 
 ### Fits when
 - `functions/` directory with `firebase.json` containing `"functions"`.
@@ -462,6 +462,7 @@ logError(err, { orderId })
 
 ### Mistakes
 - `logLocalDir` set to a folder inside the Functions source folder → the emulator restarts on every entry and a deploy uploads the files → point it outside, for example `'../.fsl-logs'`; `fsl doctor` reports `logs-inside-functions-source`.
+- `initLogger({ logLocalDir })` in a live server that is not on Cloud Run or Cloud Functions, with `NODE_ENV` not `production` → `K_SERVICE` is unset there, so the server counts as development and writes `dev.jsonl` on the live machine → start the live server with `NODE_ENV=production`, or pass `logLocalDir` only when `NODE_ENV` is not `production`.
 - `initLogger(` missing in the functions entry file → the backend logger is not configured → call it at module load.
 - `initLogger` imported from `/client` inside `functions/` → wrong half → import from `/functions`.
 - `console.log(` left in handlers beside `logInfo(` → unstructured lines, no labels → replace with `logInfo(`.
