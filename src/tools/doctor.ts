@@ -176,7 +176,7 @@ function searchBackend(projectRoot: string, distDirs: string[]): BackendSearchRe
     return {
       backendDir: null,
       finding: couldNotCheck(
-        `These folders list ${ownPackageName} in package.json: ${shown.join(', ')}. No web build folder is known, so doctor cannot tell the backend from the web app.`,
+        `Folders that list ${ownPackageName} in package.json (${shown.join(', ')}). No web build folder is known, so doctor cannot tell the backend from the web app.`,
         `Pass --dist=<web build folder>, so the search can tell the halves apart, or --backend=<folder> to name the backend (candidates: ${shown.join(', ')}).`,
       ),
     }
@@ -185,7 +185,7 @@ function searchBackend(projectRoot: string, distDirs: string[]): BackendSearchRe
     return {
       backendDir: null,
       finding: couldNotCheck(
-        `These folders list ${ownPackageName} in package.json and hold no web build: ${shown.join(', ')}. Doctor cannot tell which is the backend.`,
+        `Folders that list ${ownPackageName} in package.json and hold no web build (${shown.join(', ')}). Doctor cannot tell which is the backend.`,
         `Pass --backend=<folder>, one of: ${shown.join(', ')}.`,
       ),
     }

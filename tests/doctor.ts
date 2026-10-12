@@ -603,7 +603,7 @@ function testRootCandidateMessageStartsWithWords() {
   const root = tempProject()
   writeAppPackageJson(root, 'dependencies')
   const finding = runDoctor({ projectRoot: root }).findings.find((f) => f.id === 'could-not-check')
-  assert('could-not-check fires and names .', finding?.message.includes(': .') === true, finding?.message)
+  assert('could-not-check fires and names .', finding?.message.includes('(.)') === true, finding?.message)
   assert('message and fix start with words, not a path', startsWithWords(finding?.message) && startsWithWords(finding?.fix), finding?.message)
   cleanup([root])
 }
