@@ -203,6 +203,9 @@ export const bc = {
     warnDeprecated('bc.error', 'bc.handledError')
     addBreadcrumb('error', type, data)
   },
-  /** An error your code handled and chose not to log — a clue if something else goes wrong. */
+  /**
+   * An error your code handled and chose not to log — a clue if something else goes wrong.
+   * Not for an error you log: the logger adds an `error` breadcrumb for each error it sends.
+   */
   handledError: (type: string, data?: Record<string, unknown>) => addBreadcrumb('error', type, data),
 }

@@ -185,6 +185,11 @@ export class Logger<
     addBreadcrumb(type, name, data)
   }
 
+  /**
+   * Sends the error. When the entry is sent, the logger also adds an `error` breadcrumb named with
+   * its `errorType`, with no data, so the trail of every later entry shows it. An error the rate
+   * limiter counts as a duplicate or refuses adds none.
+   */
   error(
     raw: unknown,
     labels?: Partial<AppLabels & BaseLabels>,
@@ -243,8 +248,8 @@ export class Logger<
    * that does nothing, a total that comes out wrong, the wrong data rendered —
    * none of them throw, so none are captured, and you hear about them weeks
    * later. Feedback is the capture mechanism for that whole class, and it is
-   * actionable only because the breadcrumb trail is already in memory when the
-   * user hits send: "the discount didn't apply" is a complaint, the same
+   * actionable only because the breadcrumb trail, errors logged before it included, is
+   * already in memory when the user hits send: "the discount didn't apply" is a complaint, the same
    * sentence plus the trail is a reproduction.
    *
    * Exempt from the severity floor and the rate limiter: both control events the
@@ -325,6 +330,9 @@ export class Logger<
       allLabels.repeatKey = keyJoiningFullCopiesToTheirRepeatSummary
     }
 
+    const trailBeforeThisEntry = getLastBreadcrumbs(MAX_BREADCRUMBS)
+    if (error) addBreadcrumb('error', allLabels.errorType ?? 'UnknownError')
+
     try {
       let base64Attachments: Record<string, string> | undefined
       if (attachments && Object.keys(attachments).length > 0) {
@@ -340,7 +348,7 @@ export class Logger<
         severity,
         labels: allLabels,
         jsonPayload: {
-          breadcrumbs: getLastBreadcrumbs(MAX_BREADCRUMBS),
+          breadcrumbs: trailBeforeThisEntry,
           context,
           error,
         },

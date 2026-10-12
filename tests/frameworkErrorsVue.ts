@@ -100,6 +100,11 @@ async function testComponentErrorReachesTheHandlerOnce() {
   const entry = capture.entries[0]
   assert('it is an ERROR with errorType VueError', entry?.severity === 'ERROR' && entry?.labels.errorType === 'VueError', JSON.stringify(entry?.labels))
   assert('the message is the error message', entry?.message === 'component exploded', entry?.message)
+  const { sendFeedback } = await import('../src/client/logger.js')
+  sendFeedback('the page crashed')
+  await capture.settled()
+  const feedbackErrorCrumbs = (capture.entries[1]?.jsonPayload?.breadcrumbs ?? []).filter((crumb) => crumb.type === 'error').map((crumb) => crumb.name)
+  assert('feedback sent after the component error holds a VueError breadcrumb', JSON.stringify(feedbackErrorCrumbs) === '["VueError"]', JSON.stringify(feedbackErrorCrumbs))
   const info = (entry?.jsonPayload?.context as { info?: string } | undefined)?.info
   assert('Vue\'s info is in context', typeof info === 'string' && info.length > 0, String(info))
 }
@@ -141,6 +146,9 @@ async function testRouterErrors() {
     await pushIgnoringRejection(router, '/lazy')
     await capture.settled()
   })
+  const errorCrumbsBeforeLazy = (capture.entries[1]?.jsonPayload?.breadcrumbs ?? []).filter((crumb) => crumb.type === 'error').map((crumb) => crumb.name)
+  assert('the lazy route entry\'s trail holds the guard error that came before it, named RouteError', JSON.stringify(errorCrumbsBeforeLazy) === '["RouteError"]', JSON.stringify(errorCrumbsBeforeLazy))
+  assert('the guard error\'s own entry holds no error breadcrumb', (guard?.jsonPayload?.breadcrumbs ?? []).every((crumb) => crumb.type !== 'error'))
   assert('the lazy route -> one more entry', capture.entries.length === 2 && capture.entries[1]?.message === 'chunk failed to load', capture.entries.map((e) => e.message).join(' | '))
 
   await pushIgnoringRejection(router, '/refused')

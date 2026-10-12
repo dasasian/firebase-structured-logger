@@ -154,6 +154,16 @@ function testKnownMistakesAreNamed() {
   }
 }
 
+function testTheLoggerAddsTheErrorBreadcrumbAndTheTextsSayWhy() {
+  console.log('\nTest: the logger adds an error breadcrumb, and Breadcrumbs and Feedback say so')
+  const handledErrorLine = mistakesOf(/^Breadcrumbs$/).split('\n').find((line) => line.includes('bc.handledError(` next to `logger.error('))
+  assert('the handledError next to logger.error line exists', handledErrorLine !== undefined)
+  assert('it gives the reason that the trail shows the error twice', handledErrorLine?.includes('the trail shows the error twice') === true, handledErrorLine)
+  assert('it does not say the logs hold it in time order', handledErrorLine?.includes('time order') === false, handledErrorLine)
+  assert('Breadcrumbs Gives names the error breadcrumb the logger adds', sectionPart('Breadcrumbs', 'Gives').includes('An `error` breadcrumb, named with the entry\'s `errorType`'))
+  assert('Feedback Gives says the trail shows the errors logged before it', sectionPart('Feedback', 'Gives').includes('shows the errors logged before it'))
+}
+
 function readTree(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = path.join(dir, entry.name)
@@ -278,6 +288,7 @@ testSectionShape()
 testSectionsStandAlone()
 testExamplesImportRealSymbols()
 testKnownMistakesAreNamed()
+testTheLoggerAddsTheErrorBreadcrumbAndTheTextsSayWhy()
 testFixtureApps()
 testReviewSkillShape()
 testReviewSkillNamesNoCapability()

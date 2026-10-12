@@ -122,6 +122,11 @@ async function testRenderErrorReachesOnlyOnCaughtError(label: string, major: Rou
   assert('the message is the error message', entry?.message === 'render exploded', entry?.message)
   const componentStack = (entry?.jsonPayload?.context as { componentStack?: string } | undefined)?.componentStack
   assert('it carries a componentStack', typeof componentStack === 'string' && componentStack.length > 0, String(componentStack))
+  const { sendFeedback } = await import('../src/client/logger.js')
+  sendFeedback('the page crashed')
+  await capture.settled()
+  const feedbackErrorCrumbs = (capture.entries[1]?.jsonPayload?.breadcrumbs ?? []).filter((crumb) => crumb.type === 'error').map((crumb) => crumb.name)
+  assert('feedback sent after the render error holds a ReactError breadcrumb', JSON.stringify(feedbackErrorCrumbs) === '["ReactError"]', JSON.stringify(feedbackErrorCrumbs))
   assert('it carries the page labels', entry?.labels.route === '/crash' && entry?.labels.screen === 'Crash' && entry?.labels.path === '/crash', JSON.stringify(entry?.labels))
 
   await React.act(async () => root.unmount())
@@ -180,6 +185,9 @@ async function testLoaderErrors(label: string, major: RouterModule) {
     assert('a loader that throws a 404 -> one more entry, the first error is not logged again', capture.entries.length === 2, String(capture.entries.length))
     const missing = capture.entries[1]
     assert('the 404 is a WARNING with errorType RouteError', missing?.severity === 'WARNING' && missing?.labels.errorType === 'RouteError', JSON.stringify(missing))
+    const errorCrumbsBefore404 = (missing?.jsonPayload?.breadcrumbs ?? []).filter((crumb) => crumb.type === 'error').map((crumb) => crumb.name)
+    assert('the 404 entry\'s trail holds the loader error that came before it, named RouteError', JSON.stringify(errorCrumbsBefore404) === '["RouteError"]', JSON.stringify(errorCrumbsBefore404))
+    assert('the loader error\'s own entry holds no error breadcrumb', (failure?.jsonPayload?.breadcrumbs ?? []).every((crumb) => crumb.type !== 'error'))
     assert('the 404 carries its page labels', missing?.labels.route === '/missing' && missing?.labels.screen === 'Missing', JSON.stringify(missing?.labels))
 
     await React.act(async () => router.navigate('/down'))
