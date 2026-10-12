@@ -66,8 +66,10 @@ export interface HttpLogHandlerConfig extends ClientLogHandlerConfig {
    * Value for `Access-Control-Allow-Origin`. Defaults to `*`, matching
    * `createClientLogFunction`'s `cors: true`.
    *
-   * A browser cannot send credentials to a wildcard origin, so name your origins
-   * if the gate above reads a cookie. A bearer token in a header is unaffected.
+   * A gate that reads a cookie works only when the page and this handler are on the
+   * same origin. The handler never sends `Access-Control-Allow-Credentials`, so a
+   * browser blocks a request that carries a cookie to another origin, whatever this
+   * value is. Across origins, send a bearer token in a header.
    */
   allowOrigin?: string
 }

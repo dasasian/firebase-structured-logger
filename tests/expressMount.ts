@@ -59,6 +59,12 @@ async function runAgainstDocumentedMount(): Promise<void> {
       String(preflight.headers.get('access-control-allow-headers')),
     )
 
+    assert(
+      'and no Access-Control-Allow-Credentials, so a cookie works on the same origin only',
+      preflight.headers.get('access-control-allow-credentials') === null,
+      String(preflight.headers.get('access-control-allow-credentials')),
+    )
+
     console.log('\nTest: POST and GET still behave')
     const posted = await fetch(url, {
       method: 'POST',
@@ -66,6 +72,7 @@ async function runAgainstDocumentedMount(): Promise<void> {
       body: JSON.stringify({ message: 'hello', severity: 'INFO', labels: { appId: 'express-app' } }),
     })
     assert('POST answers 204', posted.status === 204, `got ${posted.status}`)
+    assert('POST sends no Access-Control-Allow-Credentials', posted.headers.get('access-control-allow-credentials') === null)
     const got = await fetch(url, { method: 'GET' })
     assert('GET answers 405', got.status === 405, `got ${got.status}`)
   } finally {
