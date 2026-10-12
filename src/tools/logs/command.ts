@@ -8,9 +8,11 @@ import {
   ATTACHMENT_FLAGS, DEFAULT_SINCE, MAX_LIMIT, QUERY_FLAGS, SCHEMA_FLAGS, UsageError,
   buildQuery, fieldListText, parseFlags, parseLabelAdditions, parseSince, type ParsedFlags,
 } from './flags.js'
-import { GcloudError, readCloudEntries, runGcloud, type CloudEntryReader, type GcloudRunner } from './gcloud.js'
+import { KeyFileError, resolveKeyFile } from '../keyFile.js'
+import { GcloudError, explainGcloudFailure, readCloudEntries, runGcloud, signInEnvironment, type CloudEntryReader, type GcloudRunner } from './gcloud.js'
 import { redact, resolveBucket, resolveProjectId } from './project.js'
 import { runQuery, type Query } from './query.js'
+import { refuseStrayWordInAttachments, refuseStrayWordInQuery, refuseStrayWordInSchema } from './strayWord.js'
 import {
   SCHEMA_ENTRY_LIMIT, SCHEMA_WINDOW, formatSchema, isFresh, readSchemaCache, schemaFromEntries, writeSchemaCache,
   type SchemaCache, type SchemaSource,
@@ -57,12 +59,19 @@ interface FetchRequest {
 async function fetchEntries(flags: ParsedFlags, deps: LogsDependencies, request: FetchRequest): Promise<Fetched> {
   if (flags.switches.has('local')) return fetchLocalEntries(deps, request)
   const projectId = resolveProjectId(flags.values.project?.[0], deps.cwd)
-  const filter = buildCloudFilter({ since: request.since, where: request.query.where, knownLabelKeys: request.knownLabelKeys, repeatKey: request.repeatKey })
+  const keyFile = resolveKeyFile(deps.env, deps.cwd)
+  const filter = buildCloudFilter({
+    since: request.since,
+    where: request.query.where,
+    knownLabelKeys: request.knownLabelKeys,
+    repeatKey: request.repeatKey,
+    includeLinesFslDidNotWrite: flags.switches.has('all'),
+  })
   try {
-    const raw = await deps.readCloudEntries({ projectId, filter, limit: request.scanLimit })
+    const raw = await deps.readCloudEntries({ projectId, filter, limit: request.scanLimit, childEnvironment: signInEnvironment(keyFile) })
     return { entries: raw.map(normalizeCloudEntry), hitScanCap: raw.length >= request.scanLimit }
   } catch (error) {
-    if (error instanceof GcloudError) throw new GcloudError(redact(error.message, [projectId]))
+    if (error instanceof GcloudError) throw new GcloudError(explainGcloudFailure(redact(error.message, [projectId]), keyFile, 'roles/logging.viewer'))
     throw error
   }
 }
@@ -81,14 +90,27 @@ function fetchLocalEntries(deps: LogsDependencies, request: FetchRequest): Fetch
 function printResult(rows: unknown[], moreRows: number, hitScanCap: boolean, deps: LogsDependencies): void {
   for (const row of rows) deps.printLine(JSON.stringify(row))
   if (moreRows > 0) deps.printErrorLine(`truncated: ${rows.length} shown, ${moreRows} more. Narrow with --where or raise --limit (max ${MAX_LIMIT}).`)
-  if (hitScanCap) deps.printErrorLine(`scanned: only the newest ${MAX_CLOUD_ENTRIES} entries in the window were read. Narrow with --since or --where.`)
+  if (hitScanCap && rows.length > 0) deps.printErrorLine(`scanned: only the newest ${MAX_CLOUD_ENTRIES} entries in the window were read. Narrow with --since or --where.`)
+}
+
+function windowText(sinceText: string): string {
+  return /^\d+[mhd]$/.test(sinceText) ? `in the last ${sinceText}` : `since ${sinceText}`
+}
+
+function describeNotKnown(sinceText: string): string {
+  return `Not known whether anything matched ${windowText(sinceText)}: the scan stopped at the newest ${MAX_CLOUD_ENTRIES} entries and none of them matched; older entries were not read. Narrow with --since or --where.`
 }
 
 function describeNoMatch(flags: ParsedFlags, query: Query, sinceText: string): string {
   const noun = query.groupBy.length > 0 || query.distinct !== undefined ? 'groups' : 'entries'
   const place = flags.switches.has('local') ? ` in ${LOCAL_LOG_DIR}/*.jsonl` : ''
-  const window = /^\d+[mhd]$/.test(sinceText) ? `in the last ${sinceText}` : `since ${sinceText}`
-  return `0 ${noun} matched${place} ${window}.`
+  return `0 ${noun} matched${place} ${windowText(sinceText)}.`
+}
+
+function describeNothingFound(flags: ParsedFlags, query: Query, sinceText: string, scanWasCut: boolean): string {
+  const finding = scanWasCut ? describeNotKnown(sinceText) : describeNoMatch(flags, query, sinceText)
+  const readOnlyFslLines = !flags.switches.has('local') && !flags.switches.has('all')
+  return readOnlyFslLines ? `${finding} --all also reads lines fsl did not write.` : finding
 }
 
 function schemaLabelKeys(cache: SchemaCache): string[] {
@@ -97,6 +119,10 @@ function schemaLabelKeys(cache: SchemaCache): string[] {
 
 async function runQueryCommand(argv: string[], deps: LogsDependencies): Promise<void> {
   const flags = parseFlags(argv, QUERY_FLAGS)
+  refuseStrayWordInQuery(flags)
+  if (flags.switches.has('all') && flags.switches.has('local')) {
+    throw new UsageError(`--all and --local cannot be combined: --all reads every line of the service in Cloud Logging, and --local reads ${LOCAL_LOG_DIR}/*.jsonl, which holds only fsl's entries.\nDrop one of them.`)
+  }
   const cache = readSchemaCache(deps.cwd)
   const knownLabelKeys = knownLabelKeysFrom(schemaLabelKeys(cache))
   if (flags.presentWithoutValue.has('select')) {
@@ -112,27 +138,29 @@ async function runQueryCommand(argv: string[], deps: LogsDependencies): Promise<
   checkFields(query, knownLabelKeysFrom(knownLabelKeys, keysInData))
 
   if (repeatKey !== undefined) {
-    printRepeats(fetched, query, repeatKey, deps)
+    printRepeats(fetched, query, repeatKey, sinceText, deps)
     return
   }
   const { rows, moreRows } = runQuery(fetched.entries, query)
   printResult(rows, moreRows, fetched.hitScanCap, deps)
-  if (rows.length === 0) deps.printErrorLine(describeNoMatch(flags, query, sinceText))
+  if (rows.length === 0) deps.printErrorLine(describeNothingFound(flags, query, sinceText, fetched.hitScanCap))
 }
 
-function printRepeats(fetched: Fetched, query: Query, repeatKey: string, deps: LogsDependencies): void {
+function printRepeats(fetched: Fetched, query: Query, repeatKey: string, sinceText: string, deps: LogsDependencies): void {
   const related = fetched.entries.filter((entry) => entry.labels.repeatKey === repeatKey || entry.labels.repeatOf === repeatKey)
   const copies = related.filter((entry) => entry.labels.repeatKey === repeatKey && entry.labels.repeatOf === undefined)
   const summaries = related.filter((entry) => entry.labels.repeatOf === repeatKey)
   const counted = summaries.reduce((total, entry) => total + Number(entry.labels.repeatCount ?? 0), 0)
   const { rows, moreRows } = runQuery(related, query)
   printResult(rows, moreRows, fetched.hitScanCap, deps)
+  if (rows.length === 0 && fetched.hitScanCap) deps.printErrorLine(describeNotKnown(sinceText))
   deps.printLine(JSON.stringify({ repeatKey, trueCount: copies.length + counted, fullCopies: copies.length, summaries: summaries.length, countedInSummaries: counted }))
 }
 
 async function runSchemaCommand(argv: string[], deps: LogsDependencies): Promise<void> {
   const { additions, rest } = parseLabelAdditions(argv)
   const flags = parseFlags(rest, SCHEMA_FLAGS)
+  refuseStrayWordInSchema(flags)
   const cache = readSchemaCache(deps.cwd)
   for (const { name, meaning } of additions) cache.fromCode[name] = meaning ? { meaning } : {}
   for (const name of flags.values.remove ?? []) delete cache.fromCode[name]
@@ -155,9 +183,11 @@ async function runSchemaCommand(argv: string[], deps: LogsDependencies): Promise
 async function runAttachmentsCommand(argv: string[], deps: LogsDependencies): Promise<void> {
   const flags = parseFlags(argv, ATTACHMENT_FLAGS)
   const logId = checkLogId(flags.positionals[0])
+  refuseStrayWordInAttachments(flags)
   const bucket = resolveBucket(flags.values.bucket?.[0], deps.env)
-  const { names, folder } = await downloadAttachments(deps.runGcloud, bucket, logId, deps.cwd).catch((error: unknown) => {
-    if (error instanceof GcloudError) throw new GcloudError(redact(error.message, [bucket]))
+  const keyFile = resolveKeyFile(deps.env, deps.cwd)
+  const { names, folder } = await downloadAttachments(deps.runGcloud, bucket, logId, deps.cwd, signInEnvironment(keyFile)).catch((error: unknown) => {
+    if (error instanceof GcloudError) throw new GcloudError(explainGcloudFailure(redact(error.message, [bucket]), keyFile, 'read access to the bucket (roles/storage.objectViewer)'))
     throw error
   })
   if (names.length === 0) deps.printErrorLine(`No attachments for ${logId}.`)
@@ -173,7 +203,7 @@ export async function runLogs(argv: string[], deps: LogsDependencies = defaultLo
     else await runQueryCommand(argv, deps)
     return 0
   } catch (error) {
-    if (error instanceof UsageError || error instanceof GcloudError) {
+    if (error instanceof UsageError || error instanceof GcloudError || error instanceof KeyFileError) {
       deps.printErrorLine(error.message)
       return 1
     }

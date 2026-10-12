@@ -21,7 +21,9 @@ before reading logs to explain it. Most of those are setup problems doctor reads
 
 ## 2. Ask the question
 
-Production needs `gcloud` signed in and a project (`--project <id>`, or `.firebaserc`).
+Production needs `gcloud` and a project (`--project <id>`, or `.firebaserc`). `gcloud` signs in with
+the person's `gcloud auth login`, or with a service-account key file when `GOOGLE_APPLICATION_CREDENTIALS`
+names one (a `.env.local` is loaded). If the sign-in fails, read the error: it says which of the two to fix.
 Add `--local` to ask `.fsl-logs/` instead, the file the backend writes in development
 (the Functions emulator or any dev server); the flags and the output are the same.
 
@@ -38,6 +40,9 @@ fsl logs --local --where severity=ERROR --since 30m --select timestamp,message,j
 # Which values a label takes
 fsl logs --distinct labels.screen --since 1d
 
+# A failure where fsl wrote nothing (out of memory, a crash at startup): every line of the service
+fsl logs --all --where severity=ERROR --since 1h
+
 # Entries whose message contains a word
 fsl logs --where message~timeout --since 1d --select timestamp,labels.screen,message --limit 20
 ```
@@ -45,6 +50,11 @@ fsl logs --where message~timeout --since 1d --select timestamp,labels.screen,mes
 Group, count and `--select` before you fetch whole entries: ten lines of counts beat five
 thousand lines of entries. Whole entries carry stacks and breadcrumbs; ask for them for one
 entry at a time.
+
+`fsl logs` reads the entries fsl wrote. A query that finds nothing says so on stderr and names `--all`,
+which reads every line of the service; use it only when the failure is one fsl cannot have written.
+A line that starts "Not known" means the scan stopped at its limit and found nothing: narrow with
+`--since` or `--where`, and never read it as "nothing happened".
 
 If a command fails, read the error. It lists the valid flags or fields and shows an
 example; an unknown field also suggests the nearest one.

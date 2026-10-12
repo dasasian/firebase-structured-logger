@@ -24,6 +24,7 @@ export interface Run {
   stderr: string[]
   cloudRequests: CloudReadRequest[]
   gcloudCalls: string[][]
+  gcloudChildEnvironments: Array<Record<string, string> | undefined>
 }
 
 export function tempProject(): string {
@@ -58,14 +59,15 @@ export async function runFsl(
   argv: string[],
   options: { cwd: string; cloud?: CloudLoggingEntry[]; gcloudOutput?: (args: string[]) => string; env?: NodeJS.ProcessEnv },
 ): Promise<Run> {
-  const result: Run = { code: -1, stdout: [], stderr: [], cloudRequests: [], gcloudCalls: [] }
+  const result: Run = { code: -1, stdout: [], stderr: [], cloudRequests: [], gcloudCalls: [], gcloudChildEnvironments: [] }
   const deps: LogsDependencies = {
     readCloudEntries: async (request) => {
       result.cloudRequests.push(request)
       return options.cloud ?? []
     },
-    runGcloud: async (args) => {
+    runGcloud: async (args, childEnvironment) => {
       result.gcloudCalls.push(args)
+      result.gcloudChildEnvironments.push(childEnvironment)
       return options.gcloudOutput?.(args) ?? ''
     },
     now: () => FIXED_NOW,

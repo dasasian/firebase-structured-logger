@@ -8,6 +8,7 @@ export interface CloudFilterInput {
   where: Condition[]
   knownLabelKeys: ReadonlySet<string>
   repeatKey?: string
+  includeLinesFslDidNotWrite?: boolean
 }
 
 function quoted(value: string): string {
@@ -16,6 +17,10 @@ function quoted(value: string): string {
 
 function labelEquals(key: string, value: string): string {
   return `(labels.${key}=${quoted(value)} OR jsonPayload.labels.${key}=${quoted(value)})`
+}
+
+function carriesLabel(key: string): string {
+  return `(labels.${key}:* OR jsonPayload.labels.${key}:*)`
 }
 
 function asIsoTime(value: string): string | undefined {
@@ -45,10 +50,12 @@ function serverSideTerm(condition: Condition, knownLabelKeys: ReadonlySet<string
  * certain to mean the same thing there as it does in `runQuery`; a label key nobody has
  * confirmed is left to `runQuery`, because a typo pushed to the server returns zero
  * entries and nothing to compare the key against.
+ * Unless `includeLinesFslDidNotWrite` is set, only entries that carry the `appId` label are asked for.
  */
 export function buildCloudFilter(input: CloudFilterInput): string {
   const resource = `(${RESOURCE_TYPES.map((type) => `resource.type="${type}"`).join(' OR ')})`
   const terms = [resource, 'NOT logName:"cloudaudit.googleapis.com"', `timestamp>=${quoted(input.since.toISOString())}`]
+  if (!input.includeLinesFslDidNotWrite) terms.push(carriesLabel('appId'))
   if (input.repeatKey !== undefined) {
     terms.push(`(${labelEquals('repeatKey', input.repeatKey)} OR ${labelEquals('repeatOf', input.repeatKey)})`)
   }

@@ -4,7 +4,7 @@ import { makeSelfIgnoringFolder } from '../../shared/ignoredFolder.js'
 import { ATTACHMENT_PREFIX } from '../../shared/paths.js'
 import { LOCAL_LOG_DIR } from './entry.js'
 import { UsageError } from './flags.js'
-import type { GcloudRunner } from './gcloud.js'
+import type { ChildEnvironment, GcloudRunner } from './gcloud.js'
 
 const LOG_ID_PATTERN = /^[A-Za-z0-9]+$/
 
@@ -25,13 +25,13 @@ export interface DownloadedAttachments {
 }
 
 /** Lists `logAttachments/<logId>/` in the bucket and copies it to `.fsl-logs/attachments/<logId>/`, both through `gcloud storage`. */
-export async function downloadAttachments(run: GcloudRunner, bucket: string, logId: string, cwd: string): Promise<DownloadedAttachments> {
+export async function downloadAttachments(run: GcloudRunner, bucket: string, logId: string, cwd: string, childEnvironment?: ChildEnvironment): Promise<DownloadedAttachments> {
   const source = `gs://${bucket}/${ATTACHMENT_PREFIX}/${logId}`
-  const listing = await run(['storage', 'ls', `${source}/`])
+  const listing = await run(['storage', 'ls', `${source}/`], childEnvironment)
   const names = listing.split('\n').map((line) => line.trim()).filter(Boolean).map((url) => url.slice(url.lastIndexOf('/') + 1))
   const folder = attachmentFolder(cwd, logId)
   makeSelfIgnoringFolder(path.join(cwd, LOCAL_LOG_DIR))
   fs.mkdirSync(folder, { recursive: true })
-  if (names.length > 0) await run(['storage', 'cp', `${source}/*`, folder])
+  if (names.length > 0) await run(['storage', 'cp', `${source}/*`, folder], childEnvironment)
   return { names, folder }
 }

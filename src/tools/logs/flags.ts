@@ -17,6 +17,7 @@ export const QUERY_FLAGS: FlagSpec = {
   local: 'switch',
   project: 'value',
   repeats: 'value',
+  all: 'switch',
 }
 
 export const SCHEMA_FLAGS: FlagSpec = {

@@ -6,6 +6,7 @@ import { installSkills } from './installSkills'
 import { runDoctor, exitCodeFor, formatDoctorReport } from './doctor'
 import { warnDeprecated } from '../shared/deprecate'
 import { runLogs } from './logs/command'
+import { KeyFileError } from './keyFile'
 
 const [, , command, ...rawArgs] = process.argv
 
@@ -23,7 +24,9 @@ Commands:
                backend with no bucket. Only the deployed release can then be symbolicated.
       --prefix Cloud Storage prefix to upload under (default sourcemaps/). Must match
                createClientLogHandler({ sourceMaps: { prefix } }) or maps are not found.
-      Authenticates via FIREBASE_SERVICE_ACCOUNT_PATH if set, otherwise uses ADC.
+      Signs in with the key file named by GOOGLE_APPLICATION_CREDENTIALS if set, otherwise with
+      application-default credentials. A named file that is not there is an error.
+      FIREBASE_SERVICE_ACCOUNT_PATH is the deprecated name for the same path and wins when both are set.
       Release ID is required: --release, else VITE_RELEASE_ID, else RELEASE_ID.
 
   fsl doctor [--backend=<path>] [--dist=<path>] [--strict] [--json]
@@ -47,16 +50,21 @@ Commands:
       stderr what it left, and exits 1.
 
   fsl logs [--where field=value]... [--select a,b] [--group-by f] [--order-by "f desc"]
-           [--limit N] [--distinct f] [--since 1h] [--local] [--project <id>] [--repeats <repeatKey>]
-      Read production logs (through gcloud logging read) or, with --local, .fsl-logs/*.jsonl,
-      the file the backend writes in development when initLogger has logLocalDir.
+           [--limit N] [--distinct f] [--since 1h] [--local] [--project <id>] [--repeats <repeatKey>] [--all]
+      Read the entries fsl wrote in production (through gcloud logging read) or, with --local,
+      .fsl-logs/*.jsonl, the file the backend writes in development when initLogger has logLocalDir.
+      --all reads every line of the service instead, for a failure where fsl wrote nothing; it
+      cannot be combined with --local.
+      Signs in with the key file named by GOOGLE_APPLICATION_CREDENTIALS if set (the service account
+      needs roles/logging.viewer), otherwise with your own gcloud auth login.
       One JSON entry per line. --where operators: = != >= <= ~ (contains). --limit is 100 by
       default, 1000 at most; a cut result says on stderr how many more there were.
       --select with no value lists the fields. Project: --project, else .firebaserc.
   fsl logs schema [--refresh] [--add name [meaning]]... [--remove name] [--json] [--local]
       Every label key in the last 500 entries of the last 7 days, with counts and samples.
   fsl logs attachments <logId> [--bucket <name>]
-      Download an entry's files to .fsl-logs/attachments/<logId>/ through gcloud storage.
+      Download an entry's files to .fsl-logs/attachments/<logId>/ through gcloud storage, signed in
+      as above (the key file's account needs read access to the bucket).
 
 
 `
@@ -169,6 +177,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err)
+  console.error(err instanceof KeyFileError ? err.message : err)
   process.exit(1)
 })

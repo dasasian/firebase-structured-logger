@@ -25,6 +25,7 @@ function testRootHelpForms() {
     const run = runCli(tempProject(), [form])
     assert(`${form}: exit 0`, run.status === 0, `${run.status} ${run.stderr}`)
     assert(`${form}: prints the usage`, run.stdout.includes('firebase-structured-logger (fsl)') && run.stdout.includes('fsl install-skills'))
+    assert(`${form}: logs help names --all and the key file`, run.stdout.includes('[--all]') && run.stdout.includes('GOOGLE_APPLICATION_CREDENTIALS') && run.stdout.includes('FIREBASE_SERVICE_ACCOUNT_PATH is the deprecated name'), run.stdout)
     assert(`${form}: nothing on stderr`, run.stderr === '', run.stderr)
   }
 }

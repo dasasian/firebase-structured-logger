@@ -1,6 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { Storage } from '@google-cloud/storage'
+import { resolveKeyFile } from './keyFile.js'
 import { RELEASE_MARKER, bundleNameOf, embeddedDir, storageMapPath } from '../shared/paths.js'
 
 /**
@@ -144,11 +145,6 @@ function removeMapsBrowsersCouldServe(mapFiles: string[]): void {
   }
 }
 
-function keyFileOrApplicationDefaultCredentials(): { keyFilename?: string } {
-  const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH
-  return serviceAccountPath && fs.existsSync(serviceAccountPath) ? { keyFilename: serviceAccountPath } : {}
-}
-
 function warnThisReleaseHasOnlyTheEmbeddedCopy(releaseId: string, err: unknown): void {
   console.warn(`[fsl] GCS upload FAILED for release ${releaseId}.`)
   console.warn('[fsl] GCS error:', (err as Error)?.message ?? err)
@@ -190,6 +186,8 @@ export async function uploadSourceMaps(options: UploadOptions): Promise<{ upload
     )
   }
 
+  const keyFile = options.bucket ? resolveKeyFile(process.env) : undefined
+
   if (mapFiles.length === 0) {
     console.log('[fsl] No .map files found in', distDir)
     return { uploaded: true }
@@ -210,7 +208,7 @@ export async function uploadSourceMaps(options: UploadOptions): Promise<{ upload
     return { uploaded: true }
   }
 
-  const storage = new Storage(keyFileOrApplicationDefaultCredentials())
+  const storage = new Storage(keyFile ? { keyFilename: keyFile.path } : {})
   const bucket = storage.bucket(options.bucket)
 
   try {
