@@ -434,6 +434,36 @@ function writeShrunkEntryAndSaveFull(finishedEntry: Record<string, unknown>, log
   warnOverBudget(overflowBucket ? overflowPath : undefined);
 }
 
+function appendToLocalLogFile(
+  payload: LogPayload & { functionName?: string; requestId?: string },
+  severity: LogSeverity,
+  labels: Record<string, unknown>,
+): void {
+  if (!globalConfig?.logLocalDir) return;
+  try {
+    const entry = {
+      timestamp: new Date().toISOString(),
+      severity,
+      message: payload.message,
+      labels,
+      jsonPayload: payload.jsonPayload,
+      ...(payload.functionName ? { functionName: payload.functionName } : {}),
+      ...(payload.requestId ? { requestId: payload.requestId } : {}),
+    };
+    const maxRecords = globalConfig.logMaxRecordsPerFile ?? 2000;
+    const maxRotated = globalConfig.logMaxRotatedFiles ?? 5;
+    if (currentRecordCount >= maxRecords) {
+      rotateLogFile(globalConfig.logLocalDir, maxRotated);
+      currentRecordCount = 0;
+    }
+    const logFile = path.join(globalConfig.logLocalDir, LOG_FILENAME);
+    fs.appendFileSync(logFile, JSON.stringify(entry) + "\n", "utf-8");
+    currentRecordCount++;
+  } catch (err) {
+    console.warn("[fsl] Failed to write to log file:", err);
+  }
+}
+
 /**
  * Write a structured log entry. Transport depends on environment.
  *
@@ -482,32 +512,7 @@ export function writeLog(
   }
 
   if (IS_EMULATOR) {
-    if (globalConfig?.logLocalDir) {
-      try {
-        const entry = {
-          timestamp: new Date().toISOString(),
-          severity,
-          message: payload.message,
-          labels,
-          jsonPayload: payload.jsonPayload,
-          ...(payload.functionName
-            ? { functionName: payload.functionName }
-            : {}),
-          ...(payload.requestId ? { requestId: payload.requestId } : {}),
-        };
-        const maxRecords = globalConfig.logMaxRecordsPerFile ?? 2000;
-        const maxRotated = globalConfig.logMaxRotatedFiles ?? 5;
-        if (currentRecordCount >= maxRecords) {
-          rotateLogFile(globalConfig.logLocalDir, maxRotated);
-          currentRecordCount = 0;
-        }
-        const logFile = path.join(globalConfig.logLocalDir, LOG_FILENAME);
-        fs.appendFileSync(logFile, JSON.stringify(entry) + "\n", "utf-8");
-        currentRecordCount++;
-      } catch (err) {
-        console.warn("[fsl] Failed to write to log file:", err);
-      }
-    }
+    appendToLocalLogFile(payload, severity, labels);
 
     FIREBASE_FUNCTIONS_CONSOLE_MAPPING[severity](
       `[${severity}] ${payload.message}`,
