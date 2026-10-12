@@ -297,6 +297,19 @@ subagents — is an ordinary request to their agent, not the skill's business. I
 `fsl doctor` only when the scope is the whole project; doctor checks the setup, and the
 setup has nothing to say about `src/checkout`.
 
+**The review lists what the code has before it decides where a capability fits.** The
+"Fits when" lines of `CAPABILITIES.md` are words to search for, and an agent that has a
+word list searches the list and stops: an app with hand-made overlays has none of the
+words. So the review first lists what is in the scope, each component file and each block
+that is rendered on a condition, and then decides for each item which capability covers
+it, or none. The words help to find places; they are not the limit of the search. The
+proposal says in one line what was read, so the owner can see what was not looked for.
+
+**Before the review proposes to remove code, it reads the comments at that place.** A
+line that matches a Mistakes pattern can be there for a reason the pattern does not know.
+When the code says why it is there, the proposal gives both sides and does not call the
+removal a fix.
+
 **Where a capability fits many places, the proposal is by user flow and ends with a
 question.** The review can see where a mark fits; only the owner knows which flows matter,
 and a mark on everything fills the trail with small clicks. So the proposal groups the
