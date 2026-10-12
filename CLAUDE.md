@@ -271,6 +271,13 @@ the Mistakes line about it stays true. And `createHttpLogHandler` is mounted wit
 the handler answers the browser's `OPTIONS` request itself, and under `app.post` Express
 answers it first, with no CORS headers, so the browser blocks every log from another origin.
 
+**Every deprecated name is a Mistakes line.** The review knows a deprecated name only
+through `CAPABILITIES.md`; the run-time warning and the `@deprecated` tag need a person at
+a console or an editor. So each name has a line with its replacement, in the section a
+reader of that code is in, and a test joins the list the deprecation tests use to those
+lines: a new deprecation with no line fails. Doctor reads no source code and has no check
+for this.
+
 **A comment names no README section and no page of the site.** Doc comments reach apps
 through the `.d.ts` files, and agents read them there; a section can be cut and a page
 address can change. A comment says by itself what a caller must know.
