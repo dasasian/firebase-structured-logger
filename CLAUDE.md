@@ -217,6 +217,34 @@ A check that cannot run is the error `could-not-check`, never a pass: expo-docto
 exited 0 when it could not read its config, and CI went green on projects nobody
 checked. The finding ids and `--json` fields are public API from 1.0.
 
+**Doctor finds each half of the app in a fixed order, and the first answer wins.** The
+backend folder: `--backend`; then the `functions` key of `firebase.json`; then a search;
+then no answer. The web build: `--dist`; then each `hosting.public`; then no answer. A
+flag wins because a person typed it. `firebase.json` answers only for a key it holds: a
+file with `hosting` and no `functions` key names a web build and no backend, which is a
+Hosting app whose backend runs on Cloud Run.
+
+The search is a deduction from two files with a fixed format, never from source code. The
+candidates are the project root and each folder one level down whose `package.json` lists
+this package as a dependency. A candidate that holds a web build folder is the web side
+and is removed. The search answers only when the web build is known and exactly one
+candidate is left; with no known web build, one folder with fsl could be either half. No
+candidate left means the backend is not checked, and doctor does not say that the app has
+none. More than one left, or one with no known web build, is `could-not-check`: the
+message names the folders and the fix names the flag.
+
+The kind is `firebase` only when the backend folder is the one the `functions` key names,
+so `callable-without-firebase-functions` can appear only when that key is there.
+`setup.backendFrom` says which step answered (`flag`, `firebase.json`, `search`), and the
+Setup line marks a backend that the search found, so a person can see the deduction and
+correct it with `--backend`. The search has one case it gets wrong: a second web app that
+has fsl, is not in `hosting`, and is the only candidate left is taken for the backend.
+
+**A skill runs the `fsl` of the installed package it found.** `fsl` on npm is another
+author's package, and `npx fsl` in a folder with no local install reaches for that one. A
+project root can be such a folder: an app with `backend/` and `frontend/` and no root
+`package.json` has no install there.
+
 ## Skills and `fsl logs` are for agents
 
 The skills and the CLI are read by a coding agent far more often than by a person, and
