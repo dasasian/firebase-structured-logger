@@ -49,7 +49,11 @@ The receiving end is `createClientLogFunction` or `createHttpLogHandler` from `@
 - `createApp(` without `app.config.errorHandler` → Vue's component errors are not logged → assign `app.config.errorHandler = handleVueError`.
 - A second `new Logger(` or a second `initLogger(` expected to be independent → the client logger is one session singleton → call `initLogger` once and import the returned logger.
 - `logger.info(` expected in production logs with no `minSeverity: 'INFO'` → the default floor in production is `WARNING` on the client and on the function → set `minSeverity` on both sides.
-- `minLogLevel`, `bucketName`, `triggerTestLog(`, `rateLimitOptions.sessionLimit`, `refillPerMinute`, `errorReserve` → renamed in 1.0, removed in 2.0 → use `minSeverity`, `bucket`, `sendTestLog`, `burstLimit`, `rechargeSecondsPerLog`, `reservedForErrors`.
+- `minLogLevel:` in an `initLogger(` config → deprecated, removed in 2.0 → `minSeverity`.
+- `sessionLimit:` in `rateLimitOptions` → deprecated, removed in 2.0 → `burstLimit`.
+- `refillPerMinute:` in `rateLimitOptions` → deprecated, removed in 2.0 → `rechargeSecondsPerLog` (`60 / refillPerMinute`).
+- `errorReserve:` in `rateLimitOptions` → deprecated, removed in 2.0 → `reservedForErrors`, a count rather than a share (`Math.round(errorReserve * burstLimit)`).
+- `triggerTestLog(` → deprecated, removed in 2.0 → `sendTestLog`.
 - No call to `sendTestLog` ever made → nothing proves the round trip → wire `sendTestLog()` to a dev-only button and look for `labels.errorType="fsl-verify"`.
 
 ## Breadcrumbs
@@ -78,7 +82,7 @@ bc.handledError('draft_save_failed', { attempt: 1 })
 - `bc.error(` → deprecated, removed in 2.0 → `bc.handledError(` and only for an error that was handled and not logged.
 - `bc.handledError(` next to `logger.error(` for the same error → the logger already adds an `error` breadcrumb for each error it sends, so the trail shows the error twice → remove the breadcrumb.
 - `bc.action('x', { email, token, card })` → breadcrumb `data` is written to the logs verbatim → record the step, not the data.
-- `bc.nav(` anywhere → deprecated; ignored when navigation is on → remove it; navigation records pages.
+- `bc.nav(` anywhere → deprecated, removed in 2.0; ignored when navigation is on → `enableNavigation()`, or `navigatedTo()` without URL routing.
 
 ## Navigation
 
@@ -120,7 +124,7 @@ enableNavigation()
 
 ### Mistakes
 - `bc.nav(` while an adapter or `enableNavigation()` is on → records the same page twice, so fsl ignores it and warns → delete the call.
-- `setScreen(` or `logger.setScreen(` while navigation is on → same, ignored with a warning → delete the call and name the screen with `handle: { screen }` (React Router) or the route `name` (Vue Router).
+- `setScreen(` or `logger.setScreen(` → deprecated, removed in 2.0; while navigation is on it is ignored with a warning → `enableNavigation()`, or `navigatedTo()` without URL routing; delete the call and name the screen with `handle: { screen }` (React Router) or the route `name` (Vue Router).
 - A `<Navigate>` redirect with a hand-written `bc.action(` or `navigatedTo(` beside it → the adapter already records the page that holds the `<Navigate>` and the page it ends on, so the hand-written call adds a third breadcrumb → delete the call.
 - Per-route hand-written `navigatedTo(` calls in an app with a router → the adapter already sees every route change → use the adapter and remove them.
 - Route errors expected from `<BrowserRouter>` or `enableNavigation()` → they have no loaders or actions, so there is nothing to log → use a data router (`createBrowserRouter`) with the adapter.
@@ -300,7 +304,7 @@ The Vite config needs `build: { sourcemap: true }`.
 - `.map` files left in the folder hosting serves → the source code is public → run `fsl upload-sourcemaps` before deploy; `fsl doctor` reports `maps-published`.
 - A `releaseId` in `initLogger` that differs from the value used at upload → maps are not found, stacks stay minified → use the same variable in both.
 - `--bucket` or `--prefix` on the upload with no matching `sourceMaps: { bucket, prefix }` on the receiving handler → the handler looks elsewhere and finds nothing → set both ends to the same values.
-- `--functions=<dir>` on `upload-sourcemaps` → renamed → `--backend=<dir>`.
+- `--functions=<dir>` on `upload-sourcemaps` → deprecated, removed in 2.0 → `--backend=<dir>`.
 - `releaseId` hard-coded to a constant → a build is no longer tied to its own source maps → pass the git SHA.
 
 ## Attachments
@@ -515,4 +519,6 @@ app.all('/log', createHttpLogHandler({ authorize: async (req) => isSignedIn(req)
 - A refusal thrown as a plain `Error`, such as `throw new Error('not allowed')` → it is logged as an `ERROR`, and Firebase answers the caller `internal` and writes its own `Unhandled error` entry → throw an `HttpsError` with a 4xx code, such as `permission-denied`; it is logged as a `WARNING` and the caller gets that code.
 - `userId` passed as a label inside `withLogging` → taken from `request.auth.uid` already (absent in a schedule) → remove it.
 - A handler that calls `logInfo(` with no `withLogging(` around it → entries carry no `functionName` or `userId` → wrap it.
+- `bucketName:` in a `createClientLogFunction(`, `createClientLogHandler(` or `createHttpLogHandler(` config → deprecated, removed in 2.0 → `bucket`.
+- `ClientLogRequest` type → deprecated, removed in 2.0 → `LogRequest`.
 - `maxInstances` raised on `createClientLogFunction` from reading the code alone → `maxInstances: 1` is the cost guard → raise it only when logs show dropped client entries.

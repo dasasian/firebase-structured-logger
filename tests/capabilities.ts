@@ -12,6 +12,7 @@
 import fs from 'fs'
 import path from 'path'
 import { assert, reportResults } from './testHelpers.js'
+import { DEPRECATED_DECLARATIONS, DEPRECATED_CLI_FLAGS } from './deprecatedList.js'
 import * as client from '../src/client/index.js'
 import * as navigation from '../src/client/navigation.js'
 import * as reactRouterNavigation from '../src/client/navigation/react-router.js'
@@ -275,6 +276,68 @@ function testLabelsTypeIsAnAliasAndExpressExampleMountsWithAppAll() {
   assert("and never with app.post('/log'", !/^app\.post\('\/log'/m.test(handler))
 }
 
+const MISTAKES_LINE_FOR_DEPRECATED_NAME: Record<string, { section: string; pattern: string }> = {
+  minLogLevel: { section: 'Error capture', pattern: 'minLogLevel:' },
+  bucketName: { section: 'withLogging and createHttpLogHandler', pattern: 'bucketName:' },
+  sessionLimit: { section: 'Error capture', pattern: 'sessionLimit:' },
+  refillPerMinute: { section: 'Error capture', pattern: 'refillPerMinute:' },
+  errorReserve: { section: 'Error capture', pattern: 'errorReserve:' },
+  ClientLogRequest: { section: 'withLogging and createHttpLogHandler', pattern: 'ClientLogRequest' },
+  triggerTestLog: { section: 'Error capture', pattern: 'triggerTestLog(' },
+  routeFor: { section: 'Navigation', pattern: 'routeFor' },
+  cleanPath: { section: 'Navigation', pattern: 'cleanPath' },
+  'path: false': { section: 'Navigation', pattern: 'path: false' },
+  routeSource: { section: 'Navigation', pattern: 'routeSource' },
+  'bc.nav': { section: 'Breadcrumbs', pattern: 'bc.nav(' },
+  'bc.error': { section: 'Breadcrumbs', pattern: 'bc.error(' },
+  'Logger.setScreen': { section: 'Navigation', pattern: 'setScreen(' },
+  '--functions': { section: 'Release ids and source maps', pattern: '--functions=' },
+}
+
+function escapeForRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function warnedReplacement(warnedAs: string): string | undefined {
+  const call = new RegExp(`warnDeprecated\\('${escapeForRegExp(warnedAs)}', '([^']+)'\\)`)
+  for (const file of readTree(path.join(ROOT, 'src'))) {
+    const match = call.exec(fs.readFileSync(file, 'utf-8'))
+    if (match) return match[1]
+  }
+  return undefined
+}
+
+function replacementOf(entry: { warnedAs: string } | { replacement: string }): string | undefined {
+  return 'replacement' in entry ? entry.replacement : warnedReplacement(entry.warnedAs)
+}
+
+function hasMistakesLine(section: string, pattern: string, replacement: string): boolean {
+  return mistakesOf(new RegExp(`^${escapeForRegExp(section)}$`))
+    .replace(/`/g, '')
+    .split('\n')
+    .filter((line) => line.startsWith('- '))
+    .some((line) => {
+      const [shown, why = '', fix = ''] = line.slice(2).split(' → ')
+      return shown.includes(pattern) && /deprecated, removed in 2\.0/.test(why) && fix.includes(replacement)
+    })
+}
+
+function testEveryDeprecatedNameHasAMistakesLine() {
+  console.log('\nTest: every deprecated name has a Mistakes line with its replacement')
+  const listed = [...DEPRECATED_DECLARATIONS, ...DEPRECATED_CLI_FLAGS]
+  for (const entry of listed) {
+    const where = MISTAKES_LINE_FOR_DEPRECATED_NAME[entry.name]
+    assert(`${entry.name}: this test knows where its Mistakes line is`, where !== undefined)
+    const replacement = replacementOf(entry)
+    assert(`${entry.name}: the code names its replacement`, replacement !== undefined, 'no warnDeprecated call for it in src/')
+    if (where === undefined || replacement === undefined) continue
+    assert(
+      `${entry.name}: ${where.section} has a Mistakes line "${where.pattern} → deprecated, removed in 2.0 → ${replacement}"`,
+      hasMistakesLine(where.section, where.pattern, replacement),
+    )
+  }
+}
+
 function testPackaging() {
   console.log('\nTest: the package ships CAPABILITIES.md and skills/fsl-review, and not skills/logs')
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf-8')) as { files: string[] }
@@ -296,5 +359,6 @@ testNewPlacesAreInTheirSections()
 testMarkedActionsSaysWhichToMarkFirst()
 testClientInitExamplesPassEveryRequiredField()
 testLabelsTypeIsAnAliasAndExpressExampleMountsWithAppAll()
+testEveryDeprecatedNameHasAMistakesLine()
 testPackaging()
 reportResults()
