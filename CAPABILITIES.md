@@ -136,7 +136,7 @@ enableNavigation()
 
 ### Fits when
 - State-driven screen switching: `useState('home')` with a `switch (screen)` render, a `currentView` or `step` variable swapped without `pushState`.
-- A Vue root component whose template is a `v-if` / `v-else-if` / `v-else` chain that swaps the whole tree on auth or gate state.
+- A Vue component whose template is a `v-if` / `v-else-if` / `v-else` chain that swaps the whole tree on auth or gate state.
 - A React component with no screen variable that swaps the whole tree by a chain of early returns, or by a conditional render, on auth or gate state.
 - Wizards and tab shells where the address bar never changes.
 - `bc.nav(` or `setScreen(` calls (both deprecated).
