@@ -605,7 +605,7 @@ function testSearchLooksOnlyWhereItSaysItLooks() {
   console.log('\nTest: the search ignores node_modules, dot folders and folders two levels down')
   const root = hostingOnlyProject()
   fs.rmSync(path.join(root, 'backend'), { recursive: true, force: true })
-  writeAppPackageJson(path.join(root, 'node_modules', 'vendored'), 'dependencies')
+  writeAppPackageJson(path.join(root, 'node_modules'), 'dependencies')
   writeAppPackageJson(path.join(root, '.cache'), 'dependencies')
   writeAppPackageJson(path.join(root, 'services', 'api'), 'dependencies')
   const report = runDoctor({ projectRoot: root })
