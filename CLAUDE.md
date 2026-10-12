@@ -475,6 +475,26 @@ signature reads `action` breadcrumbs only, so this changes no signature.
 
 `bc.handledError` stays for the opposite case: an error the code handled and did not log.
 
+## The backend writes the local log file in development only
+
+`fsl logs --local` reads a file the backend writes on the developer's machine, into
+`logLocalDir`. The Functions emulator is one kind of development; a server started with
+`tsx watch` or `node` is another, and it gets the same file. So the file is written when
+`logLocalDir` is set and the process is not in production, and production is read from two
+facts: `K_SERVICE` is set, which Cloud Run and Cloud Functions both do, or `NODE_ENV` is
+`production`, the Node convention that covers a VM and every other host. Inside the
+emulator the file is written as before.
+
+An app sets `logLocalDir` once, in code that also runs live, so the check is fsl's and not
+the app's. With no `logLocalDir`, no file is ever written. The case fsl cannot see is a
+live server off Google Cloud that never set `NODE_ENV`: there the file is written, bounded
+by its record and rotation limits, and the app can pass `logLocalDir` only when it knows it
+is in development.
+
+Only the file is new off the emulator. What the process prints is the production shape, as
+before, and an entry in the file has the shape the emulator branch writes, which is the
+one `fsl logs --local` reads.
+
 ## A backend handler's throw is logged by `withLogging`
 
 Logging is an aspect: a handler reads the same with logging or without it. So a handler
