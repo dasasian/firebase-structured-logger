@@ -10,9 +10,8 @@ The scope is the app, a folder or a file. If none is given, it is the whole app.
 
 1. Find the installed package. For a folder or a file, walk up from the scope to the first
    `node_modules/@dasasian/firebase-structured-logger`. For the whole app, use the one in the
-   project root; if the root has none, look in each folder one level down. If more than one install in
-   the project (such as the Cloud Functions folder) has a different version, name both versions in the
-   proposal. If there is none, say so and stop.
+   project root; if the root has none, look in each folder one level down. When the installs in the project
+   have different versions, name each version in the proposal. If there is none, say so and stop.
 2. If the scope is the whole app, run `node_modules/.bin/fsl doctor --json`, with the install
    folder from step 1 in front of the path, from the project root, and keep its findings.
    Never run it through npx: with no install in the folder, npx reaches for another package. For a folder

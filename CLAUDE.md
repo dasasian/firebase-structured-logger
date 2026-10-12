@@ -245,10 +245,9 @@ has fsl, is not in `hosting`, and is the only candidate left is taken for the ba
 **A skill runs the `fsl` of the installed package it found.** `fsl` on npm is another
 author's package, and `npx fsl` in a folder with no local install reaches for that one. A
 project root can be such a folder: an app with `backend/` and `frontend/` and no root
-`package.json` has no install there. So a skill runs the bin by its path,
-`<install folder>/node_modules/.bin/fsl`, which never asks npm anything. `npx --no fsl`
-was tried: in a folder with no install it still asks the registry about the other
-package, and what stops it is that package's shape, not our command.
+`package.json` has no install there. A project root with no install must name the folder
+that has one anyway, so a skill runs the bin by its path,
+`<install folder>/node_modules/.bin/fsl`, which asks npm nothing.
 
 ## Skills and `fsl logs` are for agents
 

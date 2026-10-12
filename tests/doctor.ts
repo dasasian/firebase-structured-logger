@@ -377,7 +377,7 @@ function testSkillOutOfDateFires() {
   assert('skill-out-of-date fires', finding !== undefined)
   assert('at warning level', finding?.level === 'warning')
   assert('names both versions', !!finding && finding.message.includes('0.0.1') && finding.message.includes(RUNNING_VERSION))
-  assert('fix is install-skills', finding?.fix.includes('node_modules/.bin/fsl install-skills') === true && !finding.fix.includes('npx'), finding?.fix)
+  assert('fix is install-skills', finding?.fix.includes('install-skills') === true && !finding.fix.includes('npx') && !finding.fix.includes('<'), finding?.fix)
   cleanup([root])
 }
 
@@ -449,6 +449,10 @@ const OWN_PACKAGE_NAME = (JSON.parse(fs.readFileSync('package.json', 'utf-8')) a
 function writeAppPackageJson(dir: string, listedIn: 'dependencies' | 'devDependencies' | 'nowhere', extra: Record<string, unknown> = {}): void {
   const listing = listedIn === 'nowhere' ? {} : { [listedIn]: { [OWN_PACKAGE_NAME]: '^1.5.0' } }
   writeJson(path.join(dir, 'package.json'), { name: path.basename(dir), ...listing, ...extra })
+}
+
+function startsWithWords(text: string | undefined): boolean {
+  return /^[A-Za-z]/.test(text ?? '')
 }
 
 function hostingOnlyProject(): string {
@@ -572,6 +576,7 @@ function testTwoCandidatesAreCouldNotCheck() {
   assert('could-not-check fires as an error', finding?.level === 'error', JSON.stringify(report.findings))
   assert('names ./backend and ./worker', finding?.message.includes('./backend') === true && finding.message.includes('./worker'), finding?.message)
   assert('the fix names --backend', finding?.fix.includes('--backend=') === true, finding?.fix)
+  assert('message and fix start with words, not a path', startsWithWords(finding?.message) && startsWithWords(finding?.fix), finding?.message)
   assert('backend is not checked', report.setup.backend === null && report.setup.backendFrom === null)
   assert('exit code 1', exitCodeFor(report, false) === 1)
   cleanup([root])
@@ -586,8 +591,44 @@ function testOneCandidateAndNoWebBuildIsCouldNotCheck() {
   assert('could-not-check fires as an error', finding?.level === 'error', JSON.stringify(report.findings))
   assert('names ./backend', finding?.message.includes('./backend') === true, finding?.message)
   assert('the fix names --backend and --dist', finding?.fix.includes('--backend=') === true && finding.fix.includes('--dist='), finding?.fix)
+  assert('the fix offers the flags as alternatives and names the candidate', finding?.fix.includes(' or ') === true && finding.fix.includes('./backend'), finding?.fix)
+  assert('message and fix start with words, not a path', startsWithWords(finding?.message) && startsWithWords(finding?.fix), finding?.message)
   assert('backend is not taken', report.setup.backend === null)
   assert('exit code 1', exitCodeFor(report, false) === 1)
+  cleanup([root])
+}
+
+function testRootCandidateMessageStartsWithWords() {
+  console.log('\nTest: a candidate that is the project root does not make a message start with "."')
+  const root = tempProject()
+  writeAppPackageJson(root, 'dependencies')
+  const finding = runDoctor({ projectRoot: root }).findings.find((f) => f.id === 'could-not-check')
+  assert('could-not-check fires and names .', finding?.message.includes(': .') === true, finding?.message)
+  assert('message and fix start with words, not a path', startsWithWords(finding?.message) && startsWithWords(finding?.fix), finding?.message)
+  cleanup([root])
+}
+
+function testEitherFlagAloneSettlesAnUnknownWebBuild() {
+  console.log('\nTest: --dist alone, or --backend alone, is enough where the web build was unknown')
+  const root = tempProject()
+  writeAppPackageJson(path.join(root, 'backend'), 'dependencies')
+  writeAppPackageJson(path.join(root, 'web'), 'dependencies')
+  fs.mkdirSync(path.join(root, 'web', 'dist'), { recursive: true })
+  assert('without a flag it is could-not-check', findingIds(runDoctor({ projectRoot: root })).includes('could-not-check'))
+  const withDist = runDoctor({ projectRoot: root, dist: 'web/dist' })
+  assert('--dist alone: backend is ./backend by search, no findings', withDist.setup.backend === './backend' && withDist.setup.backendFrom === 'search' && withDist.findings.length === 0, JSON.stringify(withDist))
+  const withBackend = runDoctor({ projectRoot: root, backend: 'backend' })
+  assert('--backend alone: backend is ./backend by flag, no findings', withBackend.setup.backend === './backend' && withBackend.setup.backendFrom === 'flag' && withBackend.findings.length === 0, JSON.stringify(withBackend))
+  cleanup([root])
+}
+
+function testDistAloneSettlesTheOnlyCandidateBeingTheWebApp() {
+  console.log('\nTest: one candidate that is the web app: --dist alone leaves no backend and no finding')
+  const root = tempProject()
+  writeAppPackageJson(path.join(root, 'web'), 'dependencies')
+  fs.mkdirSync(path.join(root, 'web', 'dist'), { recursive: true })
+  const report = runDoctor({ projectRoot: root, dist: 'web/dist' })
+  assert('backend not checked, no findings', report.setup.backend === null && report.findings.length === 0, JSON.stringify(report))
   cleanup([root])
 }
 
@@ -652,7 +693,8 @@ function testUnreadablePackageJsonInTheSearchIsCouldNotCheck() {
   const report = runDoctor({ projectRoot: root })
   const finding = report.findings.find((f) => f.id === 'could-not-check')
   assert('could-not-check fires', finding !== undefined, JSON.stringify(report.findings))
-  assert('names ./tools/package.json', finding?.message.includes('./tools/package.json') === true, finding?.message)
+  assert('names ./tools', finding?.message.includes('./tools') === true, finding?.message)
+  assert('message and fix start with words, not a path', startsWithWords(finding?.message) && startsWithWords(finding?.fix), finding?.message)
   assert('backend is not taken', report.setup.backend === null)
   assert('exit code 1', exitCodeFor(report, false) === 1)
   cleanup([root])
@@ -683,7 +725,7 @@ function testDuplicateStorageFixNamesYarn() {
   writePackage(path.join(backend, 'node_modules', 'firebase-admin'), '@google-cloud/storage', '7.22.0')
   const fix = runDoctor({ projectRoot: root }).findings.find((f) => f.id === 'duplicate-storage')?.fix ?? ''
   assert('names npm dedupe', fix.includes('npm dedupe'), fix)
-  assert('names yarn dedupe for yarn 2 and later, and yarn 1', fix.includes('yarn 2 and later: yarn dedupe') && fix.includes('yarn 1'), fix)
+  assert('names the yarn 1 lockfile edit', fix.includes('yarn 1') && fix.includes('yarn.lock') && fix.includes('yarn install'), fix)
   cleanup([root])
 }
 
@@ -729,6 +771,9 @@ function run() {
   testSearchSkipsTheWebFolder()
   testTwoCandidatesAreCouldNotCheck()
   testOneCandidateAndNoWebBuildIsCouldNotCheck()
+  testRootCandidateMessageStartsWithWords()
+  testEitherFlagAloneSettlesAnUnknownWebBuild()
+  testDistAloneSettlesTheOnlyCandidateBeingTheWebApp()
   testNoCandidateAtAllChecksNothingAndSaysNothing()
   testSearchLooksOnlyWhereItSaysItLooks()
   testSearchRemovesAFolderHoldingTheWebBuild()

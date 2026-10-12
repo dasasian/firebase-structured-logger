@@ -164,7 +164,7 @@ function testJsonCarriesSkillOutOfDate() {
   const findings = (JSON.parse(out.stdout.trim()) as { findings: Array<Record<string, unknown>> }).findings
   const finding = findings.find((f) => f.id === 'skill-out-of-date')
   assert('skill-out-of-date is present', finding !== undefined, JSON.stringify(findings))
-  assert('at warning level, with the install-skills fix', finding?.level === 'warning' && typeof finding?.fix === 'string' && finding.fix.includes('node_modules/.bin/fsl install-skills') && !finding.fix.includes('npx'), JSON.stringify(finding))
+  assert('at warning level, with the install-skills fix', finding?.level === 'warning' && typeof finding?.fix === 'string' && finding.fix.includes('install-skills') && !finding.fix.includes('npx') && !finding.fix.includes('<'), JSON.stringify(finding))
   fs.rmSync(root, { recursive: true, force: true })
 }
 

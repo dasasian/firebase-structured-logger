@@ -162,7 +162,7 @@ function searchBackend(projectRoot: string, distDirs: string[]): BackendSearchRe
       return {
         backendDir: null,
         finding: couldNotCheck(
-          `${shown}/package.json could not be parsed as JSON, so doctor cannot tell whether ${shown} is the backend.`,
+          `The package.json in ${shown} could not be parsed as JSON, so doctor cannot tell whether that folder is the backend.`,
           `Fix the syntax error in ${shown}/package.json, or pass --backend=<folder>.`,
         ),
       }
@@ -176,8 +176,8 @@ function searchBackend(projectRoot: string, distDirs: string[]): BackendSearchRe
     return {
       backendDir: null,
       finding: couldNotCheck(
-        `${shown.join(' and ')} ${shown.length === 1 ? 'lists' : 'list'} ${ownPackageName}, but no web build folder is known, so doctor cannot tell the backend from the web app.`,
-        `Pass --backend=<folder> for the backend (${shown.join(' or ')}) and --dist=<folder> for the web build.`,
+        `These folders list ${ownPackageName} in package.json: ${shown.join(', ')}. No web build folder is known, so doctor cannot tell the backend from the web app.`,
+        `Pass --dist=<web build folder>, so the search can tell the halves apart, or --backend=<folder> to name the backend (candidates: ${shown.join(', ')}).`,
       ),
     }
   }
@@ -185,7 +185,7 @@ function searchBackend(projectRoot: string, distDirs: string[]): BackendSearchRe
     return {
       backendDir: null,
       finding: couldNotCheck(
-        `${shown.join(' and ')} each list ${ownPackageName} and hold no web build, so doctor cannot tell which is the backend.`,
+        `These folders list ${ownPackageName} in package.json and hold no web build: ${shown.join(', ')}. Doctor cannot tell which is the backend.`,
         `Pass --backend=<folder>, one of: ${shown.join(', ')}.`,
       ),
     }
@@ -359,7 +359,7 @@ function checkDuplicateStorage(backendDir: string | null, findings: DoctorFindin
     id: 'duplicate-storage',
     level: 'warning',
     message: `${copies.length} copies of @google-cloud/storage (${placed.join(', ')})`,
-    fix: 'npm dedupe; yarn 2 and later: yarn dedupe; yarn 1 has no dedupe command, so remove the extra copy from yarn.lock and run yarn install',
+    fix: "npm dedupe. yarn 1: in yarn.lock, put both @google-cloud/storage patterns on the lower version's entry, delete the other entry, and run yarn install.",
   })
 }
 
@@ -528,7 +528,7 @@ function checkSkillsOutOfDate(projectRoot: string, runningVersion: string, findi
       id: 'skill-out-of-date',
       level: 'warning',
       message: `.claude/skills/${skill.name} was installed by fsl ${skill.version}; this is fsl ${runningVersion}.`,
-      fix: 'Run install-skills with the installed package\'s bin: <install folder>/node_modules/.bin/fsl install-skills',
+      fix: 'Run install-skills from the project root, with the same fsl that ran doctor.',
     })
   }
 }
