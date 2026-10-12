@@ -418,6 +418,27 @@ navigation already puts them on every entry. A `redirect()` is a page change, ne
 an adapter called again, or stopped, takes its error listener with it, so an app that makes
 a new router at each sign-in does not log twice.
 
+## An error the browser logger sends leaves one breadcrumb
+
+The trail of an entry is self-contained: the reader of one feedback entry, or of a later
+error, sees what happened before it with no second query. So an error that was logged
+must be in the trail of everything after it, and the app must not have to say so: the
+error is stated once, at `logger.error()` or at the hook that caught it.
+
+When the client logger sends an entry that carries an error, it adds one `error`
+breadcrumb whose name is the entry's `errorType`, and no data. It reads that entry's own
+trail first, so an entry never lists itself, and it does both before `error()` returns, so
+feedback sent in the same tick shows the error. Every way in ends at the same place
+(`logger.error()`, the global handler, the React and Vue hooks, the router adapters), so
+each gets the breadcrumb with no code of its own.
+
+Only an entry the logger sends: an error the rate limiter counts as a duplicate, or
+refuses, adds nothing, so a flood leaves a few breadcrumbs and not fifty. A repeat summary
+adds nothing either; it is sent later and is not an event of that moment. The repeat
+signature reads `action` breadcrumbs only, so this changes no signature.
+
+`bc.handledError` stays for the opposite case: an error the code handled and did not log.
+
 ## A backend handler's throw is logged by `withLogging`
 
 Logging is an aspect: a handler reads the same with logging or without it. So a handler
