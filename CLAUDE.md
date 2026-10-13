@@ -498,6 +498,13 @@ facts: `K_SERVICE` is set, which Cloud Run and Cloud Functions both do, or `NODE
 `production`, the Node convention that covers a VM and every other host. Inside the
 emulator the file is written as before.
 
+A test run is not development either. An app's unit tests call the same logger, and their
+errors in `dev.jsonl` would answer "what failed just now" with failures nobody had. So
+`NODE_ENV` `test` writes no file, as `production` does; Jest and Vitest both set it before
+any app code loads. A runner that sets no `NODE_ENV` (Mocha, `node --test`) still writes,
+and its app sets `NODE_ENV=test` in the test script. Inside the emulator `NODE_ENV` is not
+read.
+
 An app sets `logLocalDir` once, in code that also runs live, so the check is fsl's and not
 the app's. With no `logLocalDir`, no file is ever written. The case fsl cannot see is a
 live server off Google Cloud that never set `NODE_ENV`: there the file is written, bounded
