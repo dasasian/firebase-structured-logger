@@ -219,6 +219,15 @@ Doctor reports only what it can read from a file with a fixed format — `fireba
 from source code. A check that has to guess ("is `initLogger` called?") stays out, or
 ships later as a finding marked as a hint. A doctor that is sometimes wrong is ignored.
 
+The Setup lines follow the same rule. The Storage line names the library the installed
+packages give, and no bucket: an app can name a bucket in code, and doctor does not read
+code.
+
+A finding's fix must work as written. `install-skills` does not replace a skill file that
+is there unless it can ask or gets `--force`, so the fix of `skill-out-of-date` names
+`--force`; without it an agent runs the fix, nothing changes, and the finding stays.
+Replacing a stamped file with no flag was rejected: a person may have changed it.
+
 A check that cannot run is the error `could-not-check`, never a pass: expo-doctor once
 exited 0 when it could not read its config, and CI went green on projects nobody
 checked. The finding ids and `--json` fields are public API from 1.0.
@@ -323,6 +332,13 @@ line that matches a Mistakes pattern can be there for a reason the pattern does 
 When the code says why it is there, the proposal gives both sides and does not call the
 removal a fix.
 
+**The review checks every Mistakes line of a capability the code already uses.** A
+capability that is in the code is not, for that reason, used correctly: an app had
+`bc.handledError` one line above `logger.error`, and a review that saw the client setup
+"present and correct" did not name it. "Say nothing about code that is already right" is
+a rule for the proposal, and "right" is decided only after the Mistakes lines of that
+capability were held against the code.
+
 **Where a capability fits many places, the proposal is by user flow and ends with a
 question.** The review can see where a mark fits; only the owner knows which flows matter,
 and a mark on everything fills the trail with small clicks. So the proposal groups the
@@ -367,6 +383,9 @@ exists, because that is the moment an agent needs it. When the scan stopped at i
 and nothing matched, the answer is "not known", never "0 matched": the tool read the
 newest entries only.
 
+**An error's example is for the command that was typed.** A wrong flag on
+`fsl logs schema` shows a `schema` example, never a query: an agent copies the example.
+
 **A word `fsl logs` does not know is an error.** `schema` and `attachments` come directly
 after `logs`. A word anywhere else was ignored, so `fsl logs --local schema` ran a plain
 query and printed "0 entries matched", which reads as an empty schema. The error shows the
@@ -387,6 +406,9 @@ meant for the service account. So a key that may not read logs is one error that
 role, `roles/logging.viewer`, and a path to a file that is not there is an error from the
 tool that reads it, never a silent use of another account. Doctor has no check for the
 key: no key file is a correct setup, and a role cannot be read from disk.
+
+A leading `~` in the path is the home folder: `.env.local` is read by fsl and not by a
+shell, so nothing else expands it, and a person writes the path as in a terminal.
 
 Only a path. The key as text in a variable has no standard name, and `gcloud` takes a
 file, so fsl would write a secret to disk on every run. No flag either: the line in
