@@ -79,7 +79,7 @@ async function fetchEntries(flags: ParsedFlags, deps: LogsDependencies, request:
 function fetchLocalEntries(deps: LogsDependencies, request: FetchRequest): Fetched {
   const logDir = path.join(deps.cwd, LOCAL_LOG_DIR)
   if (!fs.existsSync(logDir)) {
-    throw new UsageError(`No ${LOCAL_LOG_DIR}/ here. The backend writes it in development, not with K_SERVICE set or NODE_ENV=production, when initLogger({ logLocalDir }) is set. Run from the project root that holds it.`)
+    throw new UsageError(`No ${LOCAL_LOG_DIR}/ here. The backend writes it in development, not with K_SERVICE set, NODE_ENV=production or NODE_ENV=test, when initLogger({ logLocalDir }) is set. Run from the project root that holds it.`)
   }
   const { entries, unreadableLines } = readLocalEntries(logDir)
   if (unreadableLines > 0) deps.printErrorLine(`skipped ${unreadableLines} unreadable line(s) in ${LOCAL_LOG_DIR}/`)

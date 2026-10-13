@@ -25,9 +25,11 @@ const DEVELOPMENT: Environment = { name: 'development', variables: {} }
 const NODE_ENV_DEVELOPMENT: Environment = { name: 'NODE_ENV=development', variables: { NODE_ENV: 'development' } }
 const CLOUD_RUN: Environment = { name: 'K_SERVICE set', variables: { K_SERVICE: 'my-service' } }
 const PRODUCTION_NODE_ENV: Environment = { name: 'NODE_ENV=production', variables: { NODE_ENV: 'production' } }
+const TEST_NODE_ENV: Environment = { name: 'NODE_ENV=test', variables: { NODE_ENV: 'test' } }
 const EMULATOR: Environment = { name: 'emulator', variables: { FUNCTIONS_EMULATOR: 'true' } }
 const EMULATOR_WITH_K_SERVICE: Environment = { name: 'emulator with K_SERVICE set', variables: { FUNCTIONS_EMULATOR: 'true', K_SERVICE: 'my-service' } }
 const EMULATOR_WITH_PRODUCTION_NODE_ENV: Environment = { name: 'emulator with NODE_ENV=production', variables: { FUNCTIONS_EMULATOR: 'true', NODE_ENV: 'production' } }
+const EMULATOR_WITH_TEST_NODE_ENV: Environment = { name: 'emulator with NODE_ENV=test', variables: { FUNCTIONS_EMULATOR: 'true', NODE_ENV: 'test' } }
 
 interface Ran {
   cwd: string
@@ -73,27 +75,35 @@ async function testDevelopmentWritesTheFileFsLogsReads() {
 }
 
 async function testADeployedOrProductionProcessWritesNoFile() {
-  console.log('\nTest: with K_SERVICE set, or NODE_ENV=production, there is no file and no folder')
-  for (const environment of [CLOUD_RUN, PRODUCTION_NODE_ENV]) {
+  console.log('\nTest: with K_SERVICE set, NODE_ENV=production or NODE_ENV=test, there is no file and no folder')
+  for (const environment of [CLOUD_RUN, PRODUCTION_NODE_ENV, TEST_NODE_ENV]) {
     const ran = runApp(environment, 'direct', { withLogLocalDir: true })
     assert(`${environment.name}: no folder`, !fs.existsSync(ran.logDir), fs.existsSync(ran.logDir) ? fs.readdirSync(ran.logDir).join(',') : '')
     assert(`${environment.name}: the entry was still printed`, ran.stderr.includes('"message":"cart sync failed"'), ran.stderr)
   }
 }
 
+async function testATestRunPrintsWhatProductionPrints() {
+  console.log('\nTest: with NODE_ENV=test the process prints the same bytes as with NODE_ENV=production')
+  const production = runApp(PRODUCTION_NODE_ENV, 'direct', { withLogLocalDir: true })
+  const testRun = runApp(TEST_NODE_ENV, 'direct', { withLogLocalDir: true })
+  assert('stdout is identical', testRun.stdout === production.stdout, `${testRun.stdout} vs ${production.stdout}`)
+  assert('stderr is identical', testRun.stderr === production.stderr, `${testRun.stderr} vs ${production.stderr}`)
+}
+
 async function testNoLogLocalDirWritesNothingAnywhere() {
   console.log('\nTest: with no logLocalDir no file is written, in any environment')
-  for (const environment of [DEVELOPMENT, CLOUD_RUN, PRODUCTION_NODE_ENV, EMULATOR, EMULATOR_WITH_K_SERVICE]) {
+  for (const environment of [DEVELOPMENT, CLOUD_RUN, PRODUCTION_NODE_ENV, TEST_NODE_ENV, EMULATOR, EMULATOR_WITH_K_SERVICE]) {
     const ran = runApp(environment, 'direct', { withLogLocalDir: false })
     assert(`${environment.name}: the working folder holds nothing`, fs.readdirSync(ran.cwd).length === 0, fs.readdirSync(ran.cwd).join(','))
   }
 }
 
 async function testTheEmulatorIsUnchangedByTheNewFacts() {
-  console.log('\nTest: inside the emulator, K_SERVICE and NODE_ENV=production change neither the file nor the output')
+  console.log('\nTest: inside the emulator, K_SERVICE, NODE_ENV=production and NODE_ENV=test change neither the file nor the output')
   const plain = runApp(EMULATOR, 'direct', { withLogLocalDir: true })
   assert('the emulator prints the console line, not the production JSON', (plain.stdout + plain.stderr).includes('[ERROR] cart sync failed') && !(plain.stdout + plain.stderr).includes('logging.googleapis.com'), plain.stderr)
-  for (const environment of [EMULATOR, EMULATOR_WITH_K_SERVICE, EMULATOR_WITH_PRODUCTION_NODE_ENV]) {
+  for (const environment of [EMULATOR, EMULATOR_WITH_K_SERVICE, EMULATOR_WITH_PRODUCTION_NODE_ENV, EMULATOR_WITH_TEST_NODE_ENV]) {
     const ran = runApp(environment, 'direct', { withLogLocalDir: true })
     assert(`${environment.name}: the file has the entry`, entriesInFile(ran).length === 1 && entriesInFile(ran)[0].message === 'cart sync failed')
     assert(`${environment.name}: stdout is what the plain emulator prints`, ran.stdout === plain.stdout, ran.stdout)
@@ -136,6 +146,7 @@ async function testEntriesFromClientsReachTheFileToo() {
 async function main() {
   await testDevelopmentWritesTheFileFsLogsReads()
   await testADeployedOrProductionProcessWritesNoFile()
+  await testATestRunPrintsWhatProductionPrints()
   await testNoLogLocalDirWritesNothingAnywhere()
   await testTheEmulatorIsUnchangedByTheNewFacts()
   await testOffTheEmulatorOnlyTheFileIsNew()

@@ -237,9 +237,11 @@ function warnOverBudget(objectPath: string | undefined): void {
 }
 
 const IS_EMULATOR = process.env.FUNCTIONS_EMULATOR === "true";
-const IS_DEPLOYED_OR_PRODUCTION_BUILD =
-  Boolean(process.env.K_SERVICE) || process.env.NODE_ENV === "production";
-const IS_DEVELOPMENT_PROCESS = IS_EMULATOR || !IS_DEPLOYED_OR_PRODUCTION_BUILD;
+const IS_LIVE_OR_TEST_PROCESS =
+  Boolean(process.env.K_SERVICE) ||
+  process.env.NODE_ENV === "production" ||
+  process.env.NODE_ENV === "test";
+const IS_DEVELOPMENT_PROCESS = IS_EMULATOR || !IS_LIVE_OR_TEST_PROCESS;
 export const LOG_FILENAME = "dev.jsonl";
 
 interface FunctionsLoggerConfig {
@@ -247,10 +249,12 @@ interface FunctionsLoggerConfig {
   /**
    * A folder for the local log file `dev.jsonl`, which `fsl logs --local` reads.
    * The file is written only in a development process: inside the Functions
-   * emulator, or on any server where `K_SERVICE` is unset and `NODE_ENV` is not
-   * `production`. With no value no file is written. What the process prints does
-   * not change. A live server that is not on Cloud Run or Cloud Functions must
-   * run with `NODE_ENV=production`, or it writes the file too.
+   * emulator, or on any server where `K_SERVICE` is unset and `NODE_ENV` is neither
+   * `production` nor `test`. With no value no file is written. What the process
+   * prints does not change. A live server that is not on Cloud Run or Cloud
+   * Functions must run with `NODE_ENV=production`, or it writes the file too. A
+   * test runner that sets no `NODE_ENV` (Mocha, `node --test`) writes the file
+   * too: set `NODE_ENV=test` in the test script.
    */
   logLocalDir?: string;
   logMaxRecordsPerFile?: number; // default 2000
