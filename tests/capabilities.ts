@@ -12,7 +12,7 @@
 import fs from 'fs'
 import path from 'path'
 import { assert, reportResults } from './testHelpers.js'
-import { DEPRECATED_DECLARATIONS, DEPRECATED_CLI_FLAGS } from './deprecatedList.js'
+import { DEPRECATED_DECLARATIONS, DEPRECATED_CLI_FLAGS, DEPRECATED_ENVIRONMENT_VARIABLES } from './deprecatedList.js'
 import * as client from '../src/client/index.js'
 import * as navigation from '../src/client/navigation.js'
 import * as reactRouterNavigation from '../src/client/navigation/react-router.js'
@@ -292,6 +292,7 @@ const MISTAKES_LINE_FOR_DEPRECATED_NAME: Record<string, { section: string; patte
   'bc.error': { section: 'Breadcrumbs', pattern: 'bc.error(' },
   'Logger.setScreen': { section: 'Navigation', pattern: 'setScreen(' },
   '--functions': { section: 'Release ids and source maps', pattern: '--functions=' },
+  FIREBASE_SERVICE_ACCOUNT_PATH: { section: 'Release ids and source maps', pattern: 'FIREBASE_SERVICE_ACCOUNT_PATH' },
 }
 
 function escapeForRegExp(text: string): string {
@@ -324,7 +325,7 @@ function hasMistakesLine(section: string, pattern: string, replacement: string):
 
 function testEveryDeprecatedNameHasAMistakesLine() {
   console.log('\nTest: every deprecated name has a Mistakes line with its replacement')
-  const listed = [...DEPRECATED_DECLARATIONS, ...DEPRECATED_CLI_FLAGS]
+  const listed = [...DEPRECATED_DECLARATIONS, ...DEPRECATED_CLI_FLAGS, ...DEPRECATED_ENVIRONMENT_VARIABLES]
   for (const entry of listed) {
     const where = MISTAKES_LINE_FOR_DEPRECATED_NAME[entry.name]
     assert(`${entry.name}: this test knows where its Mistakes line is`, where !== undefined)

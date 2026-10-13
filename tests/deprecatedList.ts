@@ -6,6 +6,8 @@
  * A name that no run-time warning covers states its `replacement` here instead.
  */
 
+import { DEPRECATED_KEY_FILE_VARIABLE, KEY_FILE_VARIABLE } from '../src/tools/keyFile.js'
+
 type ReplacementSource = { warnedAs: string } | { replacement: string }
 
 export type DeprecatedDeclaration = { name: string; file: string; declaration: string } & ReplacementSource
@@ -29,4 +31,8 @@ export const DEPRECATED_DECLARATIONS: ReadonlyArray<DeprecatedDeclaration> = [
 
 export const DEPRECATED_CLI_FLAGS: ReadonlyArray<{ name: string; file: string; warnedAs: string }> = [
   { name: '--functions', file: 'src/tools/index.ts', warnedAs: '--functions' },
+]
+
+export const DEPRECATED_ENVIRONMENT_VARIABLES: ReadonlyArray<{ name: string; replacement: string }> = [
+  { name: DEPRECATED_KEY_FILE_VARIABLE, replacement: KEY_FILE_VARIABLE },
 ]
