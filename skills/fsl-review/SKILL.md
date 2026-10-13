@@ -36,9 +36,8 @@ The scope is the app, a folder or a file. If none is given, it is the whole app.
    Before you propose to remove code, read the comments at that place. When the code says
    why it is there, give both sides and do not call the removal a fix.
    When one capability fits more than about ten places in the scope, do not list the places.
-   The count is for that one capability over the whole scope. Do not add the places of
-   different capabilities together.
    Group them by user flow, meaning what the user is trying to do, and give the count for
-   each flow. Say in a few words which flow you would do first and why. End the proposal
+   each flow. The count is for that one capability over the whole scope. Do not add the
+   places of different capabilities together. Say in a few words which flow you would do first and why. End the proposal
    with one question that asks which flows matter most to the user.
 7. Stop. Make no edits and open no issues; the user trims the list and decides what next.
