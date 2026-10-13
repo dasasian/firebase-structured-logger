@@ -10,7 +10,7 @@
 import fs from 'fs'
 import path from 'path'
 import { assert, reportResults } from './testHelpers.js'
-import { cloudEntry, runFsl, tempProject, withFirebaserc } from './logsHelpers.js'
+import { FAKE_BUCKET, FAKE_PROJECT, cloudEntry, runFsl, tempProject, withFirebaserc } from './logsHelpers.js'
 import { MAX_CLOUD_ENTRIES } from '../src/tools/logs/command.js'
 
 const APP_ID_TERM = '(labels.appId:* OR jsonPayload.labels.appId:*)'
@@ -73,7 +73,7 @@ async function testCutScanWithNoRowsIsNotKnown() {
   assert('one line', cut.stderr.length === 1, text)
   assert('says it is not known and how many were read', text.startsWith('Not known whether anything matched in the last 7d:') && text.includes(`newest ${MAX_CLOUD_ENTRIES} entries`), text)
   assert('says older entries were not read and how to narrow', text.includes('older entries were not read') && text.includes('Narrow with --since or --where'), text)
-  assert('names --all, once', text.includes(ALL_HINT), text)
+  assert('the line ends at the narrowing advice and does not name --all', text.endsWith('Narrow with --since or --where.') && !text.includes('--all'), text)
   assert('neither of the two old lines', !text.includes('scanned:') && !text.includes('0 entries matched'), text)
   const cutAll = await runFsl(['--where', 'message~timeout', '--all'], { cwd, cloud: unrelatedEntries(MAX_CLOUD_ENTRIES) })
   assert('--all: one line, without the hint', cutAll.stderr.length === 1 && cutAll.stderr[0].startsWith('Not known') && !cutAll.stderr[0].includes('--all'), cutAll.stderr.join('\n'))
@@ -106,9 +106,15 @@ async function testAWordTheCommandDoesNotKnowIsAnError() {
   assert('schema after a flag: exit 1', misplaced.code === 1)
   assert('shows the correct form with the user\'s flag', misplaced.stderr.join('\n').includes('fsl logs schema --local'), misplaced.stderr.join('\n'))
   assert('prints nothing on stdout', misplaced.stdout.length === 0)
-  const withProject = await runFsl(['--where', 'severity=ERROR', '--project', 'p1', 'schema'], { cwd, cloud: [] })
-  assert('keeps the flags schema accepts and drops the rest', withProject.stderr.join('\n').includes('Correct form: fsl logs schema --project p1') && !withProject.stderr.join('\n').includes('--where'), withProject.stderr.join('\n'))
-  assert('reads nothing', withProject.cloudRequests.length === 0)
+  const withSwitches = await runFsl(['--where', 'severity=ERROR', '--json', '--local', 'schema'], { cwd, cloud: [] })
+  assert('keeps the switches schema accepts and drops the rest', withSwitches.stderr.join('\n').includes('Correct form: fsl logs schema --json --local') && !withSwitches.stderr.join('\n').includes('--where'), withSwitches.stderr.join('\n'))
+  assert('reads nothing', withSwitches.cloudRequests.length === 0)
+  const withProject = await runFsl(['--project', FAKE_PROJECT, 'schema'], { cwd, cloud: [] })
+  const projectOutput = withProject.stdout.concat(withProject.stderr).join('\n')
+  assert('a misplaced schema with --project shows the form and not the project id', withProject.code === 1 && projectOutput.includes('Correct form: fsl logs schema') && !projectOutput.includes(FAKE_PROJECT), projectOutput)
+  const withBucket = await runFsl(['--bucket', FAKE_BUCKET, 'attachments', '01JABC'], { cwd })
+  const bucketOutput = withBucket.stdout.concat(withBucket.stderr).join('\n')
+  assert('a misplaced attachments with --bucket keeps the logId and not the bucket', withBucket.code === 1 && bucketOutput.includes('Correct form: fsl logs attachments 01JABC') && !bucketOutput.includes(FAKE_BUCKET), bucketOutput)
   const attachments = await runFsl(['--since', '2h', 'attachments', '01JABC'], { cwd })
   assert('attachments after a flag shows its form with the logId', attachments.code === 1 && attachments.stderr.join('\n').includes('Correct form: fsl logs attachments 01JABC'), attachments.stderr.join('\n'))
   const nonsense = await runFsl(['--local', 'nonsense'], { cwd })

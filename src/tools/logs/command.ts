@@ -12,7 +12,7 @@ import { KeyFileError, resolveKeyFile } from '../keyFile.js'
 import { GcloudError, explainGcloudFailure, readCloudEntries, runGcloud, signInEnvironment, type CloudEntryReader, type GcloudRunner } from './gcloud.js'
 import { redact, resolveBucket, resolveProjectId } from './project.js'
 import { runQuery, type Query } from './query.js'
-import { refuseStrayWordInAttachments, refuseStrayWordInQuery, refuseStrayWordInSchema } from './strayWord.js'
+import { parseQueryFlags, refuseStrayWordInAttachments, refuseStrayWordInQuery, refuseStrayWordInSchema } from './strayWord.js'
 import {
   SCHEMA_ENTRY_LIMIT, SCHEMA_WINDOW, formatSchema, isFresh, readSchemaCache, schemaFromEntries, writeSchemaCache,
   type SchemaCache, type SchemaSource,
@@ -109,8 +109,8 @@ function describeNoMatch(flags: ParsedFlags, query: Query, sinceText: string): s
 
 function describeNothingFound(flags: ParsedFlags, query: Query, sinceText: string, scanWasCut: boolean): string {
   const finding = scanWasCut ? describeNotKnown(sinceText) : describeNoMatch(flags, query, sinceText)
-  const readOnlyFslLines = !flags.switches.has('local') && !flags.switches.has('all')
-  return readOnlyFslLines ? `${finding} --all also reads lines fsl did not write.` : finding
+  const fullScanOfFslLines = !scanWasCut && !flags.switches.has('local') && !flags.switches.has('all')
+  return fullScanOfFslLines ? `${finding} --all also reads lines fsl did not write.` : finding
 }
 
 function schemaLabelKeys(cache: SchemaCache): string[] {
@@ -118,7 +118,7 @@ function schemaLabelKeys(cache: SchemaCache): string[] {
 }
 
 async function runQueryCommand(argv: string[], deps: LogsDependencies): Promise<void> {
-  const flags = parseFlags(argv, QUERY_FLAGS)
+  const flags = parseQueryFlags(argv)
   refuseStrayWordInQuery(flags)
   if (flags.switches.has('all') && flags.switches.has('local')) {
     throw new UsageError(`--all and --local cannot be combined: --all reads every line of the service in Cloud Logging, and --local reads ${LOCAL_LOG_DIR}/*.jsonl, which holds only fsl's entries.\nDrop one of them.`)

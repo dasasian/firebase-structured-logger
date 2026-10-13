@@ -305,7 +305,7 @@ The Vite config needs `build: { sourcemap: true }`.
 - A `releaseId` in `initLogger` that differs from the value used at upload → maps are not found, stacks stay minified → use the same variable in both.
 - `--bucket` or `--prefix` on the upload with no matching `sourceMaps: { bucket, prefix }` on the receiving handler → the handler looks elsewhere and finds nothing → set both ends to the same values.
 - `--functions=<dir>` on `upload-sourcemaps` → deprecated, removed in 2.0 → `--backend=<dir>`.
-- `FIREBASE_SERVICE_ACCOUNT_PATH` in a script or CI file → renamed; it still works and warns, and is removed in 2.0 → `GOOGLE_APPLICATION_CREDENTIALS`, with the same path.
+- `FIREBASE_SERVICE_ACCOUNT_PATH` in a script or CI file → deprecated, removed in 2.0 → `GOOGLE_APPLICATION_CREDENTIALS`, with the same path.
 - `releaseId` hard-coded to a constant → a build is no longer tied to its own source maps → pass the git SHA.
 
 ## Attachments

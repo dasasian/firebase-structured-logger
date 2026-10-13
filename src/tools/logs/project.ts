@@ -36,7 +36,10 @@ export function resolveBucket(flagValue: string | undefined, env: NodeJS.Process
   return bucket
 }
 
-/** Replaces every secret in `text`, for messages that quote a command line or a gcloud error. */
+const SERVICE_ACCOUNT_PROJECT = /@[^@\s.]+(\.iam\.gserviceaccount\.com)/g
+
+/** Replaces every secret in `text`, and the project part of any service-account address, for messages that quote a gcloud error. The account name before the `@` stays. */
 export function redact(text: string, secrets: string[]): string {
-  return secrets.filter(Boolean).reduce((safe, secret) => safe.split(secret).join('<hidden>'), text)
+  const withoutSecrets = secrets.filter(Boolean).reduce((safe, secret) => safe.split(secret).join('<hidden>'), text)
+  return withoutSecrets.replace(SERVICE_ACCOUNT_PROJECT, '@<hidden>$1')
 }

@@ -220,6 +220,10 @@ async function testFailuresSayWhatToDo() {
   const attachmentsText = attachments.stderr.join('\n')
   assert('attachments: names the variable and read access to the bucket', attachmentsText.includes('GOOGLE_APPLICATION_CREDENTIALS') && attachmentsText.includes('read access to the bucket'), attachmentsText)
   assert('attachments: the bucket is hidden', !attachmentsText.includes(FAKE_BUCKET), attachmentsText)
+  assert('attachments: the project part of the address is hidden, the account name stays', attachmentsText.includes('fsl-reader@<hidden>.iam.gserviceaccount.com') && !attachmentsText.includes(FAKE_PROJECT), attachmentsText)
+  const uploaderDenied = await runWithFailure(`gcloud failed: ERROR: HTTPError 403: uploader@${FAKE_PROJECT}.iam.gserviceaccount.com does not have storage.objects.list access`, { GOOGLE_APPLICATION_CREDENTIALS: current }, ['attachments', '01JABC'])
+  assert('attachments: uploader@<hidden>.iam.gserviceaccount.com and no project id', uploaderDenied.stderr.join('\n').includes('uploader@<hidden>.iam.gserviceaccount.com') && !uploaderDenied.stderr.join('\n').includes(FAKE_PROJECT), uploaderDenied.stderr.join('\n'))
+  assert('logs: the address keeps its account name', logsText.includes('fsl-reader@<hidden>.iam.gserviceaccount.com'), logsText)
   const noKeyDenied = await runWithFailure(denied, {})
   assert('a permission failure with no key file gets no addition', noKeyDenied.stderr.join('\n').split('\n').length === 1, noKeyDenied.stderr.join('\n'))
   for (const signInFailure of ['Reauthentication failed. cannot prompt during non-interactive execution.', 'You do not currently have an active account selected.']) {
