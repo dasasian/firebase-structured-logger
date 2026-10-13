@@ -513,7 +513,10 @@ is in development.
 
 Only the file is new off the emulator. What the process prints is the production shape, as
 before, and an entry in the file has the shape the emulator branch writes, which is the
-one `fsl logs --local` reads.
+one `fsl logs --local` reads. The severity floor does not move either: `DEBUG` in the
+emulator, `WARNING` everywhere else, so the file of a dev server holds warnings and errors
+until the app passes `minSeverity`. A lower floor would also change what that server
+prints, which is a second change.
 
 ## A backend handler's throw is logged by `withLogging`
 

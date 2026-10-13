@@ -465,6 +465,7 @@ logError(err, { orderId })
 - `logLocalDir` set to a folder inside the Functions source folder → the emulator restarts on every entry and a deploy uploads the files → point it outside, for example `'../.fsl-logs'`; `fsl doctor` reports `logs-inside-functions-source`.
 - `initLogger({ logLocalDir })` in a live server that is not on Cloud Run or Cloud Functions, with `NODE_ENV` not `production` → `K_SERVICE` is unset there, so the server counts as development and writes `dev.jsonl` on the live machine → start the live server with `NODE_ENV=production`, or pass `logLocalDir` only when `NODE_ENV` is not `production`.
 - A test script run by Mocha or `node --test` with `logLocalDir` set and no `NODE_ENV` → neither runner sets `NODE_ENV`, so the tests count as development and write `dev.jsonl` → set `NODE_ENV=test` in the test script.
+- `logInfo(` or `logDebug(` expected in `dev.jsonl` on a development server that is not the Functions emulator, with no `minSeverity` → the default floor is `DEBUG` only in the emulator and `WARNING` everywhere else, so the file holds warnings and errors → pass `minSeverity: 'DEBUG'` to `initLogger`.
 - `initLogger(` missing in the functions entry file → the backend logger is not configured → call it at module load.
 - `initLogger` imported from `/client` inside `functions/` → wrong half → import from `/functions`.
 - `console.log(` left in handlers beside `logInfo(` → unstructured lines, no labels → replace with `logInfo(`.

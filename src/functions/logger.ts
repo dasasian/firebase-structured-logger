@@ -259,7 +259,7 @@ interface FunctionsLoggerConfig {
   logLocalDir?: string;
   logMaxRecordsPerFile?: number; // default 2000
   logMaxRotatedFiles?: number; // default 5
-  minSeverity?: LogSeverity; // default 'WARNING' in production, 'DEBUG' in emulator
+  minSeverity?: LogSeverity; // default 'DEBUG' in the Functions emulator, 'WARNING' everywhere else
 }
 
 let globalConfig: FunctionsLoggerConfig | null = null;
