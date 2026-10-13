@@ -205,7 +205,8 @@ export const bc = {
   },
   /**
    * An error your code handled and chose not to log — a clue if something else goes wrong.
-   * Not for an error you log: the logger adds an `error` breadcrumb for each error it sends.
+   * Not for an error you log: the logger adds an `error` breadcrumb for every error it receives,
+   * sent or not, and never twice in a row.
    */
   handledError: (type: string, data?: Record<string, unknown>) => addBreadcrumb('error', type, data),
 }

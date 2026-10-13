@@ -1,5 +1,6 @@
 /**
- * An error the client logger sends leaves one `error` breadcrumb (#88).
+ * Every error that reaches the client logger leaves one `error` breadcrumb, sent or not, and
+ * never twice in a row (#88, #94).
  *
  * Every case reads the trail of an entry that actually shipped, through the logger's own
  * `logFunction`. Feedback is the probe for "the breadcrumb is in the trail when `error()`
@@ -10,7 +11,7 @@
 
 // Must come first — supplies Blob/FileReader, window events, and the logger reads navigator
 // at module load.
-import { dispatchErrorEvent, dispatchRejectionEvent, sessionStorageStub, setVisibility } from './browserStubs.js'
+import { dispatchErrorEvent, dispatchRejectionEvent, sessionStorageStub, setVisibility, withFrozenTime } from './browserStubs.js'
 
 import { initLogger, sendFeedback } from '../src/client/logger.js'
 import { setupGlobalErrorHandler, handleReactError, handleVueError } from '../src/client/errorHandler.js'
@@ -106,25 +107,69 @@ async function testBreadcrumbAddedDuringAttachmentReadStaysOutOfTheEntry() {
   assert('the trail is the one at the moment of the call', !trail.includes('clicked_while_reading') && !trail.includes('TypeError'), JSON.stringify(trail))
 }
 
-async function testNoBreadcrumbForWhatTheLimiterRefuses() {
-  console.log('\nTest: a duplicate and a refused entry add no breadcrumb')
-  const duplicates = freshLogger({ duplicateLimit: 1 })
-  duplicates.error(new TypeError('same'))
-  duplicates.error(new TypeError('same'))
-  duplicates.error(new TypeError('same'))
-  sendFeedback('probe')
+async function testADuplicateAfterTheFirstBreadcrumbAgedOutLeavesABreadcrumb() {
+  console.log('\nTest: a duplicate six minutes after the first error leaves a breadcrumb, and feedback after it holds the error')
+  const logger = freshLogger({ duplicateLimit: 1 })
+  const start = Date.now()
+  const sixMinutes = 6 * 60 * 1000
+  withFrozenTime(start, () => logger.error(new TypeError('same')))
+  withFrozenTime(start + sixMinutes, () => logger.error(new TypeError('same')))
+  withFrozenTime(start + sixMinutes + 1, () => sendFeedback('probe'))
   await settle()
-  assert('one full copy, two duplicates -> one breadcrumb', JSON.stringify(errorCrumbNames(feedbackEntry())) === '["TypeError"]', JSON.stringify(errorCrumbNames(feedbackEntry())))
 
-  const budget = freshLogger({ burstLimit: 2 })
-  budget.error(new TypeError('one'))
-  budget.error(new TypeError('two'))
-  budget.error(new TypeError('three'))
+  const errorEntries = sent.filter((entry) => entry.severity === 'ERROR')
+  assert('the second error was a duplicate, not sent', errorEntries.length === 1, String(errorEntries.length))
+  assert('the feedback trail holds the duplicate\'s breadcrumb', JSON.stringify(errorCrumbNames(feedbackEntry())) === '["TypeError"]', JSON.stringify(errorCrumbNames(feedbackEntry())))
+}
+
+async function testTheSameErrorFiftyTimesLeavesOneBreadcrumb() {
+  console.log('\nTest: the same error fifty times with nothing between')
+  const logger = freshLogger()
+  for (let i = 0; i < 50; i++) logger.error(new TypeError('loop'))
   sendFeedback('probe')
   await settle()
+
+  assert('one breadcrumb', JSON.stringify(errorCrumbNames(feedbackEntry())) === '["TypeError"]', JSON.stringify(errorCrumbNames(feedbackEntry())))
+}
+
+async function testErrorActionErrorLeavesThreeBreadcrumbsInOrder() {
+  console.log('\nTest: error, action, the same error')
+  const logger = freshLogger()
+  logger.error(new TypeError('again'))
+  addBreadcrumb('action', 'retry')
+  logger.error(new TypeError('again'))
+  sendFeedback('probe')
+  await settle()
+
+  const trail = trailOf(feedbackEntry()).map((crumb) => `${crumb.type}:${crumb.name}`)
+  assert('three breadcrumbs in order', JSON.stringify(trail) === '["error:TypeError","action:retry","error:TypeError"]', JSON.stringify(trail))
+}
+
+async function testAnErrorTheBudgetRefusesLeavesABreadcrumb() {
+  console.log('\nTest: an error the session budget refuses leaves a breadcrumb')
+  const logger = freshLogger({ burstLimit: 2 })
+  logger.error(new TypeError('one'))
+  logger.error(new RangeError('two'))
+  logger.error(new EvalError('three'))
+  sendFeedback('probe')
+  await settle()
+
   const errorEntries = sent.filter((entry) => entry.severity === 'ERROR')
   assert('the third error was refused by the budget', errorEntries.length === 2, String(errorEntries.length))
-  assert('two sent -> two breadcrumbs', errorCrumbNames(feedbackEntry()).length === 2, JSON.stringify(errorCrumbNames(feedbackEntry())))
+  assert('all three left a breadcrumb', JSON.stringify(errorCrumbNames(feedbackEntry())) === '["TypeError","RangeError","EvalError"]', JSON.stringify(errorCrumbNames(feedbackEntry())))
+}
+
+async function testASentEntryTrailDoesNotHoldItsOwnBreadcrumb() {
+  console.log('\nTest: the trail of a sent error entry holds what came before it and not its own breadcrumb')
+  const logger = freshLogger()
+  addBreadcrumb('action', 'pay')
+  logger.error(new TypeError('first'))
+  logger.error(new RangeError('second'))
+  await settle()
+
+  const [first, second] = sent
+  assert('the first holds only the action', JSON.stringify(trailOf(first).map((crumb) => crumb.name)) === '["pay"]', JSON.stringify(trailOf(first)))
+  assert('the second holds the action and the first error, not its own', JSON.stringify(trailOf(second).map((crumb) => crumb.name)) === '["pay","TypeError"]', JSON.stringify(trailOf(second)))
 }
 
 async function testNoBreadcrumbForEntriesWithoutAnError() {
@@ -153,6 +198,7 @@ async function testARepeatSummaryAddsNoBreadcrumb() {
   const logger = freshLogger({ duplicateLimit: 3 })
   for (let i = 0; i < 5; i++) logger.error(new TypeError('summarised'))
   await settle()
+  addBreadcrumb('action', 'after_the_errors')
   setVisibility('hidden')
   await settle()
   setVisibility('visible')
@@ -160,7 +206,7 @@ async function testARepeatSummaryAddsNoBreadcrumb() {
   assert('a summary was sent', sent.some((entry) => entry.labels.repeatOf !== undefined))
   sendFeedback('probe')
   await settle()
-  assert('3 full copies -> 3 breadcrumbs, none from the summary', errorCrumbNames(feedbackEntry()).length === 3, JSON.stringify(errorCrumbNames(feedbackEntry())))
+  assert('five errors in a row -> one breadcrumb, none from the summary', JSON.stringify(errorCrumbNames(feedbackEntry())) === '["TypeError"]', JSON.stringify(errorCrumbNames(feedbackEntry())))
 }
 
 async function testTheBreadcrumbHoldsTheTypeAndNothingElse() {
@@ -177,7 +223,7 @@ async function testTheBreadcrumbHoldsTheTypeAndNothingElse() {
 }
 
 async function testAFloodLeavesAsManyBreadcrumbsAsFullCopies() {
-  console.log('\nTest: the same error 20 times in a loop')
+  console.log('\nTest: the same error 20 times in a loop, with the limiter letting 3 through')
   const logger = freshLogger({ duplicateLimit: 3 })
   for (let i = 0; i < 20; i++) logger.error(new TypeError('flood'))
   sendFeedback('probe')
@@ -186,8 +232,7 @@ async function testAFloodLeavesAsManyBreadcrumbsAsFullCopies() {
   const fullCopies = sent.filter((entry) => entry.severity === 'ERROR')
   const crumbs = errorCrumbNames(feedbackEntry()).length
   assert('the limiter let 3 through', fullCopies.length === 3, String(fullCopies.length))
-  assert('breadcrumbs equal full copies', crumbs === fullCopies.length, String(crumbs))
-  assert('and are fewer than 20', crumbs < 20, String(crumbs))
+  assert('what the limiter decides does not change the breadcrumbs: one for the whole loop', crumbs === 1, String(crumbs))
 }
 
 function signatureKeysFor(message: string): string[] {
@@ -244,7 +289,11 @@ async function main(): Promise<void> {
   await testFeedbackOnTheNextLineCarriesTheError()
   await testAttachmentsDoNotChangeWhereTheTrailIsRead()
   await testBreadcrumbAddedDuringAttachmentReadStaysOutOfTheEntry()
-  await testNoBreadcrumbForWhatTheLimiterRefuses()
+  await testADuplicateAfterTheFirstBreadcrumbAgedOutLeavesABreadcrumb()
+  await testTheSameErrorFiftyTimesLeavesOneBreadcrumb()
+  await testErrorActionErrorLeavesThreeBreadcrumbsInOrder()
+  await testAnErrorTheBudgetRefusesLeavesABreadcrumb()
+  await testASentEntryTrailDoesNotHoldItsOwnBreadcrumb()
   await testNoBreadcrumbForEntriesWithoutAnError()
   await testARepeatSummaryAddsNoBreadcrumb()
   await testTheBreadcrumbHoldsTheTypeAndNothingElse()

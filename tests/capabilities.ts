@@ -173,9 +173,12 @@ function testTheLoggerAddsTheErrorBreadcrumbAndTheTextsSayWhy() {
   const handledErrorLine = mistakesOf(/^Breadcrumbs$/).split('\n').find((line) => line.includes('bc.handledError(` next to `logger.error('))
   assert('the handledError next to logger.error line exists', handledErrorLine !== undefined)
   assert('it gives the reason that the trail shows the error twice', handledErrorLine?.includes('the trail shows the error twice') === true, handledErrorLine)
+  assert('it says every error leaves a breadcrumb, sent or not, never twice in a row', handledErrorLine?.includes('for every error that reaches it, sent or not, and never twice in a row') === true, handledErrorLine)
+  assert('it says the removal needs no condition', handledErrorLine?.includes('with no condition') === true, handledErrorLine)
   assert('it does not say the logs hold it in time order', handledErrorLine?.includes('time order') === false, handledErrorLine)
   assert('Breadcrumbs Gives names the error breadcrumb the logger adds', sectionPart('Breadcrumbs', 'Gives').includes('An `error` breadcrumb, named with the entry\'s `errorType`'))
-  assert('Feedback Gives says the trail shows the errors logged before it', sectionPart('Feedback', 'Gives').includes('shows the errors logged before it'))
+  assert('Breadcrumbs Gives says it is added for every error, sent, duplicate or refused', sectionPart('Breadcrumbs', 'Gives').includes('for every error that reaches the client logger') && sectionPart('Breadcrumbs', 'Gives').includes('counts it as a duplicate or refuses it'))
+  assert('Feedback Gives says the trail shows the errors that reached the logger before it', sectionPart('Feedback', 'Gives').includes('shows the errors that reached the logger before it'))
 }
 
 function readTree(dir: string): string[] {

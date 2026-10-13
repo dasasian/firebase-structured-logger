@@ -186,9 +186,10 @@ export class Logger<
   }
 
   /**
-   * Sends the error. When the entry is sent, the logger also adds an `error` breadcrumb named with
-   * its `errorType`, with no data, so the trail of every later entry shows it. An error the rate
-   * limiter counts as a duplicate or refuses adds none.
+   * Sends the error. Every error that reaches the logger also leaves one `error` breadcrumb named
+   * with its `errorType`, with no data, so the trail of every later entry shows it. That holds
+   * when the rate limiter counts the error as a duplicate or refuses it. Nothing is added when the
+   * newest breadcrumb is already an `error` with the same name.
    */
   error(
     raw: unknown,
@@ -248,7 +249,7 @@ export class Logger<
    * that does nothing, a total that comes out wrong, the wrong data rendered —
    * none of them throw, so none are captured, and you hear about them weeks
    * later. Feedback is the capture mechanism for that whole class, and it is
-   * actionable only because the breadcrumb trail, errors logged before it included, is
+   * actionable only because the breadcrumb trail, errors that reached the logger before it included, is
    * already in memory when the user hits send: "the discount didn't apply" is a complaint, the same
    * sentence plus the trail is a reproduction.
    *
@@ -310,6 +311,14 @@ export class Logger<
       ...labels,
     }
 
+    const trailBeforeThisEntry = getLastBreadcrumbs(MAX_BREADCRUMBS)
+    if (error) {
+      const errorBreadcrumbName = allLabels.errorType ?? 'UnknownError'
+      const newestBreadcrumb = trailBeforeThisEntry[trailBeforeThisEntry.length - 1]
+      const sameErrorIsAlreadyNewest = newestBreadcrumb?.type === 'error' && newestBreadcrumb.name === errorBreadcrumbName
+      if (!sameErrorIsAlreadyNewest) addBreadcrumb('error', errorBreadcrumbName)
+    }
+
     const decision =
       isFeedback || isRepeatSummary
         ? ({ allowed: true } as const)
@@ -329,9 +338,6 @@ export class Logger<
     if (keyJoiningFullCopiesToTheirRepeatSummary) {
       allLabels.repeatKey = keyJoiningFullCopiesToTheirRepeatSummary
     }
-
-    const trailBeforeThisEntry = getLastBreadcrumbs(MAX_BREADCRUMBS)
-    if (error) addBreadcrumb('error', allLabels.errorType ?? 'UnknownError')
 
     try {
       let base64Attachments: Record<string, string> | undefined

@@ -61,7 +61,7 @@ The receiving end is `createClientLogFunction` or `createHttpLogHandler` from `@
 ### Gives
 - A trail of the last 50 steps (at most 5 minutes old), attached to every error and every piece of feedback. Held in memory only.
 - `bc.action`, `bc.state`, `bc.handledError`.
-- An `error` breadcrumb, named with the entry's `errorType`, for each error the client logger sends, from `logger.error(`, the global handler, `handleReactError`, `handleVueError` and the router adapters. No data. An error counted as a duplicate or refused by the rate limiter adds none.
+- An `error` breadcrumb, named with the entry's `errorType`, for every error that reaches the client logger, from `logger.error(`, the global handler, `handleReactError`, `handleVueError` and the router adapters. No data. It is added whether the rate limiter sends the error, counts it as a duplicate or refuses it, and not again while the newest breadcrumb is an `error` with the same name.
 
 ### Fits when
 - Click or submit handlers that call something that can fail (`await`, `fetch(`, `httpsCallable(`) with no `bc.action(` before it.
@@ -80,7 +80,7 @@ bc.handledError('draft_save_failed', { attempt: 1 })
 
 ### Mistakes
 - `bc.error(` → deprecated, removed in 2.0 → `bc.handledError(` and only for an error that was handled and not logged.
-- `bc.handledError(` next to `logger.error(` for the same error → the logger already adds an `error` breadcrumb for each error it sends, so the trail shows the error twice → remove the breadcrumb.
+- `bc.handledError(` next to `logger.error(` for the same error → the logger already adds an `error` breadcrumb for every error that reaches it, sent or not, and never twice in a row, so the trail shows the error twice → remove the breadcrumb, with no condition.
 - `bc.action(` in the handler of an element that also has `data-fsl-action` → the mark records an `action` breadcrumb before the handler runs and the call records another, so one click leaves two breadcrumbs, with the same name or not → keep one: delete the call, or take the mark off and keep the call when it carries data.
 - `bc.action('x', { email, token, card })` → breadcrumb `data` is written to the logs verbatim → record the step, not the data.
 - `bc.nav(` anywhere → deprecated, removed in 2.0; ignored when navigation is on → `enableNavigation()`, or `navigatedTo()` without URL routing.
@@ -349,7 +349,7 @@ configureAttachments({ bucket: 'my-app-user-content', prefix: 'evidence' })
 ## Feedback
 
 ### Gives
-- `sendFeedback(text, options)` writes a `NOTICE` entry with the breadcrumb trail, which shows the errors logged before it as `error` breadcrumbs, `screen`, `userId`, `releaseId`, `platform`, `browser`, and optional attachments and labels. Marked `labels.feedback="true"`.
+- `sendFeedback(text, options)` writes a `NOTICE` entry with the breadcrumb trail, which shows the errors that reached the logger before it as `error` breadcrumbs, `screen`, `userId`, `releaseId`, `platform`, `browser`, and optional attachments and labels. Marked `labels.feedback="true"`.
 - No UI, returns nothing, exempt from the rate limiter and the severity floor, not sent to Error Reporting.
 
 ### Fits when
