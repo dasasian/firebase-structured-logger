@@ -42,6 +42,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A flag's value comes after `=` or after a space in `fsl doctor` and `fsl upload-sourcemaps`.** `fsl doctor --backend backend` used to read the folder as `true`; `--backend`, `--dist`, `--functions`, `--bucket`, `--prefix` and `--release` now take the next word, and a value flag with no value exits 1 and shows the correct form. `--json`, `--strict`, `--force`, `--global` and `--embed-sourcemaps` stay switches and never take the next word.
 - **A cut `fsl logs` scan no longer says "0 matched".** When the scan stopped at its 5000-entry limit and no row matched, it printed "scanned: only the newest 5000 entries" and "0 entries matched", which reads as "nothing is there". It now prints one line that says the answer is not known, how many entries were read, and how to narrow.
 - **`fsl doctor` no longer invents a `./functions` folder.** A `firebase.json` with `hosting` and no `functions` key, for an app whose backend runs on Cloud Run, reported `could-not-check` for `./functions` and `callable-without-firebase-functions` for a folder nothing named. `callable-without-firebase-functions` now appears only when `firebase.json` has a `functions` key.
 - **The `duplicate-storage` fix says what a yarn 1 user does.** It names the lockfile edit that left one copy of `@google-cloud/storage` in a test project. The `skill-out-of-date` fix says to run `install-skills` from the project root with the same `fsl` that ran doctor, in place of `npx fsl`.

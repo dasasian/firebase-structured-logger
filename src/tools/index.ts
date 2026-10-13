@@ -7,11 +7,15 @@ import { runDoctor, exitCodeFor, formatDoctorReport } from './doctor'
 import { warnDeprecated } from '../shared/deprecate'
 import { runLogs } from './logs/command'
 import { KeyFileError } from './keyFile'
+import { parseCommandFlags, UPLOAD_FLAGS, DOCTOR_FLAGS, INSTALL_SKILLS_FLAGS } from './commandFlags'
+import { UsageError } from './logs/flags'
 
 const [, , command, ...rawArgs] = process.argv
 
 const USAGE = `
 firebase-structured-logger (fsl)
+
+A flag's value follows = or a space: --backend=backend and --backend backend are the same.
 
 Commands:
   fsl upload-sourcemaps [--bucket=<name>] [--backend=<path>] [--embed-sourcemaps] [--release=<id>] [--dist=<path>] [--prefix=<path>]
@@ -73,19 +77,6 @@ function wantsHelp(): boolean {
   return command === 'help' || [command, ...rawArgs].some(arg => arg === '--help' || arg === '-h')
 }
 
-function parseArgs(args: string[]): Record<string, string> {
-  const result: Record<string, string> = {}
-  for (const arg of args) {
-    const match = arg.match(/^--([^=]+)=(.*)$/)
-    if (match) {
-      result[match[1]] = match[2]
-    } else if (arg.startsWith('--')) {
-      result[arg.slice(2)] = 'true'
-    }
-  }
-  return result
-}
-
 function loadEnvFile(filePath: string): void {
   const resolved = path.resolve(process.cwd(), filePath)
   if (!fs.existsSync(resolved)) return
@@ -109,14 +100,13 @@ async function main() {
     return
   }
 
-  const args = parseArgs(rawArgs)
-
   loadEnvFile('.env.local')
 
   switch (command) {
     case 'upload-sourcemaps': {
+      const { values: args, switches } = parseCommandFlags(rawArgs, UPLOAD_FLAGS)
       const bucket = args.bucket ?? process.env.VITE_FIREBASE_STORAGE_BUCKET ?? process.env.FIREBASE_STORAGE_BUCKET
-      const embed = args['embed-sourcemaps'] === 'true'
+      const embed = switches.has('embed-sourcemaps')
       if (args.functions !== undefined) {
         warnDeprecated('--functions', '--backend')
       }
@@ -145,7 +135,8 @@ async function main() {
     }
 
     case 'install-skills': {
-      process.exit(await installSkills({ global: args.global === 'true', force: args.force === 'true' }))
+      const { switches } = parseCommandFlags(rawArgs, INSTALL_SKILLS_FLAGS)
+      process.exit(await installSkills({ global: switches.has('global'), force: switches.has('force') }))
     }
 
     case 'logs': {
@@ -153,17 +144,18 @@ async function main() {
     }
 
     case 'doctor': {
+      const { values, switches } = parseCommandFlags(rawArgs, DOCTOR_FLAGS)
       const report = runDoctor({
         projectRoot: process.cwd(),
-        backend: args.backend,
-        dist: args.dist,
+        backend: values.backend,
+        dist: values.dist,
       })
-      if (args.json === 'true') {
-        console.log(JSON.stringify({ ...report, exitCode: exitCodeFor(report, args.strict === 'true') }))
+      if (switches.has('json')) {
+        console.log(JSON.stringify({ ...report, exitCode: exitCodeFor(report, switches.has('strict')) }))
       } else {
         console.log(formatDoctorReport(report))
       }
-      process.exit(exitCodeFor(report, args.strict === 'true'))
+      process.exit(exitCodeFor(report, switches.has('strict')))
     }
 
     default: {
@@ -177,6 +169,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err instanceof KeyFileError ? err.message : err)
+  console.error(err instanceof KeyFileError || err instanceof UsageError ? err.message : err)
   process.exit(1)
 })
