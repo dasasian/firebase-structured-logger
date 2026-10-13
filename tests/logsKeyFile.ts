@@ -77,6 +77,48 @@ function testWhichNameWins() {
   assert('an empty old name does not hide the new one', emptyOld.result?.path === current && emptyOld.warnings.length === 0)
 }
 
+function withHomeFolder<T>(home: string, body: () => T): T {
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE }
+  process.env.HOME = home
+  process.env.USERPROFILE = home
+  try {
+    return body()
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  }
+}
+
+function errorMessageOf(body: () => unknown): string {
+  try {
+    body()
+  } catch (error) {
+    return (error as Error).message
+  }
+  return ''
+}
+
+function testLeadingTildeIsTheHomeFolder() {
+  console.log('\nTest: a leading ~/ or a bare ~ is the home folder; a ~ elsewhere is left alone')
+  const { cwd } = projectWithKeyFiles()
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'fsl-home-'))
+  fs.mkdirSync(path.join(home, 'keys'))
+  const inHome = keyFilePlaceholder(path.join(home, 'keys'), 'app.json')
+  fs.mkdirSync(path.join(cwd, 'keys', '~'), { recursive: true })
+  const underFolderNamedTilde = keyFilePlaceholder(path.join(cwd, 'keys', '~'), 'app.json')
+
+  withHomeFolder(home, () => {
+    assert('~/keys/app.json is the file in the home folder', resolveKeyFile({ GOOGLE_APPLICATION_CREDENTIALS: '~/keys/app.json' }, cwd)?.path === inHome)
+    assert('keys/~/app.json is the file in the folder named ~ under cwd', resolveKeyFile({ GOOGLE_APPLICATION_CREDENTIALS: 'keys/~/app.json' }, cwd)?.path === underFolderNamedTilde)
+    const named = errorMessageOf(() => resolveKeyFile({ GOOGLE_APPLICATION_CREDENTIALS: '~other/app.json' }, cwd))
+    assert('~other/app.json stays a path under cwd', named.includes(path.join(cwd, '~other', 'app.json')), named)
+    const bare = errorMessageOf(() => resolveKeyFile({ GOOGLE_APPLICATION_CREDENTIALS: '~' }, cwd))
+    assert('a bare ~ is the home folder, which is not a file', bare.includes(`names ${home},`), bare)
+  })
+}
+
 async function testGcloudChildGetsTheOverrideAndTheParentDoesNot() {
   console.log('\nTest: the gcloud process of logs and attachments gets the override; the parent does not')
   const { cwd, current } = projectWithKeyFiles()
@@ -239,6 +281,7 @@ async function testFailuresSayWhatToDo() {
 
 async function main() {
   testWhichNameWins()
+  testLeadingTildeIsTheHomeFolder()
   await testGcloudChildGetsTheOverrideAndTheParentDoesNot()
   await testRealRunnerGivesTheOverrideToTheChildOnly()
   await testMissingFileIsAnErrorAndNothingIsSent()

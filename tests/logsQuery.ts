@@ -154,6 +154,29 @@ async function testUnknownFlagListsValidOnes() {
   assert('never reached the transport', run.cloudRequests.length === 0)
 }
 
+async function testAnExampleIsForTheCommandThatWasTyped() {
+  console.log('\nTest: a wrong flag, or a flag with no value, shows an example of the command that was typed')
+  const cwd = tempProject()
+  const queryExample = 'Example: fsl logs --where severity=ERROR'
+  const schemaExample = 'Example: fsl logs schema --refresh'
+  const attachmentsExample = 'Example: fsl logs attachments 01JAXYZ... --bucket my-bucket'
+  const cases: Array<{ name: string; argv: string[]; example: string }> = [
+    { name: 'query: unknown flag', argv: ['--filter', 'x'], example: queryExample },
+    { name: 'query: flag with no value', argv: ['--since'], example: queryExample },
+    { name: 'schema: unknown flag', argv: ['schema', '--since', '7d'], example: schemaExample },
+    { name: 'schema: flag with no value', argv: ['schema', '--project'], example: schemaExample },
+    { name: 'attachments: unknown flag', argv: ['attachments', '01JABC', '--since', '7d'], example: attachmentsExample },
+    { name: 'attachments: flag with no value', argv: ['attachments', '01JABC', '--bucket'], example: attachmentsExample },
+  ]
+  for (const { name, argv, example } of cases) {
+    const run = await runFsl(argv, { cwd })
+    const message = run.stderr.join('\n')
+    const shown = message.split('\n').find((line) => line.startsWith('Example:')) ?? ''
+    assert(`${name}: exits 1 and shows ${example}`, run.code === 1 && message.includes(example), message)
+    assert(`${name}: shows no other command's example`, [queryExample, schemaExample, attachmentsExample].filter((other) => other !== example).every((other) => !shown.startsWith(other)), shown)
+  }
+}
+
 async function testSelectWithNoValuePrintsTheFieldList() {
   console.log('\nTest: --select with no value prints the field list')
   const cwd = tempProject()
@@ -295,6 +318,7 @@ async function main() {
   await testLimitPrintsExactlyThatManyAndTheStderrLine()
   await testUnknownFieldGivesFixItError()
   await testUnknownFlagListsValidOnes()
+  await testAnExampleIsForTheCommandThatWasTyped()
   await testSelectWithNoValuePrintsTheFieldList()
   await testNoProjectIsAClearError()
   await testGcloudErrorsNeverPrintTheProject()

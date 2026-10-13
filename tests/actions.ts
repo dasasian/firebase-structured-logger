@@ -11,7 +11,7 @@
 import '../tests/browserStubs.js'
 
 import { enableActions } from '../src/client/actions.js'
-import { clearBreadcrumbs, getLastBreadcrumbs } from '../src/client/breadcrumbs.js'
+import { bc, clearBreadcrumbs, getLastBreadcrumbs } from '../src/client/breadcrumbs.js'
 import { initLogger } from '../src/client/logger.js'
 import { setupGlobalErrorHandler } from '../src/client/errorHandler.js'
 import { configureRateLimiter, resetRateLimiter } from '../src/client/rateLimiter.js'
@@ -203,6 +203,18 @@ function testStopPropagationDoesNotHideTheAction() {
   assert('the crumb was recorded', names().join(',') === 'action:apply_discount', names().join(','))
 }
 
+function testBcActionInTheHandlerOfAMarkedElementRecordsASecondCrumb() {
+  console.log('\nTest: bc.action in the handler of a marked element is a second crumb for the same click, whatever its name')
+  setPage('<button id="same" data-fsl-action="apply_discount">Apply</button><button id="other" data-fsl-action="apply_discount">Apply</button>')
+  el('same').addEventListener('click', () => bc.action('apply_discount'))
+  el('same').click()
+  assert('same name: two crumbs', names().join(',') === 'action:apply_discount,action:apply_discount', names().join(','))
+  clearBreadcrumbs()
+  el('other').addEventListener('click', () => bc.action('discount_applied', { code: 'SAVE10' }))
+  el('other').click()
+  assert('other name, with data: the mark first, then the call', names().join(',') === 'action:apply_discount,action:discount_applied', names().join(','))
+}
+
 async function testThrowingHandlerErrorEndsWithTheAction() {
   console.log('\nTest: an error thrown by the app handler carries the action as its last breadcrumb')
   setupGlobalErrorHandler()
@@ -279,6 +291,7 @@ async function run() {
   testClickInsideMarkedFormIsNotTheFormsAction()
   testMarkInsideAnOpenShadowRootIsFound()
   testStopPropagationDoesNotHideTheAction()
+  testBcActionInTheHandlerOfAMarkedElementRecordsASecondCrumb()
   await testThrowingHandlerErrorEndsWithTheAction()
   testUnmarkedEmptyAndContentNeverReachACrumb()
   testCallingEnableActionsTwiceRecordsOnePerAction()

@@ -1,17 +1,17 @@
-import { ATTACHMENT_FLAGS, QUERY_FLAGS, SCHEMA_FLAGS, UsageError, parseFlags, type ParsedFlags } from './flags.js'
+import { ATTACHMENT_FLAGS, QUERY_FLAGS, SCHEMA_FLAGS, UsageError, parseFlags, type FlagSet, type ParsedFlags } from './flags.js'
 
 const SUBCOMMAND_FLAGS = { schema: SCHEMA_FLAGS, attachments: ATTACHMENT_FLAGS }
 
-const EVERY_FLAG = { ...QUERY_FLAGS, ...SCHEMA_FLAGS, ...ATTACHMENT_FLAGS }
-
 const SUBCOMMAND_EXAMPLE = 'fsl logs schema --local'
+
+const EVERY_FLAG: FlagSet = { example: SUBCOMMAND_EXAMPLE, flags: { ...QUERY_FLAGS.flags, ...SCHEMA_FLAGS.flags, ...ATTACHMENT_FLAGS.flags } }
 
 function isSubcommand(word: string): word is keyof typeof SUBCOMMAND_FLAGS {
   return word in SUBCOMMAND_FLAGS
 }
 
-function carriedSwitches(flags: ParsedFlags, accepted: Record<string, unknown>): string[] {
-  return [...flags.switches].filter((name) => name in accepted).map((name) => `--${name}`)
+function carriedSwitches(flags: ParsedFlags, accepted: FlagSet): string[] {
+  return [...flags.switches].filter((name) => name in accepted.flags).map((name) => `--${name}`)
 }
 
 /** The query takes flags only: any word is an error, and `schema` or `attachments` in the wrong place gets the correct form. */

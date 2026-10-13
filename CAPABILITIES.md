@@ -81,6 +81,7 @@ bc.handledError('draft_save_failed', { attempt: 1 })
 ### Mistakes
 - `bc.error(` → deprecated, removed in 2.0 → `bc.handledError(` and only for an error that was handled and not logged.
 - `bc.handledError(` next to `logger.error(` for the same error → the logger already adds an `error` breadcrumb for each error it sends, so the trail shows the error twice → remove the breadcrumb.
+- `bc.action(` in the handler of an element that also has `data-fsl-action` → the mark records an `action` breadcrumb before the handler runs and the call records another, so one click leaves two breadcrumbs, with the same name or not → keep one: delete the call, or take the mark off and keep the call when it carries data.
 - `bc.action('x', { email, token, card })` → breadcrumb `data` is written to the logs verbatim → record the step, not the data.
 - `bc.nav(` anywhere → deprecated, removed in 2.0; ignored when navigation is on → `enableNavigation()`, or `navigatedTo()` without URL routing.
 
@@ -226,7 +227,7 @@ Mark first the controls of the flows where a failure costs the user most: paymen
 - A mark on a wrapper around a `<form>`, `<select>` or `<input>` → the wrapper counts on click while the control counts on change, so the change is not the wrapper's action → put the mark on the control or the form itself.
 - A mark on a `<form>` plus marks on its submit button → the submit is recorded for the form and the button's click is recorded as a second action → mark the form only.
 - A mark on every row, option or key press of a list → the 50-entry trail fills with repeats and pushes out the steps that matter → mark the controls that start something.
-- `bc.action('x')` in a handler for an element that is also marked with `data-fsl-action="x"` → the action is recorded twice → keep only the mark, or keep `bc.action` for a call that has data.
+- `bc.action(` in the handler of an element that also has `data-fsl-action` → the mark records an `action` breadcrumb before the handler runs and the call records another, so one click leaves two breadcrumbs, with the same name or not → keep one: delete the call, or take the mark off and keep the call when it carries data.
 - `enableActions` imported from `/client` → it lives in its own entry point → import from `/client/actions`.
 - Marks inside a closed shadow root → not found → move the mark outside the closed root, or open the root.
 - `enableActions()` never called but `data-fsl-action` present → the marks are ignored → call it once at startup.
@@ -465,7 +466,7 @@ logError(err, { orderId })
 - `logLocalDir` set to a folder inside the Functions source folder → the emulator restarts on every entry and a deploy uploads the files → point it outside, for example `'../.fsl-logs'`; `fsl doctor` reports `logs-inside-functions-source`.
 - `initLogger({ logLocalDir })` in a live server that is not on Cloud Run or Cloud Functions, with `NODE_ENV` not `production` → `K_SERVICE` is unset there, so the server counts as development and writes `dev.jsonl` on the live machine → start the live server with `NODE_ENV=production`, or pass `logLocalDir` only when `NODE_ENV` is not `production`.
 - A test script run by Mocha or `node --test` with `logLocalDir` set and no `NODE_ENV` → neither runner sets `NODE_ENV`, so the tests count as development and write `dev.jsonl` → set `NODE_ENV=test` in the test script.
-- `logInfo(` or `logDebug(` expected in `dev.jsonl` on a development server that is not the Functions emulator, with no `minSeverity` → the default floor is `DEBUG` only in the emulator and `WARNING` everywhere else, so the file holds warnings and errors → pass `minSeverity: 'DEBUG'` to `initLogger`.
+- `logInfo(` or `logDebug(` expected in `dev.jsonl` on a development server that is not the Functions emulator, with no `minSeverity` → the default floor is `DEBUG` only in the emulator and `WARNING` everywhere else, so the file holds warnings and errors → pass `minSeverity: 'DEBUG'` in development only, for example `minSeverity: process.env.K_SERVICE === undefined && process.env.NODE_ENV !== 'production' ? 'DEBUG' : undefined`: `minSeverity` is one floor for the whole process, live too, so the same value in code that also runs live makes the live server write every debug line.
 - `initLogger(` missing in the functions entry file → the backend logger is not configured → call it at module load.
 - `initLogger` imported from `/client` inside `functions/` → wrong half → import from `/functions`.
 - `console.log(` left in handlers beside `logInfo(` → unstructured lines, no labels → replace with `logInfo(`.

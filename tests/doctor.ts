@@ -377,7 +377,18 @@ function testSkillOutOfDateFires() {
   assert('skill-out-of-date fires', finding !== undefined)
   assert('at warning level', finding?.level === 'warning')
   assert('names both versions', !!finding && finding.message.includes('0.0.1') && finding.message.includes(RUNNING_VERSION))
-  assert('fix is install-skills', finding?.fix.includes('install-skills') === true && !finding.fix.includes('npx') && !finding.fix.includes('<'), finding?.fix)
+  assert('fix is install-skills', finding?.fix.includes('install-skills') === true && finding.fix.includes('--force') && !finding.fix.includes('npx') && !finding.fix.includes('<'), finding?.fix)
+  cleanup([root])
+}
+
+function testStorageLineNamesTheLibraryAndNoBucket() {
+  console.log('\nTest: the Storage line for firebase-admin names the library and no bucket')
+  const { root, backend } = firebaseProject()
+  writePackage(backend, 'firebase-admin', '14.5.0')
+  const report = runDoctor({ projectRoot: root })
+  assert('storage is firebase-admin', report.setup.storage === 'firebase-admin', report.setup.storage)
+  const line = formatDoctorReport(report).split('\n').find((l) => l.trim().startsWith('Storage'))
+  assert('the line names firebase-admin and no bucket', line !== undefined && line.includes('firebase-admin') && !/bucket/i.test(line), line)
   cleanup([root])
 }
 
@@ -756,6 +767,7 @@ function run() {
   testLogsInsideFunctionsSourceQuietWithNoJsonl()
   testLogsInsideFunctionsSourceMultiCodebase()
   testSkillOutOfDateFires()
+  testStorageLineNamesTheLibraryAndNoBucket()
   testSkillOutOfDateQuietWhenEqual()
   testSkillWithoutStampIsNotOurs()
   testSkillCheckNeedsNothingInNodeModules()

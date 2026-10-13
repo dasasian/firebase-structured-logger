@@ -164,7 +164,27 @@ function testJsonCarriesSkillOutOfDate() {
   const findings = (JSON.parse(out.stdout.trim()) as { findings: Array<Record<string, unknown>> }).findings
   const finding = findings.find((f) => f.id === 'skill-out-of-date')
   assert('skill-out-of-date is present', finding !== undefined, JSON.stringify(findings))
-  assert('at warning level, with the install-skills fix', finding?.level === 'warning' && typeof finding?.fix === 'string' && finding.fix.includes('install-skills') && !finding.fix.includes('npx') && !finding.fix.includes('<'), JSON.stringify(finding))
+  assert('at warning level, with the install-skills fix', finding?.level === 'warning' && typeof finding?.fix === 'string' && finding.fix.includes('install-skills') && finding.fix.includes('--force') && !finding.fix.includes('npx') && !finding.fix.includes('<'), JSON.stringify(finding))
+  fs.rmSync(root, { recursive: true, force: true })
+}
+
+function testTheFixOfASkillOutOfDateWorksAsWrittenWithNoTerminal() {
+  console.log('\nTest: the skill-out-of-date fix, run as written with no terminal, replaces the stale skill')
+  const { root } = cleanFirebaseProject()
+  const skillFile = path.join(root, '.claude', 'skills', 'fsl-review', 'SKILL.md')
+  fs.mkdirSync(path.dirname(skillFile), { recursive: true })
+  fs.writeFileSync(skillFile, '---\nname: fsl-review\ndescription: x\nfsl-version: 0.0.1\n---\n')
+  const findingsOf = () => (JSON.parse(runCli(root, ['--json']).stdout.trim()) as { findings: Array<{ id: string; fix: string }> }).findings
+  const finding = findingsOf().find((f) => f.id === 'skill-out-of-date')
+  const command = /`fsl ([^`]+)`/.exec(finding?.fix ?? '')?.[1]
+  assert('the fix holds a command in code type', command !== undefined, finding?.fix)
+  if (command === undefined) {
+    fs.rmSync(root, { recursive: true, force: true })
+    return
+  }
+  const ran = spawnSync('npx', ['tsx', CLI, ...command.split(' ')], { cwd: root, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] })
+  assert('the command exits 0', ran.status === 0, `status=${ran.status} stderr=${ran.stderr.slice(0, 300)}`)
+  assert('the finding is gone', !findingsOf().some((f) => f.id === 'skill-out-of-date'), JSON.stringify(findingsOf()))
   fs.rmSync(root, { recursive: true, force: true })
 }
 
@@ -215,6 +235,7 @@ function testAmbiguousSearchExitsOne() {
 function run() {
   testCleanExitsZero()
   testJsonCarriesSkillOutOfDate()
+  testTheFixOfASkillOutOfDateWorksAsWrittenWithNoTerminal()
   testErrorExitsOne()
   testWarningExitsZeroWithoutStrict()
   testWarningExitsOneWithStrict()

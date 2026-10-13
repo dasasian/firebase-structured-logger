@@ -155,6 +155,19 @@ function testKnownMistakesAreNamed() {
   }
 }
 
+function testTwoMistakesLinesThatAnAppCopiedWrong() {
+  console.log('\nTest: the minSeverity line says one floor for the whole process, and bc.action beside a mark is named in both sections')
+  const floorLine = mistakesOf(/^Cloud Functions logger$/).split('\n').find((line) => line.includes('`logDebug(` expected in `dev.jsonl`'))
+  assert('the dev.jsonl line exists', floorLine !== undefined)
+  assert('it says the option is one floor for the whole process, live too', floorLine?.includes('one floor for the whole process, live too') === true, floorLine)
+  assert('it gives the value passed in development only', floorLine?.includes("in development only") === true && floorLine.includes("? 'DEBUG' : undefined"), floorLine)
+  for (const title of ['Breadcrumbs', 'Marked actions']) {
+    const line = mistakesOf(new RegExp(`^${title}$`)).split('\n').find((l) => l.includes('`bc.action(` in the handler of an element that also has `data-fsl-action`'))
+    assert(`${title}: a line for bc.action in the handler of a marked element`, line !== undefined)
+    assert(`${title}: it says one click leaves two breadcrumbs and to keep one`, line?.includes('one click leaves two breadcrumbs') === true && line.includes('keep one'), line)
+  }
+}
+
 function testTheLoggerAddsTheErrorBreadcrumbAndTheTextsSayWhy() {
   console.log('\nTest: the logger adds an error breadcrumb, and Breadcrumbs and Feedback say so')
   const handledErrorLine = mistakesOf(/^Breadcrumbs$/).split('\n').find((line) => line.includes('bc.handledError(` next to `logger.error('))
@@ -213,6 +226,9 @@ function testReviewSkillShape() {
   assert('says the Fits when words are not the limit of the search', /not the limit of the search/.test(flat))
   assert('says in one line what was read', /Say in one line what you read: how many files, and the kinds of place/.test(flat))
   assert('reads comments before proposing a removal', /Before you propose to remove code, read the comments at that place/.test(flat))
+  assert('holds each Mistakes line of a capability in use against the code before calling it right', /For each capability the code already uses, hold each Mistakes line of that capability against the code in the scope/.test(flat) && /Call it right only after every Mistakes line of that capability was held against it/.test(flat))
+  assert('says the count of places is for one capability over the whole scope', /The count is for that one capability over the whole scope/.test(flat))
+  assert('says doctor runs once, with any one install, when the versions are the same', /Run it once, with any one install, when the installs in the project have the same version/.test(flat))
   assert('gives both sides and does not call the removal a fix', /give both sides and do not call the removal a fix/.test(flat))
 }
 
@@ -352,6 +368,7 @@ testSectionShape()
 testSectionsStandAlone()
 testExamplesImportRealSymbols()
 testKnownMistakesAreNamed()
+testTwoMistakesLinesThatAnAppCopiedWrong()
 testTheLoggerAddsTheErrorBreadcrumbAndTheTextsSayWhy()
 testFixtureApps()
 testReviewSkillShape()

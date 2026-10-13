@@ -528,7 +528,7 @@ function checkSkillsOutOfDate(projectRoot: string, runningVersion: string, findi
       id: 'skill-out-of-date',
       level: 'warning',
       message: `.claude/skills/${skill.name} was installed by fsl ${skill.version}; this is fsl ${runningVersion}.`,
-      fix: 'Run install-skills from the project root, with the same fsl that ran doctor.',
+      fix: 'Run `fsl install-skills --force` from the project root, with the same fsl that ran doctor. Without --force, install-skills replaces no file that is there when nobody can answer.',
     })
   }
 }
@@ -624,7 +624,7 @@ const TRACE_LABEL: Record<TraceSource, string> = {
 }
 
 const STORAGE_LABEL: Record<StoragePath, string> = {
-  'firebase-admin': 'firebase-admin, default bucket',
+  'firebase-admin': 'firebase-admin',
   'google-cloud-storage': '@google-cloud/storage — needs a bucket named in code (not checked)',
   none: 'not configured',
 }

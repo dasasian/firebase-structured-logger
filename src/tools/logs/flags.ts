@@ -6,32 +6,46 @@ type FlagKind = 'value' | 'many' | 'switch' | 'optionalValue'
 
 type FlagSpec = Record<string, FlagKind>
 
-export const QUERY_FLAGS: FlagSpec = {
-  where: 'many',
-  select: 'optionalValue',
-  'group-by': 'value',
-  'order-by': 'value',
-  limit: 'value',
-  distinct: 'value',
-  since: 'value',
-  local: 'switch',
-  project: 'value',
-  repeats: 'value',
-  all: 'switch',
+export interface FlagSet {
+  flags: FlagSpec
+  example: string
 }
 
-export const SCHEMA_FLAGS: FlagSpec = {
-  refresh: 'switch',
-  add: 'many',
-  remove: 'many',
-  json: 'switch',
-  local: 'switch',
-  project: 'value',
+export const QUERY_FLAGS: FlagSet = {
+  example: 'fsl logs --where severity=ERROR --since 2h --select timestamp,message --limit 20',
+  flags: {
+    where: 'many',
+    select: 'optionalValue',
+    'group-by': 'value',
+    'order-by': 'value',
+    limit: 'value',
+    distinct: 'value',
+    since: 'value',
+    local: 'switch',
+    project: 'value',
+    repeats: 'value',
+    all: 'switch',
+  },
 }
 
-export const ATTACHMENT_FLAGS: FlagSpec = {
-  bucket: 'value',
-  project: 'value',
+export const SCHEMA_FLAGS: FlagSet = {
+  example: 'fsl logs schema --refresh --project my-project',
+  flags: {
+    refresh: 'switch',
+    add: 'many',
+    remove: 'many',
+    json: 'switch',
+    local: 'switch',
+    project: 'value',
+  },
+}
+
+export const ATTACHMENT_FLAGS: FlagSet = {
+  example: 'fsl logs attachments 01JAXYZ... --bucket my-bucket',
+  flags: {
+    bucket: 'value',
+    project: 'value',
+  },
 }
 
 export interface ParsedFlags {
@@ -50,8 +64,6 @@ export const DEFAULT_LIMIT = 100
 export const MAX_LIMIT = 1000
 export const DEFAULT_SINCE = '1h'
 
-const EXAMPLE = 'fsl logs --where severity=ERROR --since 2h --select timestamp,message --limit 20'
-
 function flagList(spec: FlagSpec): string {
   return Object.keys(spec).map((name) => `--${name}`).join(', ')
 }
@@ -60,8 +72,8 @@ function looksLikeFlag(token: string | undefined): boolean {
   return token !== undefined && token.startsWith('--')
 }
 
-/** Splits `argv` into flags and positionals. A flag outside `spec` is a `UsageError` that lists the valid ones and shows one example. */
-export function parseFlags(argv: string[], spec: FlagSpec): ParsedFlags {
+/** Splits `argv` into flags and positionals. A flag outside `set.flags` is a `UsageError` that lists the valid ones and shows the example of `set`. */
+export function parseFlags(argv: string[], set: FlagSet): ParsedFlags {
   const parsed: ParsedFlags = { values: {}, switches: new Set(), positionals: [], presentWithoutValue: new Set() }
   for (let index = 0; index < argv.length; index++) {
     const token = argv[index]
@@ -70,9 +82,9 @@ export function parseFlags(argv: string[], spec: FlagSpec): ParsedFlags {
       continue
     }
     const [rawName, inlineValue] = splitInline(token.slice(2))
-    const kind = spec[rawName]
+    const kind = set.flags[rawName]
     if (kind === undefined) {
-      throw new UsageError(`Unknown flag --${rawName}.\nValid flags: ${flagList(spec)}\nExample: ${EXAMPLE}`)
+      throw new UsageError(`Unknown flag --${rawName}.\nValid flags: ${flagList(set.flags)}\nExample: ${set.example}`)
     }
     if (kind === 'switch') {
       parsed.switches.add(rawName)
@@ -83,7 +95,7 @@ export function parseFlags(argv: string[], spec: FlagSpec): ParsedFlags {
     const value = inlineValue ?? (takesNext ? nextToken : undefined)
     if (takesNext) index++
     if (value === undefined) {
-      if (kind !== 'optionalValue') throw new UsageError(`--${rawName} needs a value.\nExample: ${EXAMPLE}`)
+      if (kind !== 'optionalValue') throw new UsageError(`--${rawName} needs a value.\nExample: ${set.example}`)
       parsed.presentWithoutValue.add(rawName)
       continue
     }
