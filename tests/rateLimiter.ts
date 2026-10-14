@@ -21,6 +21,7 @@ import {
   resetRateLimiter,
   flushDueSummaries,
   peekPendingSummaries,
+  clearPendingSummaries,
 } from '../src/client/rateLimiter.js'
 import { assert, reportResults } from './testHelpers.js'
 
@@ -678,12 +679,13 @@ function testLocalStorageFailureIsNonFatal() {
   let threw = false
   try {
     flushDueSummaries(true)
-    assert('no summaries could be taken while storage is blocked', peekPendingSummaries().length === 0)
+    assert('the summary is held in memory while storage is blocked', peekPendingSummaries().length === 1)
   } catch {
     threw = true
   }
   assert('no error escapes to the caller', !threw)
   localStorageStub.failing = false
+  clearPendingSummaries()
 }
 
 // --- Runner ---

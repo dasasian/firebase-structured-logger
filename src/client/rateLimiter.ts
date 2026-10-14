@@ -20,8 +20,9 @@ const SUMMARY_STORAGE_KEY = 'fsl_pending_summaries'
  * The flood this feature exists to survive is exactly "many distinct
  * messages" — a URL, an id, anything with a variable in the string — so
  * `state.signatures` cannot be left to grow one entry per message forever:
- * that eventually fills sessionStorage (a quota error, then the state is
- * silently lost) and makes every `allow()` parse an ever-larger map. Not a
+ * that eventually fills sessionStorage (a quota error, then the state moves to
+ * memory for the rest of the page load) and makes every `allow()` parse an
+ * ever-larger map. Not a
  * config knob: nobody tunes this per app, it is a safety valve.
  */
 const MAX_SIGNATURES = 200
@@ -201,35 +202,52 @@ function defaultState(): RateLimitState {
   return { available: config.burstLimit, lastRefillAt: Date.now(), signatures: {} }
 }
 
+let stateWhenSessionStorageFails: RateLimitState | undefined
+let summaryQueueWhenLocalStorageFails: PendingSummary[] | undefined
+
 function readState(): RateLimitState {
+  if (stateWhenSessionStorageFails) return stateWhenSessionStorageFails
   try {
     const stored = sessionStorage.getItem(config.storageKey)
     return stored ? (JSON.parse(stored) as RateLimitState) : defaultState()
   } catch {
-    return defaultState()
+    stateWhenSessionStorageFails = defaultState()
+    return stateWhenSessionStorageFails
   }
 }
 
 function writeState(state: RateLimitState): void {
+  if (stateWhenSessionStorageFails) {
+    stateWhenSessionStorageFails = state
+    return
+  }
   try {
     sessionStorage.setItem(config.storageKey, JSON.stringify(state))
   } catch {
+    stateWhenSessionStorageFails = state
   }
 }
 
 function readSummaryQueue(): PendingSummary[] {
+  if (summaryQueueWhenLocalStorageFails) return summaryQueueWhenLocalStorageFails
   try {
     const stored = localStorage.getItem(SUMMARY_STORAGE_KEY)
     return stored ? (JSON.parse(stored) as PendingSummary[]) : []
   } catch {
-    return []
+    summaryQueueWhenLocalStorageFails = []
+    return summaryQueueWhenLocalStorageFails
   }
 }
 
 function writeSummaryQueue(queue: PendingSummary[]): void {
+  if (summaryQueueWhenLocalStorageFails) {
+    summaryQueueWhenLocalStorageFails = queue
+    return
+  }
   try {
     localStorage.setItem(SUMMARY_STORAGE_KEY, JSON.stringify(queue))
   } catch {
+    summaryQueueWhenLocalStorageFails = queue
   }
 }
 
@@ -513,13 +531,15 @@ export function acknowledgeSummary(id: string): void {
 }
 
 /**
- * Test-only reset. There is no `beforeunload` wiring any more — the budget
+ * Test-only reset. Also empties the in-memory state used where `sessionStorage`
+ * fails, so the next call tries the storage again. There is no `beforeunload` wiring any more — the budget
  * lives in `sessionStorage` on purpose, so a reload keeps it — but tests still
  * need a way to start a clean session, and to simulate a genuinely new visit
  * (a new tab gets a new `bootId` for free, since the module reloads with it;
  * a test in the same process cannot, so this rotates it explicitly).
  */
 export function resetRateLimiter(): void {
+  stateWhenSessionStorageFails = undefined
   try {
     sessionStorage.removeItem(config.storageKey)
   } catch {
@@ -527,8 +547,9 @@ export function resetRateLimiter(): void {
   bootId = generateId()
 }
 
-/** Empties the pending-summary queue. */
+/** Empties the pending-summary queue, including the in-memory one used where `localStorage` fails. */
 export function clearPendingSummaries(): void {
+  summaryQueueWhenLocalStorageFails = undefined
   try {
     localStorage.removeItem(SUMMARY_STORAGE_KEY)
   } catch {
