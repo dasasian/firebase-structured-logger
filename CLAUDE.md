@@ -721,6 +721,14 @@ does not hold the page.
 A library → **npm only** (no registry, no `server.json`, no tag-triggered publish workflow).
 Full process + gotchas: `../PUBLISHING.md`. The short version:
 
+0. **Check the site against the release before you publish.** The `dasasian-web` session
+   writes the pages; this repo tells it what changed at each merge. That is not enough:
+   before 1.5.0 a check found 3 stale lines and 6 missing facts, each one a small fact
+   that was never sent or never applied. So hold every line of `[Unreleased]` against the
+   site's release branch, as the files are on disk (its work can be uncommitted), and
+   send the list of what is stale or missing to that session. Check the README map
+   against the site's pages in the same pass. The release does not wait for the site;
+   the site is deployed after the publish, because its pages describe the new version.
 1. Update `CHANGELOG.md` ([Keep a Changelog](https://keepachangelog.com) format): rename
    `[Unreleased]` to `[X.Y.Z] — <date>`, open a fresh empty `[Unreleased]`, and update the
    two link refs at the bottom of the file.
@@ -733,5 +741,6 @@ Full process + gotchas: `../PUBLISHING.md`. The short version:
    `npm view` can 404 for ~2 min after a *successful* publish (confirm with
    `npm access list packages`, don't re-publish).
 6. `git tag vX.Y.Z && git push origin vX.Y.Z`; `gh release create vX.Y.Z` with the CHANGELOG notes.
-7. Update the pages of `fsl.dasasian.com` in `dasasian-web`. Only
+7. Tell the `dasasian-web` session the version is on npm. It merges its release branch,
+   this repo checks the pages again, and the operator deploys the site. Only
    `npm publish` and the release need your credentials; an agent drives the rest.

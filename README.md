@@ -96,14 +96,14 @@ The two attributes need `enableActions()` and `enableViews()` once at startup. A
 
 - **Start:** [Home](https://fsl.dasasian.com/) · [Get started](https://fsl.dasasian.com/start/) · [How it works](https://fsl.dasasian.com/errors-in-error-reporting/)
 - **Set up:** [Source maps](https://fsl.dasasian.com/source-maps/) · [React](https://fsl.dasasian.com/react/) · [Vue](https://fsl.dasasian.com/vue/) · [Cloud Functions](https://fsl.dasasian.com/cloud-functions/) · [Cloud Run](https://fsl.dasasian.com/cloud-run/)
-- **Capture more:** [Breadcrumbs](https://fsl.dasasian.com/breadcrumbs/) · [Tabs and dialogs](https://fsl.dasasian.com/tabs-and-dialogs/) · [Slow screens](https://fsl.dasasian.com/slow-screens/) · [Feedback](https://fsl.dasasian.com/feedback/) · [Attachments](https://fsl.dasasian.com/attachments/)
+- **Capture more:** [Breadcrumbs](https://fsl.dasasian.com/breadcrumbs/) · [Clicks and submits](https://fsl.dasasian.com/clicks-and-submits/) · [Tabs and dialogs](https://fsl.dasasian.com/tabs-and-dialogs/) · [Slow screens](https://fsl.dasasian.com/slow-screens/) · [Feedback](https://fsl.dasasian.com/feedback/) · [Attachments](https://fsl.dasasian.com/attachments/)
 - **Find and read:** [Labels](https://fsl.dasasian.com/labels/) · [fsl logs](https://fsl.dasasian.com/fsl-logs/) · [Skills](https://fsl.dasasian.com/skills/)
 - **Check and fix:** [Doctor](https://fsl.dasasian.com/doctor/) · [Troubleshooting](https://fsl.dasasian.com/troubleshooting/) · [Volume](https://fsl.dasasian.com/volume/) · [Local development](https://fsl.dasasian.com/local/) · [Testing](https://fsl.dasasian.com/testing/)
 - **Reference:** [Browser API](https://fsl.dasasian.com/reference/client/) · [Backend API](https://fsl.dasasian.com/reference/functions/) · [CLI](https://fsl.dasasian.com/reference/cli/)
 
 ## For coding agents
 
-`npx fsl install-skills` adds `/fsl-review` and `/fsl-logs` to your project. `node_modules/@dasasian/firebase-structured-logger/CAPABILITIES.md` says what an app can add. [`llms.txt`](https://fsl.dasasian.com/llms.txt) lists every page.
+`backend/node_modules/.bin/fsl install-skills`, run from the project root, adds `/fsl-review` and `/fsl-logs` to your project; use the folder where you installed the package in place of `backend`. Do not use `npx fsl` there: in a folder with no install, it runs another package with the same name. `node_modules/@dasasian/firebase-structured-logger/CAPABILITIES.md` says what an app can add. [`llms.txt`](https://fsl.dasasian.com/llms.txt) lists every page.
 
 ## License
 
