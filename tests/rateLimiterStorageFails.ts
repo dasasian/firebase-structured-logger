@@ -126,6 +126,22 @@ async function testWorkingStorageStillHoldsTheState() {
   resetSession()
 }
 
+async function testDamagedStoredValueIsReplacedInStorage() {
+  console.log('\nTest: a stored value that is not JSON starts a fresh state in storage, not in memory')
+  resetSession()
+  sessionStorageStub.setItem(STATE_KEY, '{not json')
+  localStorageStub.setItem(SUMMARY_KEY, '{not json')
+  const logger = initLogger({ appId: 'test', releaseId: 'r1', logFunction: () => Promise.reject(new Error('offline')) })
+  for (let i = 0; i < 20; i++) logger.error(new TypeError('same crash'))
+  setVisibility('hidden')
+  setVisibility('visible')
+  const stored = sessionStorageStub.peek(STATE_KEY) ?? ''
+  const queued = localStorageStub.peek(SUMMARY_KEY) ?? ''
+  assert('sessionStorage holds the new state', stored.startsWith('{"'), stored)
+  assert('localStorage holds the unsent summary', queued.includes('"repeatCount":17'), queued)
+  resetSession()
+}
+
 async function testResetSessionStartsCleanAfterAFailure() {
   console.log('\nTest: resetSession() after a failure starts the next run clean')
   await whileSessionStorageIs(storageThatThrowsEverywhere, async () => {
@@ -141,6 +157,7 @@ async function main() {
   await testReadsWorkAndWritesThrow()
   await testOneStoreFailingDoesNotMoveTheOther()
   await testWorkingStorageStillHoldsTheState()
+  await testDamagedStoredValueIsReplacedInStorage()
   await testResetSessionStartsCleanAfterAFailure()
   reportResults()
 }

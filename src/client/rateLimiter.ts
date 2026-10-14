@@ -22,8 +22,8 @@ const SUMMARY_STORAGE_KEY = 'fsl_pending_summaries'
  * `state.signatures` cannot be left to grow one entry per message forever:
  * that eventually fills sessionStorage (a quota error, then the state moves to
  * memory for the rest of the page load) and makes every `allow()` parse an
- * ever-larger map. Not a
- * config knob: nobody tunes this per app, it is a safety valve.
+ * ever-larger map. Not a config knob: nobody tunes this per app, it is a
+ * safety valve.
  */
 const MAX_SIGNATURES = 200
 
@@ -205,15 +205,25 @@ function defaultState(): RateLimitState {
 let stateWhenSessionStorageFails: RateLimitState | undefined
 let summaryQueueWhenLocalStorageFails: PendingSummary[] | undefined
 
+function parseStoredOr<T>(stored: string | null, fallback: () => T): T {
+  if (!stored) return fallback()
+  try {
+    return JSON.parse(stored) as T
+  } catch {
+    return fallback()
+  }
+}
+
 function readState(): RateLimitState {
   if (stateWhenSessionStorageFails) return stateWhenSessionStorageFails
+  let stored: string | null
   try {
-    const stored = sessionStorage.getItem(config.storageKey)
-    return stored ? (JSON.parse(stored) as RateLimitState) : defaultState()
+    stored = sessionStorage.getItem(config.storageKey)
   } catch {
     stateWhenSessionStorageFails = defaultState()
     return stateWhenSessionStorageFails
   }
+  return parseStoredOr(stored, defaultState)
 }
 
 function writeState(state: RateLimitState): void {
@@ -230,13 +240,14 @@ function writeState(state: RateLimitState): void {
 
 function readSummaryQueue(): PendingSummary[] {
   if (summaryQueueWhenLocalStorageFails) return summaryQueueWhenLocalStorageFails
+  let stored: string | null
   try {
-    const stored = localStorage.getItem(SUMMARY_STORAGE_KEY)
-    return stored ? (JSON.parse(stored) as PendingSummary[]) : []
+    stored = localStorage.getItem(SUMMARY_STORAGE_KEY)
   } catch {
     summaryQueueWhenLocalStorageFails = []
     return summaryQueueWhenLocalStorageFails
   }
+  return parseStoredOr<PendingSummary[]>(stored, () => [])
 }
 
 function writeSummaryQueue(queue: PendingSummary[]): void {
@@ -532,8 +543,8 @@ export function acknowledgeSummary(id: string): void {
 
 /**
  * Test-only reset. Also empties the in-memory state used where `sessionStorage`
- * fails, so the next call tries the storage again. There is no `beforeunload` wiring any more — the budget
- * lives in `sessionStorage` on purpose, so a reload keeps it — but tests still
+ * fails, so the next call tries the storage again. There is no `beforeunload`
+ * wiring any more — the budget lives in `sessionStorage` on purpose, so a reload keeps it — but tests still
  * need a way to start a clean session, and to simulate a genuinely new visit
  * (a new tab gets a new `bootId` for free, since the module reloads with it;
  * a test in the same process cannot, so this rotates it explicitly).
