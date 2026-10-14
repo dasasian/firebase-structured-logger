@@ -740,6 +740,9 @@ Full process + gotchas: `../PUBLISHING.md`. The short version:
 5. `npm publish` — needs your OTP. Traps: a `404 on PUT` = lapsed token (`npm login`);
    `npm view` can 404 for ~2 min after a *successful* publish (confirm with
    `npm access list packages`, don't re-publish).
+   Then `npm dist-tag add @dasasian/firebase-structured-logger@X.Y.Z next`, also with your
+   OTP. A plain publish moves `latest` only, so `next` stays on the last release candidate,
+   and `@next` would install a version older than the release.
 6. `git tag vX.Y.Z && git push origin vX.Y.Z`; `gh release create vX.Y.Z` with the CHANGELOG notes.
 7. Tell the `dasasian-web` session the version is on npm. It merges its release branch,
    this repo checks the pages again, and the operator deploys the site. Only
