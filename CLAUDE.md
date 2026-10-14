@@ -159,6 +159,16 @@ own id, is keyed by signature + `releaseId` + `userId`, and is removed by the ta
 sends it; a rare double-send is visible by that id. Anything added there needs the same
 treatment: an id, an owner, a size cap and an expiry.
 
+**Where browser storage fails, the limiter keeps the same state in memory.** A page can
+have no `sessionStorage` or `localStorage`, or have one that throws: a private window, a
+sandboxed iframe, blocked site data, a full quota, and Node, where an app's tests run with
+no DOM. The limiter read a fresh state on each call there, so it counted nothing: twenty
+of the same error sent twenty entries, and a test saw a stream no browser sends. So from
+the first read or write that fails, that store's state (the budget and duplicate counts,
+or the summary queue) lives in a module variable for the rest of the page load. A reload
+loses it, which is far less than no limit. There is no option and no warning: the app has
+nothing to change.
+
 **fsl sends repeat summaries itself, and the logger has no method for it.** Sending is two
 steps: counts become queued summaries when the tab goes hidden or their hour is up, and
 the queue is then sent, also once after `initLogger` for a previous visit's. One step
